@@ -112,7 +112,7 @@ public enum Diagnostics {
     }
     private var observers: [pid_t: Subscription] = [:]
     private var workspaceTokens: [WorkspaceObservation] = []
-    private var retryTasks: [pid_t: Task<Void, Never>] = [:]
+    private let retries = RecorderRetries()
     private var running = false
     private let workspaceCenter: NotificationCenter
     private let runningApplications: () -> [NSRunningApplication]
@@ -204,18 +204,14 @@ public enum Diagnostics {
     /// Three startup passes at approximately 1, 3 and 7 seconds. Absence from
     /// enumeration never removes a reference or implies that a window closed.
     private func scheduleRetries(_ pid: pid_t) {
-        guard pid != ProcessInfo.processInfo.processIdentifier, retryTasks[pid] == nil else { return }
-        retryTasks[pid] = Task { @MainActor [weak self] in
-            for delay in [1, 2, 4] {
-                do { try await Task.sleep(for: .seconds(delay)) }
-                catch { return }
-                guard let self, self.running,
-                      let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return }
-                self.attach(pid)
-                self.emit(["event": "subscriptionRetry", "pid": pid,
-                           "uptime": ProcessInfo.processInfo.systemUptime])
-            }
-            self?.retryTasks.removeValue(forKey: pid)
+        guard pid != ProcessInfo.processInfo.processIdentifier else { return }
+        retries.schedule(pid) { [weak self] in
+            guard let self, self.running,
+                  let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return false }
+            self.attach(pid)
+            self.emit(["event": "subscriptionRetry", "pid": pid,
+                       "uptime": ProcessInfo.processInfo.systemUptime])
+            return true
         }
     }
 
@@ -274,7 +270,7 @@ public enum Diagnostics {
     }
 
     private func detach(_ pid: pid_t) {
-        retryTasks.removeValue(forKey: pid)?.cancel()
+        retries.cancel(pid)
         guard let subscription = observers.removeValue(forKey: pid) else { return }
         CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(subscription.observer), .commonModes)
     }
@@ -282,8 +278,7 @@ public enum Diagnostics {
     public func stop() {
         running = false
         workspaceTokens.removeAll()
-        for task in retryTasks.values { task.cancel() }
-        retryTasks.removeAll()
+        retries.cancelAll()
         for pid in Array(observers.keys) { detach(pid) }
     }
 }

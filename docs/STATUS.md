@@ -90,6 +90,13 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Added three platform regressions covering idempotent start/stop, restart without duplicate workspace delivery, release of a running recorder, and malformed workspace notifications. Synthetic termination events exercise callbacks without native AX registration or Accessibility permission.
 - Validation: debug build, all 26 core tests and all six platform tests pass. These isolated tests validate workspace-listener lifecycle, not AX run-loop source cleanup or retry cancellation with attached processes. Controlled live launch/window-create/destroy/termination, native tabs, popup recovery, display ownership and Space-transfer gates remain open. The app remains diagnostic-only.
 
+## Increment 10: bounded retry cancellation and cleanup
+
+- Extracted recorder startup retry ownership into a main-actor helper while preserving the three 1/2/4-second delays. Completion, sleep failure, and early exit now release pending entries; previously an early exit could leave a completed task retained until stop or termination.
+- PID cancellation, stop, and helper release cancel outstanding tasks. A token check prevents late completion from running cancelled work or removing a replacement schedule for the same PID. Recorder callbacks retain their owner weakly.
+- Added four deterministic platform regressions with a controllable sleeper: exact pass limit and duplicate suppression, early-exit/error cleanup, cancellation followed by same-PID replacement, and stop/release cancellation. The sleeper deliberately resumes after cancellation to exercise stale-work protection without real delays or AX calls.
+- Validation: debug build, all 26 core tests and all ten platform tests pass. These tests cover retry ownership independently of native processes. Live AX run-loop source cleanup, controlled launch/window-create/destroy/termination, native tabs, popup recovery, display ownership and Space-transfer gates remain open. The app remains diagnostic-only.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)
