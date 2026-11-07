@@ -105,6 +105,14 @@ This recorder is not the live management registry and does not feed the lifecycl
 - An accessory-app version completed all fixture actions but produced no workspace launch/termination events, including when tested with a full AppKit event loop. Newly launched accessory apps remain a discovery limitation. The final check uses a regular app and does not generalize its success to accessory apps or other applications; no event-loop change was retained.
 - Added three option/filter regressions. The debug build and all 39 tests (26 core, 13 platform) pass. Native-tab grouping, popup recovery, independent displays, Space transfer, and native source teardown/restart validation remain open. The app remains diagnostic-only.
 
+## Increment 12: native-tab structural evidence collection
+
+- Added read-only `tab-evidence bundle.identifier` diagnostics for one application's AX window roots and structural relationships. Captures include query errors, role/subrole, boolean selection values, available attribute names, window IDs and capture-local graph references. Titles, labels, descriptions and string values are not queried. Traversal is bounded by depth 5, 128 nodes and a one-second per-app traversal budget plus an in-flight AX call; truncation is explicit.
+- Extended the disposable fixture with eight native-tab stages and added `ruby scripts/check-native-tabs.rb [new-output.json]`. The harness validates the fixture's own merge/selection/detach/close state, checks process ownership and capture timing, and saves ground truth alongside AX captures without overwriting prior output. This is an investigation, not a grouping acceptance test.
+- On the initial host, all eight native operations were confirmed and captures completed within their stages, but AX window enumeration succeeded with an empty array throughout. A separate key-window experiment did not change that result; its activation change was removed. The final report explicitly records inconclusive AX coverage. This does not establish that tabs are absent or unsupported in daily apps.
+- A read-only Finder capture exercised the graph collector against an existing application and returned one nonstandard AX root (scroll area), not affirmative native-tab grouping evidence. Next inspect observer-supplied window references and real daily-app tab transitions; no grouping heuristic or management effect was enabled.
+- Validation: debug build and all 39 existing regressions pass; editor diagnostics report no errors. Native-tab grouping, popup recovery, independent displays, Space transfer and native source teardown/restart gates remain open. Raw captures are kept in ignored local capture/build directories. The app remains diagnostic-only.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

@@ -31,6 +31,9 @@ if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["--men
 switch args.first {
 case "snapshot":
     Diagnostics.printJSON(Diagnostics.snapshot(includeTitles: args.contains("--include-titles")))
+case "tab-evidence":
+    guard args.count == 2, !args[1].isEmpty else { print("Usage: paperi tab-evidence bundle.identifier"); exit(2) }
+    Diagnostics.printJSON(Diagnostics.tabEvidence(bundleID: args[1]))
 case "record":
     guard let options = try? RecordingOptions(arguments: Array(args.dropFirst())) else {
         print("Usage: paperi record [seconds: >0 and <=300] [--bundle-id identifier ...]")
@@ -63,6 +66,7 @@ default:
     print("""
     Paperi feasibility build (window management is inactive)
       paperi snapshot [--include-titles]  Read-only JSON snapshot
+      paperi tab-evidence identifier     Bounded read-only AX tab structure for one app
       paperi record [seconds] [--bundle-id identifier ...]
                                         Read-only AX event JSONL (default 30, max 300)
       paperi benchmark-core              Measure cached layout calculation only
