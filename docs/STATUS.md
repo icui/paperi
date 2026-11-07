@@ -84,6 +84,12 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Added a platform test target and three regressions using synthetic AX application references and injected registration results. They cover successful-request deduplication, failure recovery, element/notification isolation, removal, and replacement-observer state. These tests make no live notification registrations and need no Accessibility permission.
 - Validation: debug build, all 26 core tests and all three platform tests pass. Editor diagnostics report no errors. Controlled live launch/termination, repeated recorder start/stop, and native feasibility validation remain open. The app remains diagnostic-only.
 
+## Increment 9: isolated recorder lifecycle regressions
+
+- Added internal injection of the workspace notification center, initial application list, and diagnostic output sink. The public recorder still uses the real workspace and JSONL output; tests can exercise lifecycle handling without observing other applications.
+- Added three platform regressions covering idempotent start/stop, restart without duplicate workspace delivery, release of a running recorder, and malformed workspace notifications. Synthetic termination events exercise callbacks without native AX registration or Accessibility permission.
+- Validation: debug build, all 26 core tests and all six platform tests pass. These isolated tests validate workspace-listener lifecycle, not AX run-loop source cleanup or retry cancellation with attached processes. Controlled live launch/window-create/destroy/termination, native tabs, popup recovery, display ownership and Space-transfer gates remain open. The app remains diagnostic-only.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

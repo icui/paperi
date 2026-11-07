@@ -114,11 +114,28 @@ public enum Diagnostics {
     private var workspaceTokens: [WorkspaceObservation] = []
     private var retryTasks: [pid_t: Task<Void, Never>] = [:]
     private var running = false
-    public init() {}
+    private let workspaceCenter: NotificationCenter
+    private let runningApplications: () -> [NSRunningApplication]
+    private let emit: ([String: Any]) -> Void
+
+    public convenience init() {
+        self.init(workspaceCenter: NSWorkspace.shared.notificationCenter,
+                  runningApplications: { NSWorkspace.shared.runningApplications },
+                  emit: { Diagnostics.printJSON($0, pretty: false) })
+    }
+
+    // Isolated workspace inputs allow lifecycle tests without observing other apps.
+    init(workspaceCenter: NotificationCenter,
+         runningApplications: @escaping () -> [NSRunningApplication],
+         emit: @escaping ([String: Any]) -> Void) {
+        self.workspaceCenter = workspaceCenter
+        self.runningApplications = runningApplications
+        self.emit = emit
+    }
     public func start() {
         guard !running else { return }
         running = true
-        let center = NSWorkspace.shared.notificationCenter
+        let center = workspaceCenter
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             workspaceTokens.append(WorkspaceObservation(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
                 guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
@@ -133,18 +150,18 @@ public enum Diagnostics {
                     } else {
                         self.detach(pid)
                     }
-                    Diagnostics.printJSON(["event": event, "pid": pid,
-                                           "uptime": ProcessInfo.processInfo.systemUptime], pretty: false)
+                    self.emit(["event": event, "pid": pid,
+                               "uptime": ProcessInfo.processInfo.systemUptime])
                 }
             }, center: center))
         }
-        for app in NSWorkspace.shared.runningApplications {
+        for app in runningApplications() {
             attach(app.processIdentifier)
             scheduleRetries(app.processIdentifier)
         }
-        Diagnostics.printJSON(["event": "recorderReady", "observerCount": observers.count,
-                               "windowReferenceCount": observers.values.reduce(0) { $0 + $1.windows.count },
-                               "uptime": ProcessInfo.processInfo.systemUptime], pretty: false)
+        emit(["event": "recorderReady", "observerCount": observers.count,
+              "windowReferenceCount": observers.values.reduce(0) { $0 + $1.windows.count },
+              "uptime": ProcessInfo.processInfo.systemUptime])
     }
 
     private func attach(_ pid: pid_t) {
@@ -195,8 +212,8 @@ public enum Diagnostics {
                 guard let self, self.running,
                       let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return }
                 self.attach(pid)
-                Diagnostics.printJSON(["event": "subscriptionRetry", "pid": pid,
-                                       "uptime": ProcessInfo.processInfo.systemUptime], pretty: false)
+                self.emit(["event": "subscriptionRetry", "pid": pid,
+                           "uptime": ProcessInfo.processInfo.systemUptime])
             }
             self?.retryTasks.removeValue(forKey: pid)
         }
@@ -227,16 +244,16 @@ public enum Diagnostics {
     }
 
     private func report(_ error: AXError, pid: pid_t, notification: String) {
-        Diagnostics.printJSON(["event": "subscriptionFailed", "pid": pid, "notification": notification,
-                               "axError": error.rawValue, "uptime": ProcessInfo.processInfo.systemUptime], pretty: false)
+        emit(["event": "subscriptionFailed", "pid": pid, "notification": notification,
+              "axError": error.rawValue, "uptime": ProcessInfo.processInfo.systemUptime])
     }
 
     private func receive(_ observer: AXObserver, element: AXUIElement, notification: String) {
         guard running, let pid = observers.first(where: { CFEqual($0.value.observer, observer) })?.key else { return }
         let cachedID = observers[pid]?.windows.first(where: { CFEqual($0.element, element) })?.id ?? 0
         let id = cachedID != 0 ? cachedID : paperi_window_id(element)
-        Diagnostics.printJSON(["event": notification, "pid": pid, "windowID": id,
-                               "uptime": ProcessInfo.processInfo.systemUptime], pretty: false)
+        emit(["event": notification, "pid": pid, "windowID": id,
+              "uptime": ProcessInfo.processInfo.systemUptime])
         if notification == kAXUIElementDestroyedNotification {
             observers[pid]?.notifications.remove(element)
             observers[pid]?.windows.removeAll { CFEqual($0.element, element) }
