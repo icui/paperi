@@ -21,4 +21,15 @@ struct RecordingOptionsTests {
             }
         }
     }
+
+    @Test func tabEvidenceRequiresOneExplicitApplication() throws {
+        let options = try RecordingOptions(arguments: ["--tab-evidence", "--bundle-id", "test.one"])
+        #expect(options.includeTabEvidence)
+        #expect(options.bundleIDs == ["test.one"])
+        #expect(try !RecordingOptions(arguments: []).includeTabEvidence)
+        for arguments in [["--tab-evidence"], ["--tab-evidence", "--bundle-id", "test.one", "--bundle-id", "test.two"],
+                          ["--tab-evidence", "--tab-evidence", "--bundle-id", "test.one"]] {
+            #expect(throws: RecordingOptions.InvalidArguments.self) { try RecordingOptions(arguments: arguments) }
+        }
+    }
 }

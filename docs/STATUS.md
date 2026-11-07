@@ -113,6 +113,14 @@ This recorder is not the live management registry and does not feed the lifecycl
 - A read-only Finder capture exercised the graph collector against an existing application and returned one nonstandard AX root (scroll area), not affirmative native-tab grouping evidence. Next inspect observer-supplied window references and real daily-app tab transitions; no grouping heuristic or management effect was enabled.
 - Validation: debug build and all 39 existing regressions pass; editor diagnostics report no errors. Native-tab grouping, popup recovery, independent displays, Space transfer and native source teardown/restart gates remain open. Raw captures are kept in ignored local capture/build directories. The app remains diagnostic-only.
 
+## Increment 13: observer-backed native-tab evidence
+
+- Added opt-in `record --bundle-id identifier --tab-evidence`, restricted to one explicit app. A single recorder session now emits bounded structural samples roughly once per second, with separate enumerated and observer-supplied roots plus capture-start/completion uptime. Detailed graph reads may delay callbacks; this is not a performance mode.
+- Updated the native-tab harness to start observation before fixture launch and retain the same session through all eight stages. Observer references survive disappearance from enumeration and are removed by confirmed destruction. Samples spanning a fixture transition remain inconclusive.
+- The controlled persistent session exposes two enumerated/observed roots before merge, one enumerated and two observed roots during merge/selection, two enumerated roots after detach, one surviving root after active close, and zero after last close. All five harness checks pass: stage coverage, physical root identity, merged structure/selection, detached enumeration and confirmed destruction. No samples were truncated or crossed stage boundaries.
+- `AXTabs` is available on a child `AXTabGroup`, not the window root. Two `AXTabButton` radio controls expose selection state, and the enumerated window ID follows the fixture's selected member. Both controls point back to the active window, so a direct inactive-member mapping is still missing. The difference from increment 12's empty one-shot enumeration is observed; its cause is not established.
+- Added a regression for opt-in scope/argument validation. Debug build and all 40 tests (26 core, 14 platform) pass; editor diagnostics report no errors. Captures remain local and ignored. Daily-app native grouping and disambiguation between multiple containers, popup recovery, independent displays, Space transfer and native source teardown/restart remain release gates. No grouping heuristic, reducer wiring or window-management effect was enabled.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

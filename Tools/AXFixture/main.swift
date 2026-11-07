@@ -66,6 +66,7 @@ import AppKit
     private func log(_ event: String) {
         guard let logURL else { return }
         var row: [String: Any] = ["event": event, "pid": ProcessInfo.processInfo.processIdentifier,
+                                  "uptime": ProcessInfo.processInfo.systemUptime,
                                   "bundleID": Bundle.main.bundleIdentifier ?? "unknown",
                                   "workspaceBundleID": NSRunningApplication.current.bundleIdentifier ?? "unknown"]
         row["tabWindows"] = tabWindows.map { window in

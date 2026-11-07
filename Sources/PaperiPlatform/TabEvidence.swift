@@ -6,6 +6,10 @@ extension Diagnostics {
     /// Bounded structural evidence only: no labels, titles, descriptions or
     /// string values. Local node IDs are meaningful within this capture only.
     @MainActor public static func tabEvidence(bundleID: String) -> [String: Any] {
+        tabEvidence(bundleID: bundleID, observedWindows: [:])
+    }
+
+    @MainActor static func tabEvidence(bundleID: String, observedWindows: [pid_t: [AXUIElement]]) -> [String: Any] {
         var applications: [[String: Any]] = []
         for app in NSWorkspace.shared.runningApplications where app.bundleIdentifier == bundleID {
             let application = AXUIElementCreateApplication(app.processIdentifier)
@@ -13,6 +17,7 @@ extension Diagnostics {
             var value: CFTypeRef?
             let error = AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value)
             let windows = value as? [AXUIElement] ?? []
+            let observed = observedWindows[app.processIdentifier] ?? []
             let applicationRole = attribute(application, kAXRoleAttribute) as? String ?? "unknown"
             var nodes: [AXUIElement] = []
             var rows: [[String: Any]] = []
@@ -31,6 +36,7 @@ extension Diagnostics {
                 AXUIElementSetMessagingTimeout(element, 0.15)
                 var row: [String: Any] = ["node": index]
                 if let root = windows.firstIndex(where: { CFEqual($0, element) }) { row["enumeratedWindowIndex"] = root }
+                if let root = observed.firstIndex(where: { CFEqual($0, element) }) { row["observedWindowIndex"] = root }
                 let id = paperi_window_id(element)
                 if id != 0 { row["windowID"] = id }
                 for name in [kAXRoleAttribute, kAXSubroleAttribute] {
@@ -65,10 +71,12 @@ extension Diagnostics {
                 return index
             }
             let roots = windows.compactMap { visit($0, depth: 0) }
+            let observedRoots = observed.compactMap { visit($0, depth: 0) }
             applications.append(["pid": app.processIdentifier, "windowsError": error.rawValue,
                                  "rawWindowCount": (value as? [Any])?.count ?? -1,
                                  "applicationRole": applicationRole,
-                                 "roots": roots, "nodes": rows, "truncated": truncated])
+                                 "roots": roots, "observedRoots": observedRoots,
+                                 "nodes": rows, "truncated": truncated])
         }
         return ["schemaVersion": 1, "bundleID": bundleID,
                 "os": ProcessInfo.processInfo.operatingSystemVersionString,

@@ -36,14 +36,28 @@ case "tab-evidence":
     Diagnostics.printJSON(Diagnostics.tabEvidence(bundleID: args[1]))
 case "record":
     guard let options = try? RecordingOptions(arguments: Array(args.dropFirst())) else {
-        print("Usage: paperi record [seconds: >0 and <=300] [--bundle-id identifier ...]")
+        print("Usage: paperi record [seconds: >0 and <=300] [--bundle-id identifier ...] [--tab-evidence (one bundle required)]")
         exit(2)
     }
     guard AXIsProcessTrusted() else { print("Accessibility access is required. Run the app and select Request Accessibility Access."); exit(1) }
     Diagnostics.printJSON(["event": "recordingStarted", "durationSeconds": options.seconds], pretty: false)
     let recorder = EventRecorder(bundleIDs: options.bundleIDs)
     recorder.start()
+    var evidenceTimer: Timer?
+    if options.includeTabEvidence, let bundleID = options.bundleIDs?.first {
+        evidenceTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                let started = ProcessInfo.processInfo.systemUptime
+                var evidence = recorder.tabEvidence(bundleID: bundleID)
+                evidence["event"] = "tabEvidence"
+                evidence["captureStartedUptime"] = started
+                evidence["uptime"] = ProcessInfo.processInfo.systemUptime
+                Diagnostics.printJSON(evidence, pretty: false)
+            }
+        }
+    }
     RunLoop.main.run(until: Date(timeIntervalSinceNow: options.seconds))
+    evidenceTimer?.invalidate()
     recorder.stop()
     Diagnostics.printJSON(["event": "recordingEnded"], pretty: false)
 case "--menu":
@@ -67,7 +81,7 @@ default:
     Paperi feasibility build (window management is inactive)
       paperi snapshot [--include-titles]  Read-only JSON snapshot
       paperi tab-evidence identifier     Bounded read-only AX tab structure for one app
-      paperi record [seconds] [--bundle-id identifier ...]
+      paperi record [seconds] [--bundle-id identifier ...] [--tab-evidence]
                                         Read-only AX event JSONL (default 30, max 300)
       paperi benchmark-core              Measure cached layout calculation only
       paperi --menu                      Run diagnostic menu bar shell

@@ -174,6 +174,11 @@ public enum Diagnostics {
         return app.bundleIdentifier.map { bundleIDs.contains($0) } ?? false
     }
 
+    public func tabEvidence(bundleID: String) -> [String: Any] {
+        Diagnostics.tabEvidence(bundleID: bundleID,
+            observedWindows: observers.mapValues { $0.windows.map(\.element) })
+    }
+
     private func attach(_ pid: pid_t) {
         guard pid != ProcessInfo.processInfo.processIdentifier else { return }
         if observers[pid] != nil {

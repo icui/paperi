@@ -16,6 +16,7 @@ bundle_id = 'dev.paperi.NativeTabFixture'
 output = ARGV.first || File.join(root, 'captures', 'native-tab-fixture.json')
 abort "Output already exists: #{output}" if File.exist?(output)
 stages = []
+records = []
 
 Dir.mktmpdir('paperi-tabs-', File.join(root, '.build')) do |temporary|
   app = File.join(temporary, 'PaperiNativeTabFixture.app')
@@ -34,19 +35,45 @@ Dir.mktmpdir('paperi-tabs-', File.join(root, '.build')) do |temporary|
     </dict></plist>
   PLIST
   log = File.join(temporary, 'fixture.jsonl')
-  launcher = Process.spawn('/usr/bin/open', '-g', '-n', '-W', app, '--args', log, '--tabs')
+  input, stream, recorder = Open3.popen2(File.join(bin, 'paperi'), 'record', '20',
+                                      '--bundle-id', bundle_id, '--tab-evidence')
+  input.close
+  queue = Queue.new
+  reader = Thread.new do
+    begin
+      stream.each_line { |line| queue << JSON.parse(line) }
+    rescue StandardError => error
+      queue << error
+    ensure
+      queue << nil
+    end
+  end
+  next_record = lambda do
+    row = queue.pop
+    abort 'Recorder ended before evidence was collected' unless row
+    raise row if row.is_a?(Exception)
+    records << row
+    row
+  end
+  launcher = nil
   consumed = 0
   begin
     Timeout.timeout(35) do
       loop do
+        row = next_record.call
+        break if row['event'] == 'recorderReady'
+      end
+      launcher = Process.spawn('/usr/bin/open', '-g', '-n', '-W', app, '--args', log, '--tabs')
+      loop do
         rows = File.exist?(log) ? File.readlines(log).map { |line| JSON.parse(line) } : []
         rows.drop(consumed).each do |row|
           if row.fetch('event').start_with?('action-')
-            # Allow AppKit to publish its asynchronous accessibility changes.
-            sleep 0.15
-            raw, result = Open3.capture2(File.join(bin, 'paperi'), 'tab-evidence', bundle_id)
-            abort 'Tab evidence command failed' unless result.success?
-            evidence = JSON.parse(raw)
+            # Use the same observer session throughout. Wait for a structural
+            # sample collected after this action, not an earlier cached report.
+            evidence = loop do
+              candidate = next_record.call
+              break candidate if candidate['event'] == 'tabEvidence' && candidate['captureStartedUptime'] >= row.fetch('uptime') + 0.15
+            end
             abort 'Accessibility trust is required' unless evidence.fetch('accessibilityTrusted')
             abort 'Fixture application not discovered' if evidence.fetch('applications').empty?
             abort 'Wrong fixture process observed' unless evidence.fetch('applications').all? { |app_row| app_row['pid'] == row['pid'] }
@@ -58,9 +85,17 @@ Dir.mktmpdir('paperi-tabs-', File.join(root, '.build')) do |temporary|
         break if rows.any? { |row| row['event'] == 'terminating' }
         sleep 0.05
       end
+      loop do
+        break if next_record.call['event'] == 'recordingEnded'
+      end
+      abort 'Observer recorder failed' unless recorder.value.success?
     end
   ensure
-    Process.wait(launcher)
+    Process.kill('TERM', recorder.pid) if recorder.alive?
+    recorder.value
+    reader.join
+    stream.close
+    Process.wait(launcher) if launcher
   end
 end
 abort 'Fixture did not complete all eight tab stages' unless stages.length == 8
@@ -81,21 +116,50 @@ complete = stages.all? do |stage|
   apps = stage[:evidence]['applications']
   visible = stage[:fixture]['tabWindows'].any? { |window| window['visible'] }
   stage[:stageStillCurrent] && apps.all? do |app|
-    app['windowsError'] == 0 && !app['truncated'] && (!visible || !app['roots'].empty?)
+    app['windowsError'] == 0 && !app['truncated'] && (!visible || !(app['roots'] + app['observedRoots']).empty?)
   end
 end
-observation = complete ? 'evidence-collected; grouping requires review' : 'inconclusive AX coverage'
-File.write(output, JSON.pretty_generate(schemaVersion: 1, observation: observation, stages: stages,
+checks = { stageCoverage: complete }
+checks[:physicalRootIdentity] = stages.all? do |stage|
+  app_row = stage[:evidence]['applications'].first
+  ids_seen = app_row['observedRoots'].map { |index| app_row['nodes'][index]['windowID'] }.sort
+  expected = stage[:fixture]['tabWindows'].select { |window| window['visible'] }.map { |window| window['id'] }.sort
+  ids_seen == expected
+end
+checks[:mergedStructureAndSelection] = [3, 5, 7, 11].all? do |n|
+  stage = stages.find { |entry| entry[:fixture]['event'] == "action-#{n}.0" }
+  app_row = stage[:evidence]['applications'].first
+  nodes = app_row['nodes']
+  groups = nodes.select { |node| node['AXRole'] == 'AXTabGroup' }
+  next false unless app_row['roots'].length == 1 && groups.length == 1
+  root = nodes[app_row['roots'].first]
+  tabs = groups.first.fetch('AXTabs', {})
+  controls = (tabs['nodes'] || []).map { |index| nodes[index] }
+  expected_selected = stage[:fixture]['tabWindows'].first['selected']
+  root['windowID'] == expected_selected && tabs['error'] == 0 && tabs['count'] == 2 &&
+    controls.length == 2 && controls.all? { |node| node['AXSubrole'] == 'AXTabButton' } &&
+    controls.count { |node| node['AXValue'] == true } == 1
+end
+checks[:detachedEnumeration] = [1, 9].all? do |n|
+  stage = stages.find { |entry| entry[:fixture]['event'] == "action-#{n}.0" }
+  app_row = stage[:evidence]['applications'].first
+  app_row['roots'].map { |index| app_row['nodes'][index]['windowID'] }.sort == ids
+end
+checks[:confirmedDestruction] = records.count { |row| row['event'] == 'AXUIElementDestroyed' } == 2
+observation = checks.values.all? ? 'fixture tab structure verified; member mapping unresolved' : 'inconclusive AX coverage'
+event_counts = records.group_by { |row| row['event'] }.transform_values(&:length)
+File.write(output, JSON.pretty_generate(schemaVersion: 2, observation: observation, checks: checks, stages: stages, events: event_counts,
   scope: 'Controlled fixture evidence only. Native-tab grouping is not inferred from equal frames or titles.'))
 summary = stages.map do |stage|
   apps = stage[:evidence]['applications']
   nodes = apps.flat_map { |app| app['nodes'] }
   { stage: stage[:fixture]['event'], truth: stage[:fixture]['tabWindows'],
     axWindowIDs: nodes.select { |node| node.key?('enumeratedWindowIndex') }.map { |node| node['windowID'] },
+    observedWindowIDs: nodes.select { |node| node.key?('observedWindowIndex') }.map { |node| node['windowID'] },
     windowsErrors: apps.map { |app| app['windowsError'] },
     tabControls: nodes.select { |node| ['AXTabGroup', 'AXRadioButton'].include?(node['AXRole']) }.map do |node|
       node.select { |key, _| ['node', 'AXRole', 'AXValue', 'AXSelected', 'AXChildren', 'AXSelectedChildren', 'AXWindow'].include?(key) }
     end,
     truncated: apps.any? { |app| app['truncated'] } }
 end
-puts JSON.pretty_generate(output: output, observation: observation, stages: summary)
+puts JSON.pretty_generate(output: output, observation: observation, checks: checks, events: event_counts, stages: summary)
