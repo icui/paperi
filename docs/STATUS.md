@@ -51,6 +51,16 @@ This is the first tiled lifecycle subset of Step 3, not the full event reducer. 
 
 The reducer remains in-memory and disconnected from native observers. Metadata retries, hide/minimize/fullscreen restoration, ownership reconciliation, recorded fixture parity, and platform feasibility gates remain open. The app remains diagnostic-only.
 
+## Increment 5: explicit suspension and restoration
+
+- Added explicit whole-container hide, minimize, and fullscreen suspension events to the pure lifecycle reducer. Overlapping reasons are tracked independently; restoration waits until all reasons clear and current classification is eligible.
+- Suspended slots reserve their logical and native-tab member identities. Confirmed tab updates remain supported while suspended, and explicit removal discards the saved slot so a later resume cannot resurrect a closed container.
+- Retained floating mode, preferred width, and saved stack weight. Tiled restoration rejoins the first surviving original stack sibling, inserting before a surviving following row where possible; without a sibling it creates a column at the saved, clamped index. Existing managed focus is retained. This deterministic fallback still awaits recorded parity evidence.
+- Restoration during a suppressed interaction updates state without returning layout intent or clearing focus suppression. No OS focus changes or deferred replay are introduced.
+- Added four regression tests covering overlapping reasons and pending metadata, tab identity reservation/close, floating restoration during suppression, and loss of the original stack sibling. Editor diagnostics report no errors. `./scripts/swift.sh test` cannot start because no developer directory is active; tests remain unexecuted.
+
+The platform adapter must confirm these events for the entire logical container; absence from AX enumeration is insufficient. Native observer wiring, metadata retry scheduling, ownership reconciliation, recorded fixture parity, and feasibility gates remain open. The app remains diagnostic-only.
+
 ## Validation on the initial host
 
 - Swift 6.4 / Command Line Tools; macOS 26.7.2, arm64. The SDK is macOS 27; deployment target is macOS 14. Older OS support has not been exercised.

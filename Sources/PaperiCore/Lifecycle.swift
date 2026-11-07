@@ -1,3 +1,14 @@
+public enum SuspensionReason: Hashable, Sendable { case hidden, minimized, fullscreen }
+
+public struct SuspendedSlot: Equatable, Sendable {
+    public internal(set) var column: Column
+    public internal(set) var reasons: Set<SuspensionReason>
+    public let wasFloating: Bool
+    public let columnIndex: Int
+    public let rowIndex: Int
+    public let siblingIDs: [String]
+}
+
 /// Events are scoped to one confirmed display/Space layout by the caller.
 /// Missing AX enumeration entries are deliberately not removal events.
 public enum LifecycleEvent: Sendable {
@@ -6,6 +17,9 @@ public enum LifecycleEvent: Sendable {
     /// Only affirmative platform evidence may replace native-tab membership.
     case confirmedTabs(Slot)
     case toggleFloating(slotID: String, classification: Classification)
+    /// These describe the whole confirmed logical container, not one inactive tab.
+    case suspend(slotID: String, reason: SuspensionReason)
+    case resume(slotID: String, reason: SuspensionReason, classification: Classification)
     case focus(windowID: UInt32?, classification: Classification)
 }
 
@@ -13,6 +27,7 @@ public enum LifecycleEvent: Sendable {
 public struct LifecycleState: Equatable, Sendable {
     public private(set) var layout: Layout
     public private(set) var floating: [Column]
+    public private(set) var suspended: [SuspendedSlot] = []
     public private(set) var osFocusedWindow: UInt32?
     public private(set) var interactionSuppressed: Bool
 
@@ -33,6 +48,10 @@ public struct LifecycleState: Equatable, Sendable {
         switch event {
         case let .insert(slot, width, classification):
             guard classification.eligibility == .tiled || classification.eligibility == .floating else { return false }
+            if let saved = next.suspended.first(where: { $0.column.slots[0].id == slot.id }) {
+                guard saved.column.slots[0] == slot else { throw LayoutError.invalidMembership }
+                return false
+            }
             if let column = next.floating.first(where: { $0.slots.first?.id == slot.id }) {
                 guard column.slots[0] == slot else { throw LayoutError.invalidMembership }
                 return false
@@ -54,6 +73,10 @@ public struct LifecycleState: Equatable, Sendable {
             if next.layout.focused == nil { next.layout.focused = slot.id }
             needsLayout = true
         case let .remove(slotID):
+            if let i = next.suspended.firstIndex(where: { $0.column.slots[0].id == slotID }) {
+                next.suspended.remove(at: i)
+                break
+            }
             if let i = next.floating.firstIndex(where: { $0.slots.first?.id == slotID }) {
                 next.floating.remove(at: i)
                 break
@@ -73,6 +96,10 @@ public struct LifecycleState: Equatable, Sendable {
             }
             needsLayout = true
         case let .confirmedTabs(slot):
+            if let i = next.suspended.firstIndex(where: { $0.column.slots[0].id == slot.id }) {
+                next.suspended[i].column.slots[0] = slot
+                break
+            }
             if let i = next.floating.firstIndex(where: { $0.slots.first?.id == slot.id }) {
                 next.floating[i].slots[0] = slot
                 break
@@ -88,6 +115,51 @@ public struct LifecycleState: Equatable, Sendable {
             needsLayout = try managed.toggleFloating(slotID: slotID, classification: classification)
             next.layout = managed.tiled
             next.floating = managed.floating
+        case let .suspend(slotID, reason):
+            if let i = next.suspended.firstIndex(where: { $0.column.slots[0].id == slotID }) {
+                next.suspended[i].reasons.insert(reason)
+                break
+            }
+            let saved: SuspendedSlot
+            if let i = next.layout.index(of: slotID) {
+                let column = next.layout.columns[i.column]
+                saved = SuspendedSlot(column: Column(slots: [column.slots[i.row]], width: column.width,
+                                                      weights: [column.weights[i.row]]),
+                                      reasons: [reason], wasFloating: false, columnIndex: i.column,
+                                      rowIndex: i.row, siblingIDs: column.slots.map(\.id))
+            } else if let i = next.floating.firstIndex(where: { $0.slots[0].id == slotID }) {
+                saved = SuspendedSlot(column: next.floating[i], reasons: [reason], wasFloating: true,
+                                      columnIndex: i, rowIndex: 0, siblingIDs: [])
+            } else { return false }
+            needsLayout = try next.reduce(.remove(slotID: slotID))
+            next.suspended.append(saved)
+        case let .resume(slotID, reason, classification):
+            guard let i = next.suspended.firstIndex(where: { $0.column.slots[0].id == slotID }) else { return false }
+            next.suspended[i].reasons.remove(reason)
+            let saved = next.suspended[i]
+            // A later resume with fresh metadata can retry after all reasons clear.
+            guard saved.reasons.isEmpty,
+                  classification.eligibility == .tiled || classification.eligibility == .floating else {
+                break
+            }
+            next.suspended.remove(at: i)
+            if saved.wasFloating {
+                next.floating.insert(saved.column, at: min(saved.columnIndex, next.floating.count))
+            } else {
+                let sibling = saved.siblingIDs.compactMap { next.layout.index(of: $0) }.first
+                if let sibling {
+                    let column = next.layout.columns[sibling.column]
+                    let following = saved.siblingIDs.dropFirst(saved.rowIndex + 1)
+                    let row = column.slots.firstIndex { following.contains($0.id) }
+                        ?? min(saved.rowIndex, column.slots.count)
+                    next.layout.columns[sibling.column].slots.insert(saved.column.slots[0], at: row)
+                    next.layout.columns[sibling.column].weights.insert(saved.column.weights[0], at: row)
+                } else {
+                    next.layout.columns.insert(saved.column, at: min(saved.columnIndex, next.layout.columns.count))
+                }
+                if next.layout.focused == nil { next.layout.focused = slotID }
+                needsLayout = true
+            }
         case let .focus(windowID, classification):
             next.osFocusedWindow = windowID
             next.interactionSuppressed = true
@@ -109,5 +181,7 @@ public struct LifecycleState: Equatable, Sendable {
 
     public func validate() throws {
         try LayoutState(tiled: layout, floating: floating).validate()
+        guard suspended.allSatisfy({ $0.column.slots.count == 1 }) else { throw LayoutError.invalidMembership }
+        try Layout(columns: layout.columns + floating + suspended.map(\.column)).validate()
     }
 }
