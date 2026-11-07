@@ -32,4 +32,15 @@ struct RecordingOptionsTests {
             #expect(throws: RecordingOptions.InvalidArguments.self) { try RecordingOptions(arguments: arguments) }
         }
     }
+
+    @Test func restartMustOccurStrictlyWithinRecordingDuration() throws {
+        #expect(try RecordingOptions(arguments: []).restartAfter == nil)
+        #expect(try RecordingOptions(arguments: ["--restart-after", "2.5", "10"]).restartAfter == 2.5)
+        for arguments in [["--restart-after"], ["--restart-after", "0"], ["--restart-after", "-1"],
+                          ["--restart-after", "nan"], ["--restart-after", "inf"],
+                          ["--restart-after", "30"], ["10", "--restart-after", "11"],
+                          ["--restart-after", "1", "--restart-after", "2"]] {
+            #expect(throws: RecordingOptions.InvalidArguments.self) { try RecordingOptions(arguments: arguments) }
+        }
+    }
 }

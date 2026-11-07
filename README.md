@@ -38,6 +38,8 @@ The recorder makes three bounded subscription/enumeration retry passes for each 
 
 Repeat `--bundle-id` to record several specific apps; omitting it records all discovered apps. Filters apply to initial discovery and workspace launch/termination notifications. JSONL output is written immediately so a pipe reader can wait for `recorderReady` before interacting.
 
+`record --restart-after seconds` performs one diagnostic stop/start strictly within the recording interval. It emits another `recorderReady`, then `recorderRestarted` with actual native-source removal counts; `recordingEnded` also includes teardown evidence. `ruby scripts/check-native-tabs.rb --restart [new-output.json]` checks a learned native group before and after replacement (about 42 seconds). The replacement gets a fresh identity scope and only currently observed bindings. Inactive physical roots may be absent until rediscovered; restart never carries them forward as confirmed membership.
+
 An opt-in live integration check creates a disposable AppKit app, records only its bundle ID, and checks launch, create, move, resize, minimize, restore, close, and termination delivery, including stable create/destroy window IDs:
 
 ```sh

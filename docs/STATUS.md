@@ -169,6 +169,15 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Debug build and all 55 tests (26 core, 29 platform) pass. The existing mixed native/content fixture still passes all 15 checks. Editor diagnostics and Ruby syntax checks are clean. Production association logic is unchanged; no unvisited binding is inferred or replayed.
 - Controlled unvisited-member behavior is now validated. Daily-app classification and unvisited discovery, whole-capture metadata failures, popup recovery, displays, Spaces and remaining lifecycle release gates stay open. No window-management effects were enabled.
 
+## Increment 20: native source ownership and controlled recorder restart
+
+- Extracted native run-loop source ownership with idempotent removal and release cleanup. Recorder stop reports actual source-removal results before releasing native observers, and clears workspace listeners/retries. The CLI includes teardown evidence on recording end.
+- Added opt-in `record --restart-after seconds` with strict finite, positive, in-duration validation. The same recorder stops and starts once, emitting new readiness and explicit restart evidence. Native-tab `--restart` uses a wide quiet interval around replacement and report schema 9.
+- The controlled run passes all 14 required checks: a previously complete native pair becomes partial under a new identity scope, sources are removed, readiness is not duplicated, and each physical window creates/destroys once. `physicalInventoryComplete` is separately false: a fresh observer initially sees only the selected representative. No old references or bindings are replayed to hide this rediscovery limitation. An initial timing-sensitive run was inconclusive; the final fixture separates selection-back, restart and capture.
+- Added native-CFRunLoop tests for removal/replacement, release cleanup and no delivery of queued callbacks after removal, plus restart-option validation. Distinct synthetic source contexts are required because empty CFRunLoopSource contexts compare equal. No Accessibility registration occurs in these isolated tests.
+- Debug build and all 59 tests (26 core, 33 platform) pass. The original live launch/move/resize/minimize/restore/close recorder check also passes. Editor diagnostics and patch formatting are clean.
+- This validates controlled native-source teardown/restart and preserves diagnostic-only operation. Daily-app recovery, inactive-member rediscovery, metadata/classification gaps and other platform release gates remain open.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

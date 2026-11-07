@@ -4,6 +4,7 @@ public struct RecordingOptions {
     public let seconds: Double
     public let bundleIDs: Set<String>?
     public let includeTabEvidence: Bool
+    public let restartAfter: Double?
 
     public enum InvalidArguments: Error { case usage }
 
@@ -11,10 +12,18 @@ public struct RecordingOptions {
         var seconds: Double?
         var bundleIDs: Set<String> = []
         var includeTabEvidence = false
+        var restartAfter: Double?
         var index = 0
         while index < arguments.count {
             let argument = arguments[index]
-            if argument == "--tab-evidence" {
+            if argument == "--restart-after" {
+                index += 1
+                guard restartAfter == nil, index < arguments.count,
+                      let value = Double(arguments[index]), value > 0, value.isFinite else {
+                    throw InvalidArguments.usage
+                }
+                restartAfter = value
+            } else if argument == "--tab-evidence" {
                 guard !includeTabEvidence else { throw InvalidArguments.usage }
                 includeTabEvidence = true
             } else if argument == "--bundle-id" {
@@ -30,9 +39,12 @@ public struct RecordingOptions {
             }
             index += 1
         }
-        self.seconds = seconds ?? 30
+        let duration = seconds ?? 30
+        self.seconds = duration
+        guard restartAfter.map({ $0 < duration }) ?? true else { throw InvalidArguments.usage }
         guard !includeTabEvidence || bundleIDs.count == 1 else { throw InvalidArguments.usage }
         self.bundleIDs = bundleIDs.isEmpty ? nil : bundleIDs
         self.includeTabEvidence = includeTabEvidence
+        self.restartAfter = restartAfter
     }
 }

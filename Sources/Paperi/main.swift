@@ -36,13 +36,23 @@ case "tab-evidence":
     Diagnostics.printJSON(Diagnostics.tabEvidence(bundleID: args[1]))
 case "record":
     guard let options = try? RecordingOptions(arguments: Array(args.dropFirst())) else {
-        print("Usage: paperi record [seconds: >0 and <=300] [--bundle-id identifier ...] [--tab-evidence (one bundle required)]")
+        print("Usage: paperi record [seconds: >0 and <=300] [--bundle-id identifier ...] [--tab-evidence (one bundle required)] [--restart-after seconds]")
         exit(2)
     }
     guard AXIsProcessTrusted() else { print("Accessibility access is required. Run the app and select Request Accessibility Access."); exit(1) }
     Diagnostics.printJSON(["event": "recordingStarted", "durationSeconds": options.seconds], pretty: false)
     let recorder = EventRecorder(bundleIDs: options.bundleIDs)
     recorder.start()
+    let restartTimer = options.restartAfter.map { delay in
+        Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                let teardown = recorder.stop()
+                recorder.start()
+                Diagnostics.printJSON(["event": "recorderRestarted", "teardown": teardown,
+                                       "uptime": ProcessInfo.processInfo.systemUptime], pretty: false)
+            }
+        }
+    }
     var evidenceTimer: Timer?
     if options.includeTabEvidence, let bundleID = options.bundleIDs?.first {
         evidenceTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
@@ -58,8 +68,9 @@ case "record":
     }
     RunLoop.main.run(until: Date(timeIntervalSinceNow: options.seconds))
     evidenceTimer?.invalidate()
-    recorder.stop()
-    Diagnostics.printJSON(["event": "recordingEnded"], pretty: false)
+    restartTimer?.invalidate()
+    let teardown = recorder.stop()
+    Diagnostics.printJSON(["event": "recordingEnded", "teardown": teardown], pretty: false)
 case "--menu":
     let app = NSApplication.shared
     let delegate = AppDelegate(); app.delegate = delegate; app.run()
@@ -81,7 +92,7 @@ default:
     Paperi feasibility build (window management is inactive)
       paperi snapshot [--include-titles]  Read-only JSON snapshot
       paperi tab-evidence identifier     Bounded read-only AX tab structure for one app
-      paperi record [seconds] [--bundle-id identifier ...] [--tab-evidence]
+      paperi record [seconds] [--bundle-id identifier ...] [--tab-evidence] [--restart-after seconds]
                                         Read-only AX event JSONL (default 30, max 300)
       paperi benchmark-core              Measure cached layout calculation only
       paperi --menu                      Run diagnostic menu bar shell

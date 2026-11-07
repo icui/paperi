@@ -9,16 +9,17 @@ require 'tmpdir'
 root = File.expand_path('..', __dir__)
 arguments = ARGV.dup
 unvisited = arguments.delete('--unvisited') != nil
+restart = arguments.delete('--restart') != nil
 content = arguments.delete('--content') != nil
 multi = arguments.delete('--multi') != nil || content
-abort 'Usage: check-native-tabs.rb [--multi|--content|--unvisited] [new-output.json]' if arguments.length > 1 || (unvisited && multi)
+abort 'Usage: check-native-tabs.rb [--multi|--content|--unvisited|--restart] [new-output.json]' if arguments.length > 1 || (unvisited && multi) || (restart && (unvisited || multi))
 wrapper = File.join(root, 'scripts', 'swift.sh')
 abort 'Build failed' unless system(wrapper, 'build')
 bin, status = Open3.capture2(wrapper, 'build', '--show-bin-path')
 abort 'Cannot resolve build directory' unless status.success?
 bin = bin.strip
-bundle_id = unvisited ? 'dev.paperi.UnvisitedTabFixture' : (content ? 'dev.paperi.ContentTabFixture' : (multi ? 'dev.paperi.MultiTabFixture' : 'dev.paperi.NativeTabFixture'))
-filename = unvisited ? 'native-tab-unvisited-fixture.json' : (content ? 'content-tab-fixture.json' : (multi ? 'native-tab-multi-fixture.json' : 'native-tab-fixture.json'))
+bundle_id = restart ? 'dev.paperi.RestartTabFixture' : (unvisited ? 'dev.paperi.UnvisitedTabFixture' : (content ? 'dev.paperi.ContentTabFixture' : (multi ? 'dev.paperi.MultiTabFixture' : 'dev.paperi.NativeTabFixture')))
+filename = restart ? 'native-tab-restart-fixture.json' : (unvisited ? 'native-tab-unvisited-fixture.json' : (content ? 'content-tab-fixture.json' : (multi ? 'native-tab-multi-fixture.json' : 'native-tab-fixture.json')))
 output = arguments.first || File.join(root, 'captures', filename)
 abort "Output already exists: #{output}" if File.exist?(output)
 stages = []
@@ -41,8 +42,9 @@ Dir.mktmpdir('paperi-tabs-', File.join(root, '.build')) do |temporary|
     </dict></plist>
   PLIST
   log = File.join(temporary, 'fixture.jsonl')
-  input, stream, recorder = Open3.popen2(File.join(bin, 'paperi'), 'record', unvisited ? '29' : '20',
-                                      '--bundle-id', bundle_id, '--tab-evidence')
+  recorder_args = ['record', restart ? '42' : (unvisited ? '29' : '20'), '--bundle-id', bundle_id, '--tab-evidence']
+  recorder_args += ['--restart-after', '18.5'] if restart
+  input, stream, recorder = Open3.popen2(File.join(bin, 'paperi'), *recorder_args)
   input.close
   queue = Queue.new
   reader = Thread.new do
@@ -64,13 +66,14 @@ Dir.mktmpdir('paperi-tabs-', File.join(root, '.build')) do |temporary|
   launcher = nil
   consumed = 0
   begin
-    Timeout.timeout(unvisited ? 45 : 35) do
+    Timeout.timeout(restart ? 55 : (unvisited ? 45 : 35)) do
       loop do
         row = next_record.call
         break if row['event'] == 'recorderReady'
       end
       fixture_args = [log, unvisited ? '--unvisited-tabs' : (multi ? '--multi-tabs' : '--tabs')]
       fixture_args << '--content-tabs' if content
+      fixture_args << '--restart-check' if restart
       launcher = Process.spawn('/usr/bin/open', '-g', '-n', '-W', app, '--args', *fixture_args)
       loop do
         rows = File.exist?(log) ? File.readlines(log).map { |line| JSON.parse(line) } : []
@@ -106,7 +109,7 @@ Dir.mktmpdir('paperi-tabs-', File.join(root, '.build')) do |temporary|
     Process.wait(launcher) if launcher
   end
 end
-stage_numbers = unvisited ? [1, 3, 5, 7, 9, 10, 11, 13, 15] : [1, 3, 5, 7, 9, 11, 13, 15]
+stage_numbers = restart ? [1, 3, 5, 7, 8, 9, 11, 13, 15] : (unvisited ? [1, 3, 5, 7, 9, 10, 11, 13, 15] : [1, 3, 5, 7, 9, 11, 13, 15])
 abort 'Fixture did not complete all tab stages' unless stages.length == stage_numbers.length
 truth = stages.map { |stage| [stage[:fixture]['event'], stage[:fixture]['tabWindows']] }.to_h
 abort 'Fixture stages were incomplete or duplicated' unless truth.keys == stage_numbers.map { |n| "action-#{n}.0" }
@@ -158,12 +161,19 @@ complete = stages.all? do |stage|
   end
 end
 checks = { stageCoverage: complete }
+inventory_complete = true
 checks[:physicalRootIdentity] = stages.all? do |stage|
   app_row = stage[:evidence]['applications'].first
   ids_seen = app_row['observedRoots'].map { |index| app_row['nodes'][index]['windowID'] }.sort
   expected = stage[:fixture]['tabWindows'].select { |window| window['visible'] }.map { |window| window['id'] }.sort
-  ids_seen == expected
+  inventory_complete &&= ids_seen == expected
+  if restart && stage[:fixture]['event'].delete_prefix('action-').to_f >= 8
+    ids_seen.uniq == ids_seen && (ids_seen - expected).empty?
+  else
+    ids_seen == expected
+  end
 end
+checks[:physicalInventoryComplete] = inventory_complete if restart
 checks[:enumeratedRepresentatives] = stages.all? do |stage|
   app_row = stage[:evidence]['applications'].first
   nodes = app_row['nodes']
@@ -253,6 +263,21 @@ checks[:regroupingDropsBindings] = regrouped && (content ? ['observed', 'unavail
 closed_stage = stages.find { |stage| stage[:fixture]['event'] == 'action-15.0' }
 closed_candidates = closed_stage[:evidence]['applications'].first['selectionAssociations']
 checks[:closedCandidatesCleared] = closed_candidates && closed_candidates['groups'].empty?
+if restart
+  after_restart = stages.find { |stage| stage[:fixture]['event'] == 'action-8.0' }[:evidence]['applications'].first
+  before_restart = learned_stage[:evidence]['applications'].first
+  new_report = after_restart['selectionAssociations']
+  checks[:restartDiscardsLearnedBindings] = before_restart['identityScope'] != after_restart['identityScope'] &&
+    new_report['status'] == 'observed' && !new_report['quarantined'] && new_report['groups'].length == 1 &&
+    new_report['groups'].all? { |group| !group['complete'] && group['bindings'].length == 1 && group['unresolvedControls'].length == 1 }
+  restarts = records.select { |row| row['event'] == 'recorderRestarted' }
+  checks[:nativeSourcesRemovedAtRestart] = restarts.length == 1 && restarts.first['teardown'] == {
+    'detachedObserverCount' => 1, 'sourcesStillInstalled' => 0, 'workspaceObserverCount' => 0 }
+  checks[:restartReadyOnce] = records.count { |row| row['event'] == 'recorderReady' } == 2
+  checks[:noDuplicateWindowEvents] = records.count { |row| row['event'] == 'AXWindowCreated' } == 2 &&
+    records.count { |row| row['event'] == 'AXUIElementDestroyed' } == 2
+  checks[:finalNativeSourcesRemoved] = records.find { |row| row['event'] == 'recordingEnded' }.dig('teardown', 'sourcesStillInstalled') == 0
+end
 if content
   checks[:contentSelectionConfirmed] = [1, 3, 5, 7].map do |n|
     stages.find { |stage| stage[:fixture]['event'] == "action-#{n}.0" }[:fixture]['contentTab']
@@ -292,12 +317,13 @@ if content
   end
   checks[:onlyContentGroupQuarantined] = content_group && learned['quarantinedGroups'] == [content_group['axIdentity']]
 end
-structural_checks = checks.reject { |name, _| name == :enumeratedRepresentatives }
+structural_checks = checks.reject { |name, _| name == :enumeratedRepresentatives || name == :physicalInventoryComplete }
 observation = if structural_checks.values.all?
-  unvisited ? 'unvisited selection withheld and fresh learning verified; daily-app support unresolved' :
+  restart ? 'native observer restart verified; inactive-member rediscovery may be incomplete' :
+    (unvisited ? 'unvisited selection withheld and fresh learning verified; daily-app support unresolved' :
     (content ? 'content-tab negative control verified; app classification unresolved' :
     (checks[:enumeratedRepresentatives] ? 'fixture tab structure verified; member mapping unresolved' :
-    'observer tab structure verified; enumeration inconclusive; member mapping unresolved'))
+    'observer tab structure verified; enumeration inconclusive; member mapping unresolved')))
 else
   'inconclusive AX coverage'
 end
@@ -335,8 +361,8 @@ identity_comparisons = (unvisited ? [[0, 1, 2]] : (multi ? [[0, 1], [2, 3]] : [[
     sameOrderedControlTokens: ready ? samples.map { |sample| sample[:controls] }.uniq.length == 1 : nil,
     returnRestoresTokens: ready ? samples.first[:controls] == samples.last[:controls] : nil }
 end
-mode = unvisited ? 'unvisited native member' : (content ? 'native groups with content tabs' : (multi ? 'multiple containers' : 'single container'))
-File.write(output, JSON.pretty_generate(schemaVersion: 8, fixtureMode: mode, observation: observation, checks: checks, identityComparisons: identity_comparisons, stages: stages, events: event_counts,
+mode = restart ? 'observer restart' : (unvisited ? 'unvisited native member' : (content ? 'native groups with content tabs' : (multi ? 'multiple containers' : 'single container')))
+File.write(output, JSON.pretty_generate(schemaVersion: 9, fixtureMode: mode, observation: observation, checks: checks, identityComparisons: identity_comparisons, stages: stages, events: event_counts,
   scope: 'Controlled fixture evidence only. Native-tab grouping is not inferred from equal frames or titles.'))
 summary = stages.map do |stage|
   apps = stage[:evidence]['applications']

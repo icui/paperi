@@ -94,6 +94,7 @@ public enum Diagnostics {
 @MainActor public final class EventRecorder {
     private final class Subscription {
         let observer: AXObserver
+        let source: RecorderSource
         weak var owner: EventRecorder?
         var windows: [(element: AXUIElement, id: UInt32)] = []
         var notifications = NotificationSubscriptions()
@@ -101,10 +102,8 @@ public enum Diagnostics {
         let selectionAssociations = SelectionAssociations()
         init(observer: AXObserver, owner: EventRecorder) {
             self.observer = observer
+            self.source = RecorderSource(AXObserverGetRunLoopSource(observer))
             self.owner = owner
-        }
-        deinit {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
         }
     }
     private final class WorkspaceObservation {
@@ -204,7 +203,6 @@ public enum Diagnostics {
         }
         observers[pid] = Subscription(observer: observer, owner: self)
         reconcile(pid)
-        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
     }
 
     private func reconcile(_ pid: pid_t) {
@@ -289,16 +287,23 @@ public enum Diagnostics {
         }
     }
 
-    private func detach(_ pid: pid_t) {
+    @discardableResult private func detach(_ pid: pid_t) -> Bool {
         retries.cancel(pid)
-        guard let subscription = observers.removeValue(forKey: pid) else { return }
-        CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(subscription.observer), .commonModes)
+        guard let subscription = observers.removeValue(forKey: pid) else { return true }
+        return subscription.source.remove()
     }
 
-    public func stop() {
+    /// Reports actual native source removal before releasing observer ownership.
+    @discardableResult public func stop() -> [String: Any] {
         running = false
         workspaceTokens.removeAll()
         retries.cancelAll()
-        for pid in Array(observers.keys) { detach(pid) }
+        let count = observers.count
+        var remaining = 0
+        for pid in Array(observers.keys) {
+            if !detach(pid) { remaining += 1 }
+        }
+        return ["detachedObserverCount": count, "sourcesStillInstalled": remaining,
+                "workspaceObserverCount": workspaceTokens.count]
     }
 }

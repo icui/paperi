@@ -40,6 +40,7 @@ import AppKit
         after(3) { self.tabWindows[0].addTabbedWindow(self.tabWindows[1], ordered: .above) }
         after(5) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1] }
         after(7) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0] }
+        if CommandLine.arguments.contains("--restart-check") { after(8) {} }
         after(9) {
             self.tabWindows[0].tabGroup?.removeWindow(self.tabWindows[1])
             self.tabWindows[1].orderFrontRegardless()
@@ -121,7 +122,13 @@ import AppKit
     }
 
     private func after(_ seconds: Double, action: @escaping @MainActor () -> Void) {
-        let delay = CommandLine.arguments.contains("--unvisited-tabs") ? seconds * 1.5 : seconds
+        let delay: Double
+        if CommandLine.arguments.contains("--restart-check") {
+            // Leave a wide quiet interval after selection-back for teardown.
+            delay = seconds * 2 + (seconds >= 8 ? 4 : 0)
+        } else {
+            delay = CommandLine.arguments.contains("--unvisited-tabs") ? seconds * 1.5 : seconds
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             action()
             self.log("action-\(seconds)")
