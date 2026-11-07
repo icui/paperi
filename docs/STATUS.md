@@ -41,6 +41,16 @@ These are in-memory commands only; they do not enable window management or resol
 
 This is the first tiled lifecycle subset of Step 3, not the full event reducer. It is not wired to native observers or an effect scheduler. Floating lifecycle, metadata retries, hide/minimize/fullscreen restoration, cross-display ownership, recorded fixture parity, and actual tab discovery remain open. Native feasibility gates and diagnostic-only operation are unchanged.
 
+## Increment 4: floating lifecycle integration
+
+- Extended the pure lifecycle reducer to retain user-floating slots, handle their explicit removal and confirmed tab updates, and toggle between tiled and floating collections while preserving preferred width and native-tab members.
+- Validation spans both collections, so conflicting slot/member identities fail transactionally. Repeated discovery preserves the existing placement mode; transitions require an explicit floating toggle.
+- Floating focus clears interaction suppression only for a registered active representative. Unknown floating focus remains suppressed and retains the last tiled focus. Floating commands during suppressed interactions are discarded without replay.
+- Floating insertion/removal/tab changes return no tiled layout intent; toggles request layout only when the interaction permits it.
+- Added three regressions covering floating lifecycle, cross-collection membership rollback, and focus suppression/toggle recovery. Editor diagnostics report no errors. `./scripts/swift.sh test` still cannot start because no developer directory is active; the new tests remain unexecuted.
+
+The reducer remains in-memory and disconnected from native observers. Metadata retries, hide/minimize/fullscreen restoration, ownership reconciliation, recorded fixture parity, and platform feasibility gates remain open. The app remains diagnostic-only.
+
 ## Validation on the initial host
 
 - Swift 6.4 / Command Line Tools; macOS 26.7.2, arm64. The SDK is macOS 27; deployment target is macOS 14. Older OS support has not been exercised.

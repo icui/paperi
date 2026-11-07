@@ -4,6 +4,7 @@ import Testing
 struct LifecycleTests {
     let document = Classification(eligibility: .tiled, reason: "document")
     let overlay = Classification(eligibility: .excluded, reason: "overlay")
+    let userFloating = Classification(eligibility: .floating, reason: "user floating")
     func slot(_ id: UInt32) -> Slot { Slot(id: "\(id)", members: [id], activeMember: id) }
 
     @Test func insertionIsIdempotentAndInvalidMembershipIsAtomic() throws {
@@ -54,6 +55,57 @@ struct LifecycleTests {
         try state.reduce(.focus(windowID: 2, classification: document))
         #expect(state.layout.focused == "1")
         #expect(!state.interactionSuppressed)
+    }
+
+    @Test func floatingLifecycleKeepsTabsAndTiledFocus() throws {
+        var state = LifecycleState()
+        try state.reduce(.insert(slot(1), width: 400, classification: document))
+        #expect(try !state.reduce(.insert(slot(2), width: 500, classification: userFloating)))
+        #expect(try !state.reduce(.insert(slot(2), width: 500, classification: userFloating)))
+        #expect(try !state.reduce(.confirmedTabs(Slot(id: "2", members: [2, 3], activeMember: 3))))
+        try state.reduce(.focus(windowID: 3, classification: userFloating))
+        #expect(!state.interactionSuppressed)
+        #expect(state.layout.focused == "1")
+        #expect(try state.reduce(.toggleFloating(slotID: "2", classification: userFloating)))
+        #expect(state.layout.focused == "2")
+        #expect(state.layout.columns[1].width == 500)
+        #expect(state.layout.columns[1].slots[0].members == [2, 3])
+        #expect(try state.reduce(.toggleFloating(slotID: "2", classification: document)))
+        #expect(state.layout.focused == "1")
+        #expect(try !state.reduce(.remove(slotID: "2")))
+        #expect(state.floating.isEmpty)
+        try state.validate()
+    }
+
+    @Test func floatingMembershipConflictsRollBack() throws {
+        var state = LifecycleState()
+        try state.reduce(.insert(slot(1), width: 400, classification: document))
+        try state.reduce(.insert(slot(2), width: 500, classification: userFloating))
+        let before = state
+        #expect(throws: (any Error).self) {
+            try state.reduce(.confirmedTabs(Slot(id: "2", members: [1, 2], activeMember: 2)))
+        }
+        #expect(state == before)
+        #expect(throws: (any Error).self) {
+            try state.reduce(.insert(Slot(id: "duplicate", members: [2], activeMember: 2),
+                                     width: 400, classification: document))
+        }
+        #expect(state == before)
+    }
+
+    @Test func unknownFloatingFocusSuppressesAndOverlayDiscardsToggle() throws {
+        var state = LifecycleState()
+        try state.reduce(.insert(slot(1), width: 400, classification: document))
+        try state.reduce(.focus(windowID: 99, classification: userFloating))
+        #expect(state.interactionSuppressed)
+        let before = state
+        #expect(try !state.reduce(.toggleFloating(slotID: "1", classification: document)))
+        #expect(state == before)
+        try state.reduce(.focus(windowID: 1, classification: document))
+        #expect(state.floating.isEmpty)
+        #expect(!state.interactionSuppressed)
+        #expect(try !state.reduce(.toggleFloating(slotID: "1", classification: overlay)))
+        #expect(try state.reduce(.toggleFloating(slotID: "1", classification: document)))
     }
 
     @Test func removalChoosesExistingRowAndCleansEmptyColumns() throws {
