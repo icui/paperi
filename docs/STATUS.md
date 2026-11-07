@@ -3,7 +3,7 @@
 ## Current checkpoint: 2026-11-07
 
 - Diagnostic-only: no window effects, management hotkeys or native observer-to-reducer integration.
-- All 76 regressions pass in debug and release (28 core, 48 platform).
+- All 78 regressions pass in debug and release (28 core, 50 platform).
 - Latest nine-mode integration: eight pass; the restart case lacks complete learning before replacement. A repeat passes, with no established cause for the difference. Earlier empty-enumeration restart failures remain open; source teardown and missing-reference handling are verified separately.
 - Latest work adds scoped popup evidence, safe unknown presentation state, isolated missing tab-selection metadata, repeated diagnostic checks, stale-callback rejection, fresh focus/main discovery, explicit sampled-reference coverage and opt-in periodic reconciliation.
 - Next priorities: startup/restart window rediscovery, daily-app native-tab classification, actual OS/cross-display popup recovery and display/Space feasibility. Historical increments below retain their original observations and limits.
@@ -255,6 +255,13 @@ This recorder is not the live management registry and does not feed the lifecycl
 - At selection-back, the staged report retains only the current binding despite an unchanged staged scope/group/control sequence. The intervening samples were not retained, so the reason for discarding the earlier binding is unproven. No sampling-race or platform-failure cause is asserted.
 - Added native report schema 13 with compact association state for every structural sample, including captures between fixture stages, and an explicit list of failed required checks. A repeated restart capture passes every required check and shows complete pre-restart learning followed by a fresh partial scope. It does not reproduce or resolve the earlier failure, which remains recorded.
 - Production is unchanged from increment 28; all 76 regressions remain validated in debug/release. Ruby syntax, editor diagnostics and patch formatting are clean. No conservative invalidation rule, required assertion or management gate was weakened.
+
+## Increment 30: explicit association reset evidence
+
+- Added per-report `resets` evidence for actual discarded bindings: scope changes, topology changes, unavailable capture/selection, identity conflicts, confirmed window destruction and explicit invalidation. Entries include the affected group token and discarded binding count. Initial learning and repeated empty invalidations produce no entries; destruction between captures is retained until the next report.
+- Preserved association learning, quarantine and invalidation behavior. Added two regressions covering group isolation, single-report delivery, destruction, topology, scope and conflicts. All 78 tests pass in debug and release; editor diagnostics and patch formatting are clean.
+- A controlled restart run passes every required check and retains reset arrays in all 42 timeline samples. It records one topology reset discarding one binding. Complete pre-restart learning, fresh partial learning, unique/complete window-event delivery and source teardown pass. Full physical inventory remains incomplete as an informational result.
+- This run does not reproduce or resolve the earlier unexplained pre-restart binding loss. Capture-unavailable reasons identify the tracker decision, not the individual AX read failure; replacing the observer creates a fresh tracker whose scope transition remains visible in the timeline. The app remains diagnostic-only.
 
 ## Validation on the initial host
 

@@ -328,7 +328,7 @@ public enum Diagnostics {
         emit(["event": notification, "pid": pid, "windowID": id,
               "uptime": ProcessInfo.processInfo.systemUptime])
         if notification == kAXUIElementDestroyedNotification {
-            observers[pid]?.selectionAssociations.invalidate()
+            observers[pid]?.selectionAssociations.invalidate(reason: .windowDestroyed)
             observers[pid]?.notifications.remove(element)
             observers[pid]?.windows.removeAll { CFEqual($0.element, element) }
         } else if notification == kAXWindowCreatedNotification {

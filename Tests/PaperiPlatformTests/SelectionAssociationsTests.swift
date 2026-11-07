@@ -8,6 +8,38 @@ struct SelectionAssociationsTests {
         TabSelection(group: group, controls: controls, selected: selected, window: window)
     }
 
+    @Test func resetEvidenceExplainsLossWithoutRepeatingOrClearingOtherGroups() {
+        let tracker = SelectionAssociations()
+        let other = selection(21, window: 201, controls: [21, 22], group: 2)
+        #expect(tracker.observe(scope: "one", groups: [selection(), other]).resets.isEmpty)
+        _ = tracker.observe(scope: "one", groups: [selection(12, window: 102), other])
+        let unknown = TabSelection(group: 1, controls: [11, 12], selected: nil, window: 102)
+        let lost = tracker.observe(scope: "one", groups: [unknown, other])
+        #expect(lost.resets == [.init(reason: .selectionUnavailable, group: 1, discardedBindings: 2)])
+        #expect(lost.bindings == [2: [21: 201]])
+        #expect(tracker.observe(scope: "one", groups: [unknown, other]).resets.isEmpty)
+        let missing = tracker.observe(scope: "one", groups: nil)
+        #expect(missing.resets == [.init(reason: .captureUnavailable, group: 2, discardedBindings: 1)])
+        #expect(tracker.observe(scope: "one", groups: nil).resets.isEmpty)
+    }
+
+    @Test func resetEvidenceSurvivesDestructionUntilNextReportAndDistinguishesScopeTopologyConflict() {
+        let tracker = SelectionAssociations()
+        _ = tracker.observe(scope: "one", groups: [selection()])
+        tracker.invalidate(reason: .windowDestroyed)
+        tracker.invalidate(reason: .windowDestroyed)
+        let destroyed = tracker.observe(scope: "two", groups: [selection()])
+        #expect(destroyed.resets == [.init(reason: .windowDestroyed, group: 1, discardedBindings: 1)])
+        let topology = tracker.observe(scope: "two", groups: [selection(controls: [11])])
+        #expect(topology.resets == [.init(reason: .topologyChanged, group: 1, discardedBindings: 1)])
+        let scope = tracker.observe(scope: "three", groups: [selection(controls: [11])])
+        #expect(scope.resets == [.init(reason: .scopeChanged, group: 1, discardedBindings: 1)])
+        let conflict = tracker.observe(scope: "three", groups: [selection(window: 999, controls: [11])])
+        #expect(conflict.resets == [.init(reason: .identityConflict, group: 1, discardedBindings: 1)])
+        #expect((conflict.json["resets"] as? [[String: Any]])?.first?["reason"] as? String == "identityConflict")
+        #expect(tracker.observe(scope: "three", groups: [selection(controls: [11])]).resets.isEmpty)
+    }
+
     @Test func unvisitedControlsStayUnresolvedUntilSelected() {
         let tracker = SelectionAssociations()
         let first = tracker.observe(scope: "one", groups: [selection()])

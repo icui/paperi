@@ -9,11 +9,18 @@ struct TabSelection: Equatable {
 
 struct SelectionAssociationReport {
     enum Status: String { case observed, unavailable, conflict }
+    struct Reset: Equatable {
+        enum Reason: String { case scopeChanged, topologyChanged, captureUnavailable, selectionUnavailable, identityConflict, windowDestroyed, explicitInvalidation }
+        let reason: Reason
+        let group: Int
+        let discardedBindings: Int
+    }
     let status: Status
     let groups: [TabSelection]
     let bindings: [Int: [Int: UInt32]]
     let scopeQuarantined: Bool
     let quarantinedGroups: Set<Int>
+    let resets: [Reset]
     var quarantined: Bool { scopeQuarantined || !quarantinedGroups.isEmpty }
     var unavailableGroups: Set<Int> { Set(groups.filter { $0.selected == nil }.map(\.group)) }
 
@@ -21,6 +28,8 @@ struct SelectionAssociationReport {
         ["status": status.rawValue, "quarantined": quarantined,
          "scopeQuarantined": scopeQuarantined, "quarantinedGroups": quarantinedGroups.sorted(),
          "unavailableGroups": unavailableGroups.sorted(),
+         "resets": resets.map { ["reason": $0.reason.rawValue, "group": $0.group,
+                                  "discardedBindings": $0.discardedBindings] as [String: Any] },
          "groups": groups.map { group in
             let known = bindings[group.group] ?? [:]
             return ["group": group.group, "controls": group.controls,
@@ -42,17 +51,29 @@ final class SelectionAssociations {
     private var bindings: [Int: [Int: UInt32]] = [:]
     private var quarantined = false
     private var quarantinedGroups: Set<Int> = []
+    private var pendingResets: [SelectionAssociationReport.Reset] = []
 
-    func invalidate() {
-        bindings.removeAll()
+    func invalidate(reason: SelectionAssociationReport.Reset.Reason = .explicitInvalidation) {
+        discard(reason: reason)
         structure = nil
     }
 
+    // Only actual losses are recorded. Repeated invalidations before a sample
+    // cannot grow this buffer because the first one removes the bindings.
+    private func discard(group: Int? = nil, reason: SelectionAssociationReport.Reset.Reason) {
+        for id in (group.map { [$0] } ?? bindings.keys.sorted()) {
+            if let removed = bindings.removeValue(forKey: id), !removed.isEmpty {
+                pendingResets.append(.init(reason: reason, group: id, discardedBindings: removed.count))
+            }
+        }
+    }
+
     func observe(scope: String, groups: [TabSelection]?) -> SelectionAssociationReport {
+        defer { pendingResets.removeAll() }
         guard !scope.isEmpty else { return unavailable() }
         if self.scope != scope {
             self.scope = scope
-            invalidate()
+            invalidate(reason: .scopeChanged)
             quarantined = false
             quarantinedGroups.removeAll()
         }
@@ -68,12 +89,12 @@ final class SelectionAssociations {
                   (group.selected.map { group.controls.contains($0) } ?? true) && group.window > 0 }) else { return conflict() }
         let next = groups.map { Structure(group: $0.group, controls: $0.controls) }
         if structure != next {
-            bindings.removeAll()
+            discard(reason: .topologyChanged)
             structure = next
         }
         for group in groups {
             guard let selected = group.selected, !quarantinedGroups.contains(group.group) else {
-                bindings.removeValue(forKey: group.group)
+                discard(group: group.group, reason: group.selected == nil ? .selectionUnavailable : .identityConflict)
                 continue
             }
             if let old = bindings[group.group]?[selected], old != group.window {
@@ -96,25 +117,25 @@ final class SelectionAssociations {
         for claimants in owners.values where claimants.count > 1 {
             quarantinedGroups.formUnion(claimants)
         }
-        for group in quarantinedGroups { bindings.removeValue(forKey: group) }
+        for group in quarantinedGroups.sorted() { discard(group: group, reason: .identityConflict) }
         let blocked = !groups.isEmpty && groups.allSatisfy { quarantinedGroups.contains($0.group) }
         let unavailable = !groups.isEmpty && groups.allSatisfy { $0.selected == nil || quarantinedGroups.contains($0.group) }
         return SelectionAssociationReport(status: blocked ? .conflict : (unavailable ? .unavailable : .observed), groups: groups,
                                           bindings: bindings, scopeQuarantined: false,
-                                          quarantinedGroups: quarantinedGroups)
+                                          quarantinedGroups: quarantinedGroups, resets: pendingResets)
     }
 
     private func unavailable() -> SelectionAssociationReport {
-        bindings.removeAll()
+        discard(reason: .captureUnavailable)
         return SelectionAssociationReport(status: .unavailable, groups: [], bindings: [:],
-                                          scopeQuarantined: quarantined, quarantinedGroups: quarantinedGroups)
+                                          scopeQuarantined: quarantined, quarantinedGroups: quarantinedGroups, resets: pendingResets)
     }
 
     private func conflict() -> SelectionAssociationReport {
         quarantined = true
-        bindings.removeAll()
+        discard(reason: .identityConflict)
         return SelectionAssociationReport(status: .conflict, groups: [], bindings: [:],
-                                          scopeQuarantined: true, quarantinedGroups: quarantinedGroups)
+                                          scopeQuarantined: true, quarantinedGroups: quarantinedGroups, resets: pendingResets)
     }
 }
 
