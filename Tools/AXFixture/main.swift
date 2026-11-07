@@ -7,11 +7,14 @@ import AppKit
     private var logURL: URL?
     private var tabWindows: [NSWindow] = []
     private var contentTabs: NSTabView?
+    private var popup: NSWindow?
+    private var sheet: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if CommandLine.arguments.count >= 2 { logURL = URL(fileURLWithPath: CommandLine.arguments[1]) }
         log("launched")
         NSApp.setActivationPolicy(.regular)
+        if CommandLine.arguments.contains("--popups") { runPopups(); return }
         if CommandLine.arguments.contains("--unvisited-tabs") { runUnvisitedTabs(); return }
         if CommandLine.arguments.contains("--multi-tabs") { runMultipleTabGroups(); return }
         if CommandLine.arguments.contains("--tabs") { runTabs(); return }
@@ -31,6 +34,39 @@ import AppKit
         after(6) { self.window?.deminiaturize(nil) }
         after(8) { self.window?.close(); self.window = nil }
         after(9) { self.log("terminating"); NSApp.terminate(nil) }
+    }
+
+    private func runPopups() {
+        after(1) { self.window = self.makeTabWindow(0) }
+        after(3) {
+            let panel = NSPanel(contentRect: NSRect(x: 180, y: 160, width: 240, height: 160),
+                                styleMask: [.titled, .closable, .utilityWindow, .nonactivatingPanel],
+                                backing: .buffered, defer: false)
+            panel.isReleasedWhenClosed = false
+            panel.level = .floating
+            self.popup = panel
+            self.window?.addChildWindow(panel, ordered: .above)
+            panel.orderFrontRegardless()
+        }
+        after(5) {
+            if let popup = self.popup { self.window?.removeChildWindow(popup); popup.close() }
+            self.popup = nil
+            self.window?.setFrameOrigin(NSPoint(x: 160, y: 140))
+        }
+        after(7) {
+            let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 280, height: 160),
+                                 styleMask: [.titled], backing: .buffered, defer: false)
+            sheet.isReleasedWhenClosed = false
+            self.sheet = sheet
+            self.window?.beginSheet(sheet)
+        }
+        after(9) {
+            if let sheet = self.sheet { self.window?.endSheet(sheet); sheet.close() }
+            self.sheet = nil
+            self.window?.setFrameOrigin(NSPoint(x: 200, y: 160))
+        }
+        after(11) { self.window?.close(); self.window = nil }
+        after(13) { self.log("terminating"); NSApp.terminate(nil) }
     }
 
     private func runTabs() {
@@ -149,6 +185,15 @@ import AppKit
         if let tabs = contentTabs, let selected = tabs.selectedTabViewItem {
             row["contentTab"] = tabs.indexOfTabViewItem(selected)
             row["contentWindow"] = tabWindows[4].windowNumber
+        }
+        if CommandLine.arguments.contains("--popups") {
+            row["documentID"] = window?.windowNumber ?? 0
+            row["documentVisible"] = window?.isVisible ?? false
+            row["panelID"] = popup?.windowNumber ?? 0
+            row["panelVisible"] = popup?.isVisible ?? false
+            row["sheetID"] = sheet?.windowNumber ?? 0
+            row["sheetVisible"] = sheet?.isVisible ?? false
+            row["attachedSheetID"] = window?.attachedSheet?.windowNumber ?? 0
         }
         guard let data = try? JSONSerialization.data(withJSONObject: row) else { return }
         if !FileManager.default.fileExists(atPath: logURL.path) {

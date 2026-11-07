@@ -178,6 +178,15 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Debug build and all 59 tests (26 core, 33 platform) pass. The original live launch/move/resize/minimize/restore/close recorder check also passes. Editor diagnostics and patch formatting are clean.
 - This validates controlled native-source teardown/restart and preserves diagnostic-only operation. Daily-app recovery, inactive-member rediscovery, metadata/classification gaps and other platform release gates remain open.
 
+## Increment 21: scoped popup policy evidence and unknown presentation state
+
+- Added bounded `window-evidence identifier` and `record --window-evidence` for one explicit app. Reports preserve enumeration/observer provenance, direct window/sheet children, roles, policy facts, query errors and per-app focus identities. No text or geometry values are read. Traversal has explicit depth/node/child/time limits and truncation.
+- Fullscreen/minimized metadata is now optional in window facts. Otherwise eligible windows remain pending when those reads are unavailable; snapshot schema 2 uses null instead of silently substituting false. Added missing-state classification/serialization and option-scope regressions; recording options are Sendable for timer capture.
+- Added a disposable six-stage document/nonactivating-panel/sheet fixture and `check-popups.rb`. All 12 live checks pass: transient exclusion, preserved document eligibility/observation, continued move events after dismissal, distinct sheet focus vs document owner, per-app focus return after sheet dismissal, close cleanup, native teardown and no content values.
+- The panel exposes AXSystemFloatingWindow; the sheet exposes AXSheet without a subrole. Its focused UI owner points to the document while the focused-window ID identifies the sheet. The app stays inactive, and document-focus return after the nonactivating panel is unproven. This does not close OS active-focus, cross-display, Control Center, context-menu, file-panel or original-popup recovery gates.
+- Debug build and all 62 tests (28 core, 34 platform) pass; editor diagnostics, Ruby syntax and patch formatting are clean. The live popup check passes twice. Existing toolchain linker-path warnings remain nonfatal.
+- Production remains diagnostic-only, with no reducer wiring or window-management effects.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

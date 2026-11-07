@@ -49,8 +49,8 @@ public enum Diagnostics {
                         isRoot: parent.map { CFEqual($0, element) },
                         movable: moveResult == .success ? move.boolValue : nil,
                         resizable: resizeResult == .success ? resize.boolValue : nil,
-                        fullscreen: attribute(ref, "AXFullScreen") as? Bool ?? false,
-                        minimized: attribute(ref, kAXMinimizedAttribute) as? Bool ?? false, level: levels[id])
+                        fullscreen: attribute(ref, "AXFullScreen") as? Bool,
+                        minimized: attribute(ref, kAXMinimizedAttribute) as? Bool, level: levels[id])
                     let classification = WindowPolicy.classify(facts)
                     var row: [String: Any] = ["id": id, "pid": app.processIdentifier, "bundleID": facts.bundleID,
                         "role": facts.role ?? "unknown", "subrole": facts.subrole ?? "unknown",
@@ -58,7 +58,8 @@ public enum Diagnostics {
                         "appFocusedWindow": focused.map { CFEqual($0, ref) } ?? false,
                         "applicationActive": app.isActive,
                         "spaces": paperi_copy_window_spaces(id).map { $0 as NSArray } ?? [],
-                        "fullscreen": facts.fullscreen, "minimized": facts.minimized]
+                        "fullscreen": facts.fullscreen.map { $0 as Any } ?? NSNull(),
+                        "minimized": facts.minimized.map { $0 as Any } ?? NSNull()]
                     if let frame = frame(ref) { row["axFrame"] = ["x": frame.x, "y": frame.y, "width": frame.width, "height": frame.height] }
                     if let tabs = attribute(ref, "AXTabs") as? [Any] { row["axTabCount"] = tabs.count }
                     if includeTitles { row["title"] = attribute(ref, kAXTitleAttribute) as? String ?? "" }
@@ -71,7 +72,7 @@ public enum Diagnostics {
         #else
         let architecture = "x86_64"
         #endif
-        return ["schemaVersion": 1, "timestamp": ISO8601DateFormatter().string(from: Date()),
+        return ["schemaVersion": 2, "timestamp": ISO8601DateFormatter().string(from: Date()),
                 "os": ProcessInfo.processInfo.operatingSystemVersionString, "architecture": architecture,
                 "accessibilityTrusted": trusted, "separateSpaces": NSScreen.screensHaveSeparateSpaces,
                 "spacesAvailable": spaces != nil, "spaces": spaces ?? [], "displays": displays, "windows": windows,
@@ -180,6 +181,11 @@ public enum Diagnostics {
             observedWindows: observers.mapValues { $0.windows.map(\.element) },
             identities: observers.mapValues(\.evidenceIdentities),
             associations: observers.mapValues(\.selectionAssociations))
+    }
+
+    public func windowEvidence(bundleID: String) -> [String: Any] {
+        Diagnostics.windowEvidence(bundleID: bundleID,
+            observedWindows: observers.mapValues { $0.windows.map(\.element) })
     }
 
     private func attach(_ pid: pid_t) {

@@ -40,6 +40,10 @@ Repeat `--bundle-id` to record several specific apps; omitting it records all di
 
 `record --restart-after seconds` performs one diagnostic stop/start strictly within the recording interval. It emits another `recorderReady`, then `recorderRestarted` with actual native-source removal counts; `recordingEnded` also includes teardown evidence. `ruby scripts/check-native-tabs.rb --restart [new-output.json]` checks a learned native group before and after replacement (about 42 seconds). The replacement gets a fresh identity scope and only currently observed bindings. Inactive physical roots may be absent until rediscovered; restart never carries them forward as confirmed membership.
 
+`paperi window-evidence identifier` and `record --bundle-id identifier --window-evidence` collect bounded window-policy facts and per-app focus metadata without titles, text or geometry values. Enumeration and retained observer references stay separate; direct window/sheet children are inspected too. Unknown fullscreen/minimized metadata remains pending for otherwise eligible documents; snapshot schema 2 represents unknown presentation flags as `null`.
+
+`ruby scripts/check-popups.rb [new-output.json]` runs a disposable background document, nonactivating panel and attached sheet (about 17 seconds). It checks transient exclusion, continued document notifications after dismissal, and the sheet's focus identity versus its document owner. Per-app focus return after a sheet is narrower than active-app or cross-display recovery. Control Center, context menus, modal file panels and the original blocking popup still require real interaction traces.
+
 An opt-in live integration check creates a disposable AppKit app, records only its bundle ID, and checks launch, create, move, resize, minimize, restore, close, and termination delivery, including stable create/destroy window IDs:
 
 ```sh

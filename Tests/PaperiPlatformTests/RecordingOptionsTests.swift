@@ -43,4 +43,14 @@ struct RecordingOptionsTests {
             #expect(throws: RecordingOptions.InvalidArguments.self) { try RecordingOptions(arguments: arguments) }
         }
     }
+
+    @Test func windowEvidenceRequiresOneExplicitApplication() throws {
+        #expect(try !RecordingOptions(arguments: []).includeWindowEvidence)
+        let combined = try RecordingOptions(arguments: ["--window-evidence", "--tab-evidence", "--bundle-id", "test.one"])
+        #expect(combined.includeWindowEvidence && combined.includeTabEvidence)
+        for arguments in [["--window-evidence"], ["--window-evidence", "--window-evidence", "--bundle-id", "test.one"],
+                          ["--window-evidence", "--bundle-id", "test.one", "--bundle-id", "test.two"]] {
+            #expect(throws: RecordingOptions.InvalidArguments.self) { try RecordingOptions(arguments: arguments) }
+        }
+    }
 }

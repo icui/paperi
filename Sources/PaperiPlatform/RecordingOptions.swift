@@ -1,9 +1,10 @@
 import Foundation
 
-public struct RecordingOptions {
+public struct RecordingOptions: Sendable {
     public let seconds: Double
     public let bundleIDs: Set<String>?
     public let includeTabEvidence: Bool
+    public let includeWindowEvidence: Bool
     public let restartAfter: Double?
 
     public enum InvalidArguments: Error { case usage }
@@ -12,6 +13,7 @@ public struct RecordingOptions {
         var seconds: Double?
         var bundleIDs: Set<String> = []
         var includeTabEvidence = false
+        var includeWindowEvidence = false
         var restartAfter: Double?
         var index = 0
         while index < arguments.count {
@@ -23,6 +25,9 @@ public struct RecordingOptions {
                     throw InvalidArguments.usage
                 }
                 restartAfter = value
+            } else if argument == "--window-evidence" {
+                guard !includeWindowEvidence else { throw InvalidArguments.usage }
+                includeWindowEvidence = true
             } else if argument == "--tab-evidence" {
                 guard !includeTabEvidence else { throw InvalidArguments.usage }
                 includeTabEvidence = true
@@ -42,9 +47,10 @@ public struct RecordingOptions {
         let duration = seconds ?? 30
         self.seconds = duration
         guard restartAfter.map({ $0 < duration }) ?? true else { throw InvalidArguments.usage }
-        guard !includeTabEvidence || bundleIDs.count == 1 else { throw InvalidArguments.usage }
+        guard !(includeTabEvidence || includeWindowEvidence) || bundleIDs.count == 1 else { throw InvalidArguments.usage }
         self.bundleIDs = bundleIDs.isEmpty ? nil : bundleIDs
         self.includeTabEvidence = includeTabEvidence
+        self.includeWindowEvidence = includeWindowEvidence
         self.restartAfter = restartAfter
     }
 }

@@ -34,9 +34,12 @@ case "snapshot":
 case "tab-evidence":
     guard args.count == 2, !args[1].isEmpty else { print("Usage: paperi tab-evidence bundle.identifier"); exit(2) }
     Diagnostics.printJSON(Diagnostics.tabEvidence(bundleID: args[1]))
+case "window-evidence":
+    guard args.count == 2, !args[1].isEmpty else { print("Usage: paperi window-evidence bundle.identifier"); exit(2) }
+    Diagnostics.printJSON(Diagnostics.windowEvidence(bundleID: args[1]))
 case "record":
     guard let options = try? RecordingOptions(arguments: Array(args.dropFirst())) else {
-        print("Usage: paperi record [seconds: >0 and <=300] [--bundle-id identifier ...] [--tab-evidence (one bundle required)] [--restart-after seconds]")
+        print("Usage: paperi record [seconds: >0 and <=300] [--bundle-id identifier ...] [--tab-evidence] [--window-evidence] [--restart-after seconds] (evidence requires one bundle)")
         exit(2)
     }
     guard AXIsProcessTrusted() else { print("Accessibility access is required. Run the app and select Request Accessibility Access."); exit(1) }
@@ -54,15 +57,25 @@ case "record":
         }
     }
     var evidenceTimer: Timer?
-    if options.includeTabEvidence, let bundleID = options.bundleIDs?.first {
+    if options.includeTabEvidence || options.includeWindowEvidence, let bundleID = options.bundleIDs?.first {
         evidenceTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             MainActor.assumeIsolated {
-                let started = ProcessInfo.processInfo.systemUptime
-                var evidence = recorder.tabEvidence(bundleID: bundleID)
-                evidence["event"] = "tabEvidence"
-                evidence["captureStartedUptime"] = started
-                evidence["uptime"] = ProcessInfo.processInfo.systemUptime
-                Diagnostics.printJSON(evidence, pretty: false)
+                if options.includeTabEvidence {
+                    let started = ProcessInfo.processInfo.systemUptime
+                    var evidence = recorder.tabEvidence(bundleID: bundleID)
+                    evidence["event"] = "tabEvidence"
+                    evidence["captureStartedUptime"] = started
+                    evidence["uptime"] = ProcessInfo.processInfo.systemUptime
+                    Diagnostics.printJSON(evidence, pretty: false)
+                }
+                if options.includeWindowEvidence {
+                    let started = ProcessInfo.processInfo.systemUptime
+                    var evidence = recorder.windowEvidence(bundleID: bundleID)
+                    evidence["event"] = "windowEvidence"
+                    evidence["captureStartedUptime"] = started
+                    evidence["uptime"] = ProcessInfo.processInfo.systemUptime
+                    Diagnostics.printJSON(evidence, pretty: false)
+                }
             }
         }
     }
@@ -92,7 +105,8 @@ default:
     Paperi feasibility build (window management is inactive)
       paperi snapshot [--include-titles]  Read-only JSON snapshot
       paperi tab-evidence identifier     Bounded read-only AX tab structure for one app
-      paperi record [seconds] [--bundle-id identifier ...] [--tab-evidence] [--restart-after seconds]
+      paperi window-evidence identifier  Bounded read-only window policy/focus metadata for one app
+      paperi record [seconds] [--bundle-id identifier ...] [--tab-evidence] [--window-evidence] [--restart-after seconds]
                                         Read-only AX event JSONL (default 30, max 300)
       paperi benchmark-core              Measure cached layout calculation only
       paperi --menu                      Run diagnostic menu bar shell
