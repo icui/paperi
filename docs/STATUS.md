@@ -31,6 +31,16 @@ The current binary never writes window geometry, changes focus, moves Spaces or 
 
 These are in-memory commands only; they do not enable window management or resolve the native feasibility gates.
 
+## Increment 3: pure tiled lifecycle reducer
+
+- Added a transactional reducer scoped by its caller to one display/Space layout. Eligible insertion is idempotent; explicit slot removal cleans empty columns and chooses a surviving focus row deterministically.
+- Kept OS focus separate from last managed focus. Excluded, pending, and unresolved tiled focus suppress returned layout intent while retaining lifecycle updates. Returning to an eligible document clears suppression without replaying deferred work.
+- Added affirmative native-tab membership replacement with global member validation, preserving slot geometry and rejecting conflicting membership atomically. Missing AX enumeration entries are not removal events.
+- Added four regression tests for insertion/rollback, overlay isolation/recovery, confirmed tabs, and removal fallback.
+- Validation: editor diagnostics report no errors in the new source/tests. `./scripts/swift.sh test` cannot start because this session has no active developer directory; these tests remain unexecuted.
+
+This is the first tiled lifecycle subset of Step 3, not the full event reducer. It is not wired to native observers or an effect scheduler. Floating lifecycle, metadata retries, hide/minimize/fullscreen restoration, cross-display ownership, recorded fixture parity, and actual tab discovery remain open. Native feasibility gates and diagnostic-only operation are unchanged.
+
 ## Validation on the initial host
 
 - Swift 6.4 / Command Line Tools; macOS 26.7.2, arm64. The SDK is macOS 27; deployment target is macOS 14. Older OS support has not been exercised.
