@@ -45,7 +45,9 @@ struct SelectionAssociationsTests {
         let tracker = SelectionAssociations()
         _ = tracker.observe(scope: "one", groups: [selection()])
         #expect(tracker.observe(scope: "one", groups: [selection(window: 999)]).status == .conflict)
-        _ = tracker.observe(scope: "one", groups: nil)
+        let missing = tracker.observe(scope: "one", groups: nil)
+        #expect(missing.status == .unavailable)
+        #expect(missing.quarantined)
         tracker.invalidate()
         #expect(tracker.observe(scope: "one", groups: [selection(12, window: 102, controls: [12])]).status == .conflict)
         #expect(tracker.observe(scope: "two", groups: [selection()]).bindings == [1: [11: 101]])
@@ -112,5 +114,16 @@ struct SelectionAssociationsTests {
         native[2]["AXValue"] = kCFBooleanTrue as CFBoolean
         native[3]["AXValue"] = kCFBooleanFalse as CFBoolean
         #expect(TabSelectionEvidence.parse(nodes: native, roots: [0], complete: true) == [selection()])
+    }
+
+    @Test func radioSelectionNumbersAreExplicitlyBoundedAndRoleScoped() {
+        #expect(TabSelectionValue.read(NSNumber(value: 1), role: "AXRadioButton", attribute: "AXValue")?.value == true)
+        #expect(TabSelectionValue.read(NSNumber(value: 0), role: "AXRadioButton", attribute: "AXValue")?.value == false)
+        #expect(TabSelectionValue.read(NSNumber(value: 1), role: "AXRadioButton", attribute: "AXValue")?.encoding == "number01")
+        #expect(TabSelectionValue.read(NSNumber(value: 2), role: "AXRadioButton", attribute: "AXValue") == nil)
+        #expect(TabSelectionValue.read(NSNumber(value: 1), role: "AXStaticText", attribute: "AXValue") == nil)
+        #expect(TabSelectionValue.read(NSNumber(value: 1), role: "AXRadioButton", attribute: "AXSelected") == nil)
+        #expect(TabSelectionValue.read("not captured" as CFString, role: "AXRadioButton", attribute: "AXValue") == nil)
+        #expect(TabSelectionValue.read(kCFBooleanTrue, role: nil, attribute: "AXSelected")?.encoding == "boolean")
     }
 }

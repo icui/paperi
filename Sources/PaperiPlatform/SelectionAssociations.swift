@@ -12,9 +12,10 @@ struct SelectionAssociationReport {
     let status: Status
     let groups: [TabSelection]
     let bindings: [Int: [Int: UInt32]]
+    let quarantined: Bool
 
     var json: [String: Any] {
-        ["status": status.rawValue, "groups": groups.map { group in
+        ["status": status.rawValue, "quarantined": quarantined, "groups": groups.map { group in
             let known = bindings[group.group] ?? [:]
             return ["group": group.group, "controls": group.controls,
                     "bindings": known.keys.sorted().map { ["control": $0, "windowID": known[$0]!] as [String: Any] },
@@ -66,18 +67,18 @@ final class SelectionAssociations {
         }
         let windows = bindings.values.flatMap { $0.values }
         guard Set(windows).count == windows.count else { return conflict() }
-        return SelectionAssociationReport(status: .observed, groups: groups, bindings: bindings)
+        return SelectionAssociationReport(status: .observed, groups: groups, bindings: bindings, quarantined: false)
     }
 
     private func unavailable() -> SelectionAssociationReport {
         bindings.removeAll()
-        return SelectionAssociationReport(status: .unavailable, groups: [], bindings: [:])
+        return SelectionAssociationReport(status: .unavailable, groups: [], bindings: [:], quarantined: quarantined)
     }
 
     private func conflict() -> SelectionAssociationReport {
         quarantined = true
         bindings.removeAll()
-        return SelectionAssociationReport(status: .conflict, groups: [], bindings: [:])
+        return SelectionAssociationReport(status: .conflict, groups: [], bindings: [:], quarantined: true)
     }
 }
 

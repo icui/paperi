@@ -8,15 +8,17 @@ require 'tmpdir'
 
 root = File.expand_path('..', __dir__)
 arguments = ARGV.dup
-multi = arguments.delete('--multi') != nil
-abort 'Usage: check-native-tabs.rb [--multi] [new-output.json]' if arguments.length > 1
+content = arguments.delete('--content') != nil
+multi = arguments.delete('--multi') != nil || content
+abort 'Usage: check-native-tabs.rb [--multi|--content] [new-output.json]' if arguments.length > 1
 wrapper = File.join(root, 'scripts', 'swift.sh')
 abort 'Build failed' unless system(wrapper, 'build')
 bin, status = Open3.capture2(wrapper, 'build', '--show-bin-path')
 abort 'Cannot resolve build directory' unless status.success?
 bin = bin.strip
-bundle_id = multi ? 'dev.paperi.MultiTabFixture' : 'dev.paperi.NativeTabFixture'
-output = arguments.first || File.join(root, 'captures', multi ? 'native-tab-multi-fixture.json' : 'native-tab-fixture.json')
+bundle_id = content ? 'dev.paperi.ContentTabFixture' : (multi ? 'dev.paperi.MultiTabFixture' : 'dev.paperi.NativeTabFixture')
+filename = content ? 'content-tab-fixture.json' : (multi ? 'native-tab-multi-fixture.json' : 'native-tab-fixture.json')
+output = arguments.first || File.join(root, 'captures', filename)
 abort "Output already exists: #{output}" if File.exist?(output)
 stages = []
 records = []
@@ -66,7 +68,9 @@ Dir.mktmpdir('paperi-tabs-', File.join(root, '.build')) do |temporary|
         row = next_record.call
         break if row['event'] == 'recorderReady'
       end
-      launcher = Process.spawn('/usr/bin/open', '-g', '-n', '-W', app, '--args', log, multi ? '--multi-tabs' : '--tabs')
+      fixture_args = [log, multi ? '--multi-tabs' : '--tabs']
+      fixture_args << '--content-tabs' if content
+      launcher = Process.spawn('/usr/bin/open', '-g', '-n', '-W', app, '--args', *fixture_args)
       loop do
         rows = File.exist?(log) ? File.readlines(log).map { |line| JSON.parse(line) } : []
         rows.drop(consumed).each do |row|
@@ -168,6 +172,10 @@ checks[:tabGroupOwnershipAndSelection] = stages.all? do |stage|
   app_row = stage[:evidence]['applications'].first
   nodes = app_row['nodes']
   groups = nodes.select { |node| node['AXRole'] == 'AXTabGroup' }
+  if content
+    content_owner = stage[:fixture]['contentWindow']
+    groups = groups.reject { |group| group['windowID'] == content_owner }
+  end
   visible = stage[:fixture]['tabWindows'].select { |window| window['visible'] }
   containers = visible.group_by { |window| window['members'].empty? ? [window['id']] : window['members'].sort }
   tabbed = containers.select { |members, _| members.length > 1 }
@@ -188,10 +196,15 @@ checks[:confirmedDestruction] = records.count { |row| row['event'] == 'AXUIEleme
 checks[:candidateAssociationsSound] = stages.all? do |stage|
   app_row = stage[:evidence]['applications'].first
   candidates = app_row['selectionAssociations']
-  next false unless candidates && ['observed', 'unavailable'].include?(candidates['status'])
+  permitted = content ? ['observed', 'unavailable', 'conflict'] : ['observed', 'unavailable']
+  next false unless candidates && permitted.include?(candidates['status'])
   candidates['groups'].all? do |candidate|
     node = app_row['nodes'].find { |entry| entry['axIdentity'] == candidate['group'] }
     owner = node && node['windowID']
+    if content && owner == stage[:fixture]['contentWindow']
+      next !candidate['complete'] && candidate['bindings'].length <= 1 &&
+        candidate['bindings'].all? { |binding| binding['windowID'] == owner }
+    end
     native = stage[:fixture]['tabWindows'].find { |window| window['visible'] && window['selected'] == owner && window['members'].length > 1 }
     next false unless native
     bindings = candidate['bindings']
@@ -205,19 +218,51 @@ checks[:candidateAssociationsSound] = stages.all? do |stage|
 end
 learned_stage = stages.find { |stage| stage[:fixture]['event'] == 'action-7.0' }
 learned = learned_stage[:evidence]['applications'].first['selectionAssociations']
-checks[:visitedGroupsLearned] = learned && learned['status'] == 'observed' &&
-  learned['groups'].length == (multi ? 2 : 1) && learned['groups'].all? { |group| group['complete'] }
+unless content
+  checks[:visitedGroupsLearned] = learned && learned['status'] == 'observed' &&
+    learned['groups'].length == (multi ? 2 : 1) && learned['groups'].all? { |group| group['complete'] }
+end
 regrouped_stage = stages.find { |stage| stage[:fixture]['event'] == 'action-11.0' }
 regrouped = regrouped_stage[:evidence]['applications'].first['selectionAssociations']
-checks[:regroupingDropsBindings] = regrouped && ['observed', 'unavailable'].include?(regrouped['status']) &&
+checks[:regroupingDropsBindings] = regrouped && (content ? ['observed', 'unavailable', 'conflict'] : ['observed', 'unavailable']).include?(regrouped['status']) &&
   regrouped['groups'].all? { |group| !group['complete'] && group['bindings'].length <= 1 }
 closed_stage = stages.find { |stage| stage[:fixture]['event'] == 'action-15.0' }
 closed_candidates = closed_stage[:evidence]['applications'].first['selectionAssociations']
 checks[:closedCandidatesCleared] = closed_candidates && closed_candidates['groups'].empty?
+if content
+  checks[:contentSelectionConfirmed] = [1, 3, 5, 7].map do |n|
+    stages.find { |stage| stage[:fixture]['event'] == "action-#{n}.0" }[:fixture]['contentTab']
+  end == [0, 1, 0, 1]
+  checks[:contentAXStructureObserved] = stages.select { |stage| [1, 3, 5, 7].any? { |n| stage[:fixture]['event'] == "action-#{n}.0" } }.all? do |stage|
+    stage[:evidence]['applications'].first['nodes'].any? do |node|
+      node['AXRole'] == 'AXTabGroup' && node['windowID'] == stage[:fixture]['contentWindow'] && node.dig('AXTabs', 'count') == 2
+    end
+  end
+  checks[:contentNeverComplete] = stages.all? do |stage|
+    app_row = stage[:evidence]['applications'].first
+    app_row['selectionAssociations']['groups'].none? do |candidate|
+      node = app_row['nodes'].find { |entry| entry['axIdentity'] == candidate['group'] }
+      candidate['complete'] && node && node['windowID'] == stage[:fixture]['contentWindow']
+    end
+  end
+  checks[:contentRadioSelectionCaptured] = [5, 7].all? do |n|
+    stage = stages.find { |entry| entry[:fixture]['event'] == "action-#{n}.0" }
+    nodes = stage[:evidence]['applications'].first['nodes']
+    group = nodes.find { |node| node['AXRole'] == 'AXTabGroup' && node['windowID'] == stage[:fixture]['contentWindow'] }
+    controls = group ? (group.dig('AXTabs', 'nodes') || []).map { |index| nodes[index] } : []
+    controls.length == 2 && controls.all? { |node| [true, false].include?(node['AXValue']) } &&
+      controls.index { |node| node['AXValue'] == true } == stage[:fixture]['contentTab'] &&
+      controls.any? { |node| node['AXValueEncoding'] == 'number01' }
+  end
+  checks[:contentConflictQuarantined] = stages.select do |stage|
+    [7, 9, 11, 13].any? { |n| stage[:fixture]['event'] == "action-#{n}.0" }
+  end.all? { |stage| stage[:evidence]['applications'].first.dig('selectionAssociations', 'quarantined') == true }
+end
 structural_checks = checks.reject { |name, _| name == :enumeratedRepresentatives }
 observation = if structural_checks.values.all?
-  checks[:enumeratedRepresentatives] ? 'fixture tab structure verified; member mapping unresolved' :
-    'observer tab structure verified; enumeration inconclusive; member mapping unresolved'
+  content ? 'content-tab negative control verified; app classification unresolved' :
+    (checks[:enumeratedRepresentatives] ? 'fixture tab structure verified; member mapping unresolved' :
+    'observer tab structure verified; enumeration inconclusive; member mapping unresolved')
 else
   'inconclusive AX coverage'
 end
@@ -255,7 +300,8 @@ identity_comparisons = (multi ? [[0, 1], [2, 3]] : [[0, 1]]).map do |indices|
     sameOrderedControlTokens: ready ? samples.map { |sample| sample[:controls] }.uniq.length == 1 : nil,
     returnRestoresTokens: ready ? samples.first[:controls] == samples.last[:controls] : nil }
 end
-File.write(output, JSON.pretty_generate(schemaVersion: 5, fixtureMode: multi ? 'multiple containers' : 'single container', observation: observation, checks: checks, identityComparisons: identity_comparisons, stages: stages, events: event_counts,
+mode = content ? 'native groups with content tabs' : (multi ? 'multiple containers' : 'single container')
+File.write(output, JSON.pretty_generate(schemaVersion: 6, fixtureMode: mode, observation: observation, checks: checks, identityComparisons: identity_comparisons, stages: stages, events: event_counts,
   scope: 'Controlled fixture evidence only. Native-tab grouping is not inferred from equal frames or titles.'))
 summary = stages.map do |stage|
   apps = stage[:evidence]['applications']

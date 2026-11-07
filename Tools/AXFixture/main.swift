@@ -6,6 +6,7 @@ import AppKit
     private var window: NSWindow?
     private var logURL: URL?
     private var tabWindows: [NSWindow] = []
+    private var contentTabs: NSTabView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if CommandLine.arguments.count >= 2 { logURL = URL(fileURLWithPath: CommandLine.arguments[1]) }
@@ -61,18 +62,35 @@ import AppKit
     }
 
     private func runMultipleTabGroups() {
-        after(1) { self.tabWindows = (0..<5).map { self.makeTabWindow($0) } }
+        after(1) {
+            self.tabWindows = (0..<5).map { self.makeTabWindow($0) }
+            if CommandLine.arguments.contains("--content-tabs") {
+                let tabs = NSTabView(frame: self.tabWindows[4].contentView!.bounds)
+                tabs.autoresizingMask = [.width, .height]
+                for index in 0..<2 {
+                    let item = NSTabViewItem(identifier: index)
+                    item.label = "Content tab"
+                    item.view = NSView()
+                    tabs.addTabViewItem(item)
+                }
+                self.tabWindows[4].contentView = tabs
+                self.contentTabs = tabs
+            }
+        }
         after(3) {
             self.tabWindows[0].addTabbedWindow(self.tabWindows[1], ordered: .above)
             self.tabWindows[2].addTabbedWindow(self.tabWindows[3], ordered: .above)
+            self.contentTabs?.selectTabViewItem(at: 1)
         }
         after(5) {
             self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1]
             self.tabWindows[2].tabGroup?.selectedWindow = self.tabWindows[3]
+            self.contentTabs?.selectTabViewItem(at: 0)
         }
         after(7) {
             self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0]
             self.tabWindows[2].tabGroup?.selectedWindow = self.tabWindows[2]
+            self.contentTabs?.selectTabViewItem(at: 1)
         }
         after(9) {
             self.tabWindows[0].tabGroup?.removeWindow(self.tabWindows[1])
@@ -101,6 +119,10 @@ import AppKit
             ["id": window.windowNumber, "visible": window.isVisible,
              "members": window.tabbedWindows?.map(\.windowNumber) ?? [],
              "selected": window.tabGroup?.selectedWindow?.windowNumber ?? 0] as [String: Any]
+        }
+        if let tabs = contentTabs, let selected = tabs.selectedTabViewItem {
+            row["contentTab"] = tabs.indexOfTabViewItem(selected)
+            row["contentWindow"] = tabWindows[4].windowNumber
         }
         guard let data = try? JSONSerialization.data(withJSONObject: row) else { return }
         if !FileManager.default.fileExists(atPath: logURL.path) {

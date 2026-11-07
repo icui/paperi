@@ -2,6 +2,19 @@ import AppKit
 import ApplicationServices
 import PaperiBridge
 
+enum TabSelectionValue {
+    static func read(_ value: CFTypeRef, role: String?, attribute: String) -> (value: Bool, encoding: String)? {
+        if CFGetTypeID(value) == CFBooleanGetTypeID() {
+            return (CFBooleanGetValue((value as! CFBoolean)), "boolean")
+        }
+        if attribute == "AXValue", role == "AXRadioButton", CFGetTypeID(value) == CFNumberGetTypeID(),
+           let number = value as? NSNumber, number.doubleValue == 0 || number.doubleValue == 1 {
+            return (number.doubleValue == 1, "number01")
+        }
+        return nil
+    }
+}
+
 extension Diagnostics {
     /// Bounded structural evidence only: no labels, titles, descriptions or
     /// string values. Local node IDs are meaningful within this capture only.
@@ -49,8 +62,11 @@ extension Diagnostics {
                 }
                 for name in ["AXSelected", "AXValue"] {
                     guard withinBudget() else { break }
-                    if let value = attribute(element, name), CFGetTypeID(value) == CFBooleanGetTypeID() {
-                        row[name] = value as! CFBoolean
+                    if name == "AXValue", row[kAXRoleAttribute] as? String != "AXRadioButton" { continue }
+                    if let value = attribute(element, name),
+                       let selection = TabSelectionValue.read(value, role: row[kAXRoleAttribute] as? String, attribute: name) {
+                        row[name] = selection.value
+                        row[name + "Encoding"] = selection.encoding
                     }
                 }
                 var attributes: CFArray?
