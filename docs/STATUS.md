@@ -3,9 +3,9 @@
 ## Current checkpoint: 2026-11-07
 
 - Diagnostic-only: no window effects, management hotkeys or native observer-to-reducer integration.
-- All 67 regressions pass in debug and release (28 core, 39 platform).
+- All 70 regressions pass in debug and release (28 core, 42 platform).
 - Two rounds of eight live fixtures: 14 pass, two restart cases remain inconclusive because empty AX enumeration prevents rediscovery. Source teardown passes; missing references are never interpreted as closed windows.
-- Latest work adds scoped popup evidence, safe unknown presentation state, isolated missing tab-selection metadata, repeated diagnostic checks and rejection of stale callbacks after restart.
+- Latest work adds scoped popup evidence, safe unknown presentation state, isolated missing tab-selection metadata, repeated diagnostic checks, stale-callback rejection and validated fresh focus/main discovery channels.
 - Next priorities: startup/restart window rediscovery, daily-app native-tab classification, actual OS/cross-display popup recovery and display/Space feasibility. Historical increments below retain their original observations and limits.
 
 ## Increment 1: repository, diagnostic shell, and initial core
@@ -218,6 +218,14 @@ This recorder is not the live management registry and does not feed the lifecycl
 - All 67 regressions (28 core, 39 platform) pass in both debug and release, including the previously failing old-callback case. The live baseline recorder check still passes. Native restart metrics now distinguish duplicate delivery from complete create/destroy coverage; missing destruction is not labeled as duplication.
 - A final native restart capture after the fix passes every required check, including fresh partial learning, unique/complete window-event delivery and source removal. Its initial physical inventory and enumerated-representative checks still report incomplete coverage. This single successful recovery does not negate the two soak failures or establish a cause for differing rediscovery behavior.
 - This fixes stale-run acceptance, not the separate empty-enumeration rediscovery gap found by the soak. Production remains diagnostic-only and platform release gates remain open.
+
+## Increment 25: fresh focused/main window discovery
+
+- Startup/retry reconciliation now reads AXFocusedWindow and AXMainWindow alongside AXWindows. Each fresh reference must match the observer PID and expose AXWindow or AXSheet; CF-equal references deduplicate across sources before subscribing. No prior observer references or learned bindings are carried forward.
+- Added `windowDiscovery` diagnostics with query errors, accepted source provenance and rejected-reference counts. Native fixture schema 11 preserves discovery passes, making channel availability inspectable rather than attributing a successful restart to the fallback without evidence.
+- Three isolated regressions cover empty-enumeration fallback, equality/provenance deduplication, foreign/missing PID, missing/non-window roles, sheet references and wholly absent input. All 70 regressions (28 core, 42 platform) pass in debug and release; editor diagnostics and patch formatting are clean.
+- Two live native restart runs pass all required checks while initial physical inventory remains incomplete. In the second run, all eight discovery passes show AXFocusedWindow/AXMainWindow returning -25212; every accepted reference came from AXWindows. Thus this host did not affirmatively exercise the fallback. The unit checks establish its filtering behavior, not daily-app support or a fix for the prior empty-enumeration failures.
+- Restart/inactive-member rediscovery remains open when all fresh channels are unavailable. The app remains diagnostic-only, with no layout integration or window-management effects.
 
 ## Validation on the initial host
 

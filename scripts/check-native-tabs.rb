@@ -396,7 +396,8 @@ identity_comparisons = (unvisited ? [[0, 1, 2]] : (multi ? [[0, 1], partial ? [2
     sameOrderedControlTokens: ready ? samples.map { |sample| sample[:controls] }.uniq.length == 1 : nil,
     returnRestoresTokens: ready ? samples.first[:controls] == samples.last[:controls] : nil }
 end
-File.write(output, JSON.pretty_generate(schemaVersion: 10, fixtureMode: configuration[2], observation: observation, checks: checks, identityComparisons: identity_comparisons, stages: stages, events: event_counts,
+File.write(output, JSON.pretty_generate(schemaVersion: 11, fixtureMode: configuration[2], observation: observation, checks: checks, identityComparisons: identity_comparisons,
+  discoveryPasses: records.select { |row| row['event'] == 'windowDiscovery' }, stages: stages, events: event_counts,
   scope: 'Controlled fixture evidence only. Native-tab grouping is not inferred from equal frames or titles.'))
 summary = stages.map do |stage|
   apps = stage[:evidence]['applications']

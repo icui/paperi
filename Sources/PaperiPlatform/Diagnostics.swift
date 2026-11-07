@@ -225,9 +225,33 @@ public enum Diagnostics {
                      kAXApplicationHiddenNotification, kAXApplicationShownNotification] {
             subscribe(observer, element: element, name: name, pid: pid)
         }
-        if let windows = Diagnostics.attribute(element, kAXWindowsAttribute) as? [AXUIElement] {
-            for window in windows { attachWindow(window, pid: pid) }
+        var errors: [String: Int32] = [:]
+        func read(_ name: String) -> CFTypeRef? {
+            var value: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+            errors[name] = result.rawValue
+            return result == .success ? value : nil
         }
+        func reference(_ value: CFTypeRef?) -> AXUIElement? {
+            guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+            return (value as! AXUIElement)
+        }
+        let enumerated = read(kAXWindowsAttribute) as? [AXUIElement] ?? []
+        let focused = reference(read(kAXFocusedWindowAttribute))
+        let main = reference(read(kAXMainWindowAttribute))
+        let discovery = RecorderWindowDiscovery.collect(enumerated: enumerated, focused: focused, main: main, pid: pid) { window in
+            AXUIElementSetMessagingTimeout(window, 0.15)
+            var owner: pid_t = 0
+            let result = AXUIElementGetPid(window, &owner)
+            return (result == .success ? owner : nil, Diagnostics.attribute(window, kAXRoleAttribute) as? String)
+        }
+        for window in discovery.windows { attachWindow(window.element, pid: pid) }
+        emit(["event": "windowDiscovery", "pid": pid, "queryErrors": errors,
+              "enumeratedCount": enumerated.count, "rejectedCount": discovery.rejectedCount,
+              "windows": discovery.windows.map { window in
+                  ["windowID": observers[pid]?.windows.first(where: { CFEqual($0.element, window.element) })?.id ?? 0,
+                   "sources": window.sources.sorted()] as [String: Any]
+              }, "uptime": ProcessInfo.processInfo.systemUptime])
     }
 
     /// Three startup passes at approximately 1, 3 and 7 seconds. Absence from
