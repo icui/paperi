@@ -7,6 +7,7 @@ public struct RecordingOptions: Sendable {
     public let includeWindowEvidence: Bool
     public let restartAfter: Double?
     public let reconcileEvery: Double?
+    public let pollOnly: Bool
 
     public enum InvalidArguments: Error { case usage }
 
@@ -17,10 +18,14 @@ public struct RecordingOptions: Sendable {
         var includeWindowEvidence = false
         var restartAfter: Double?
         var reconcileEvery: Double?
+        var pollOnly = false
         var index = 0
         while index < arguments.count {
             let argument = arguments[index]
-            if argument == "--reconcile-every" {
+            if argument == "--poll-only" {
+                guard !pollOnly else { throw InvalidArguments.usage }
+                pollOnly = true
+            } else if argument == "--reconcile-every" {
                 index += 1
                 guard reconcileEvery == nil, index < arguments.count,
                       let value = Double(arguments[index]), value >= 1, value <= 30 else {
@@ -58,10 +63,12 @@ public struct RecordingOptions: Sendable {
         guard restartAfter.map({ $0 < duration }) ?? true else { throw InvalidArguments.usage }
         guard !(includeTabEvidence || includeWindowEvidence) || bundleIDs.count == 1 else { throw InvalidArguments.usage }
         guard reconcileEvery == nil || bundleIDs.count == 1 else { throw InvalidArguments.usage }
+        guard !pollOnly || reconcileEvery != nil else { throw InvalidArguments.usage }
         self.bundleIDs = bundleIDs.isEmpty ? nil : bundleIDs
         self.includeTabEvidence = includeTabEvidence
         self.includeWindowEvidence = includeWindowEvidence
         self.restartAfter = restartAfter
         self.reconcileEvery = reconcileEvery
+        self.pollOnly = pollOnly
     }
 }

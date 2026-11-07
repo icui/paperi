@@ -2,6 +2,16 @@ import Testing
 @testable import PaperiPlatform
 
 struct RecordingOptionsTests {
+    @Test func pollingOnlyRequiresExplicitScopedReconciliation() throws {
+        #expect(try !RecordingOptions(arguments: []).pollOnly)
+        #expect(try RecordingOptions(arguments: ["--poll-only", "--bundle-id", "test.one", "--reconcile-every", "1"]).pollOnly)
+        for arguments in [["--poll-only"], ["--poll-only", "--bundle-id", "test.one"],
+                          ["--poll-only", "--reconcile-every", "1"],
+                          ["--poll-only", "--poll-only", "--bundle-id", "test.one", "--reconcile-every", "1"]] {
+            #expect(throws: RecordingOptions.InvalidArguments.self) { try RecordingOptions(arguments: arguments) }
+        }
+    }
+
     @Test func periodicReconciliationIsExplicitBoundedAndAppScoped() throws {
         #expect(try RecordingOptions(arguments: []).reconcileEvery == nil)
         let options = try RecordingOptions(arguments: ["--bundle-id", "test.one", "--reconcile-every", "1.5"])

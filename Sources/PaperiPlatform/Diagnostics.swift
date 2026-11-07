@@ -124,22 +124,26 @@ public enum Diagnostics {
     private let runningApplications: () -> [NSRunningApplication]
     private let emit: ([String: Any]) -> Void
     private let bundleIDs: Set<String>?
+    private let observeWorkspaceEvents: Bool
 
-    public convenience init(bundleIDs: Set<String>? = nil) {
+    public convenience init(bundleIDs: Set<String>? = nil, observeWorkspaceEvents: Bool = true) {
         self.init(workspaceCenter: NSWorkspace.shared.notificationCenter,
                   runningApplications: { NSWorkspace.shared.runningApplications },
-                  bundleIDs: bundleIDs, emit: { Diagnostics.printJSON($0, pretty: false) })
+                  bundleIDs: bundleIDs, observeWorkspaceEvents: observeWorkspaceEvents,
+                  emit: { Diagnostics.printJSON($0, pretty: false) })
     }
 
     // Isolated workspace inputs allow lifecycle tests without observing other apps.
     init(workspaceCenter: NotificationCenter,
          runningApplications: @escaping () -> [NSRunningApplication],
          bundleIDs: Set<String>? = nil,
+         observeWorkspaceEvents: Bool = true,
          emit: @escaping ([String: Any]) -> Void) {
         self.workspaceCenter = workspaceCenter
         self.runningApplications = runningApplications
         self.emit = emit
         self.bundleIDs = bundleIDs
+        self.observeWorkspaceEvents = observeWorkspaceEvents
     }
     public func start() {
         guard !running else { return }
@@ -147,7 +151,8 @@ public enum Diagnostics {
         let runID = UUID()
         self.runID = runID
         let center = workspaceCenter
-        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+        let names = observeWorkspaceEvents ? [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] : []
+        for name in names {
             workspaceTokens.append(WorkspaceObservation(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
                 guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
                 let pid = app.processIdentifier
@@ -172,6 +177,7 @@ public enum Diagnostics {
             scheduleRetries(app.processIdentifier)
         }
         emit(["event": "recorderReady", "observerCount": observers.count,
+              "workspaceEventsEnabled": observeWorkspaceEvents,
               "windowReferenceCount": observers.values.reduce(0) { $0 + $1.windows.count },
               "uptime": ProcessInfo.processInfo.systemUptime])
     }

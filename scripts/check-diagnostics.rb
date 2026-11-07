@@ -24,6 +24,7 @@ revision, revision_status = Open3.capture2('/usr/bin/git', '-C', root, 'rev-pars
 abort 'Cannot identify repository revision' unless revision_status.success?
 steps = [
   ['recorder', 'check-ax-recorder.rb', []],
+  ['poll-only', 'check-ax-recorder.rb', ['--poll-only']],
   ['native', 'check-native-tabs.rb', []],
   ['multi', 'check-native-tabs.rb', ['--multi']],
   ['partial', 'check-native-tabs.rb', ['--partial']],
@@ -66,7 +67,9 @@ cycles.times do |cycle|
       row[:requiredChecks] = required
       row[:informationalChecks] = checks.select { |key, _| informational.include?(key) }
       row[:observation] = report['observation'] || report['scope']
-      row[:passed] = status.success? && (name == 'recorder' ? report['result'] == 'passed' : !required.empty? && required.values.all? { |value| value == true })
+      lifecycle = %w[recorder poll-only].include?(name)
+      row[:passed] = status.success? && (lifecycle ? report['result'] == 'passed' : !required.empty? && required.values.all? { |value| value == true })
+      row[:passed] &&= report['workspaceEventsEnabled'] == false if name == 'poll-only'
     rescue JSON::ParserError, Errno::ENOENT, KeyError => error
       row[:passed] = false
       row[:error] = error.message

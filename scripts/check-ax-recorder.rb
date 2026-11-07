@@ -8,8 +8,9 @@ require 'tmpdir'
 
 root = File.expand_path('..', __dir__)
 arguments = ARGV.dup
-accessory = arguments.delete('--accessory') != nil
-abort 'Usage: check-ax-recorder.rb [--accessory] [new-output.json]' if arguments.length > 1 || arguments.any? { |argument| argument.start_with?('-') }
+poll_only = arguments.delete('--poll-only') != nil
+accessory = arguments.delete('--accessory') != nil || poll_only
+abort 'Usage: check-ax-recorder.rb [--accessory|--poll-only] [new-output.json]' if arguments.length > 1 || arguments.any? { |argument| argument.start_with?('-') }
 output = arguments.first
 abort "Output already exists: #{output}" if output && File.exist?(output)
 wrapper = File.join(root, 'scripts', 'swift.sh')
@@ -45,6 +46,7 @@ Dir.mktmpdir('paperi-ax-', File.join(root, '.build')) do |temporary|
   discovered = []
   recorded_pids = []
   teardown = nil
+  workspace_enabled = nil
   fixture_pid = nil
   launcher = nil
   recorder_pid = nil
@@ -54,6 +56,7 @@ Dir.mktmpdir('paperi-ax-', File.join(root, '.build')) do |temporary|
     Timeout.timeout(40) do
       recorder_args = [File.join(bin, 'paperi'), 'record', accessory ? '19' : '16', '--bundle-id', bundle_id]
       recorder_args += ['--reconcile-every', '1'] if accessory
+      recorder_args << '--poll-only' if poll_only
       IO.popen(recorder_args, 'r') do |stream|
         recorder_pid = stream.pid
         stream.each_line do |line|
@@ -66,6 +69,7 @@ Dir.mktmpdir('paperi-ax-', File.join(root, '.build')) do |temporary|
           counts[event] += 1
           teardown = row['teardown'] if event == 'recordingEnded'
           if event == 'recorderReady'
+            workspace_enabled = row['workspaceEventsEnabled']
             abort 'Fixture already running or duplicate readiness' unless counts[event] == 1 && row['observerCount'] == 0
             fixture_args = [fixture_log] + (accessory ? ['--accessory'] : [])
             launcher = Process.spawn('/usr/bin/open', '-g', '-n', '-W', app, '--args', *fixture_args,
@@ -105,7 +109,10 @@ Dir.mktmpdir('paperi-ax-', File.join(root, '.build')) do |temporary|
       teardown['sourcesStillInstalled'] == 0 && teardown['workspaceObserverCount'] == 0
     abort 'Periodic reconciliation did not discover the accessory window' if accessory &&
       (counts['recorderReconciled'] == 0 || (discovered & destroyed).empty?)
-    report = { result: 'passed', fixtureMode: accessory ? 'accessory with periodic reconciliation' : 'regular',
+    abort 'Workspace events were not disabled for polling-only check' if poll_only &&
+      (workspace_enabled != false || counts['NSWorkspaceDidLaunchApplicationNotification'] != 0 || counts['NSWorkspaceDidTerminateApplicationNotification'] != 0)
+    report = { result: 'passed', fixtureMode: poll_only ? 'accessory with polling-only discovery' : (accessory ? 'accessory with periodic reconciliation' : 'regular'),
+               workspaceEventsEnabled: workspace_enabled,
                fixtureBundleID: bundle_id, events: counts, teardown: teardown,
                scope: 'Disposable AppKit fixture only; no native-tab, popup, display or Space-transfer gate verified' }
     if output

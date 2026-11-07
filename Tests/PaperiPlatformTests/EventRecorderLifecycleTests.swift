@@ -3,6 +3,22 @@ import Testing
 @testable import PaperiPlatform
 
 @MainActor struct EventRecorderLifecycleTests {
+    @Test func pollingOnlyDoesNotRegisterWorkspaceCallbacksAcrossRestart() {
+        let center = CapturedWorkspaceCenter()
+        var records: [[String: Any]] = []
+        let recorder = EventRecorder(workspaceCenter: center, runningApplications: { [] },
+            observeWorkspaceEvents: false, emit: { records.append($0) })
+        recorder.start()
+        #expect(center.handlers.isEmpty)
+        #expect(records.last?["workspaceEventsEnabled"] as? Bool == false)
+        recorder.reconcileNow()
+        #expect(records.last?["event"] as? String == "recorderReconciled")
+        recorder.stop()
+        recorder.start()
+        #expect(center.handlers.isEmpty)
+        recorder.stop()
+    }
+
     @Test func explicitReconciliationUsesFreshEnumerationAndStopsWithRecorder() {
         var enumerations = 0
         var records: [[String: Any]] = []

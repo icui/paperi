@@ -3,7 +3,7 @@
 ## Current checkpoint: 2026-11-07
 
 - Diagnostic-only: no window effects, management hotkeys or native observer-to-reducer integration.
-- All 74 regressions pass in debug and release (28 core, 46 platform).
+- All 76 regressions pass in debug and release (28 core, 48 platform).
 - Two rounds of eight live fixtures: 14 pass, two restart cases remain inconclusive because empty AX enumeration prevents rediscovery. Source teardown passes; missing references are never interpreted as closed windows.
 - Latest work adds scoped popup evidence, safe unknown presentation state, isolated missing tab-selection metadata, repeated diagnostic checks, stale-callback rejection, fresh focus/main discovery, explicit sampled-reference coverage and opt-in periodic reconciliation.
 - Next priorities: startup/restart window rediscovery, daily-app native-tab classification, actual OS/cross-display popup recovery and display/Space feasibility. Historical increments below retain their original observations and limits.
@@ -241,6 +241,13 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Added `check-ax-recorder.rb --accessory`, with delayed window creation and one-second polling. The live check passes: 19 reconciliation ticks, single create/move/resize/minimize/restore/destroy delivery, matching discovered/destroyed identity and clean source/listener teardown. It received one workspace launch event, so this run does not prove polling-only initial app discovery. No termination event arrived; the remaining native observer was removed at recording end.
 - The original regular fixture still passes with no periodic reconciliation enabled. Both harness modes now require exactly one matching create/destroy pair and explicit zero native/workspace sources at session end.
 - This supplies an opt-in recovery opportunity after startup retries, not evidence of recovering past events or resolving all missing-window channels. Polling-only accessory discovery, absence-based process lifecycle, restart/inactive-member recovery and other platform release gates remain open. No management effects or reducer integration were enabled.
+
+## Increment 28: isolate polling-only accessory discovery
+
+- Added explicit `record --poll-only`, requiring scoped periodic reconciliation. It disables workspace launch/termination listeners while retaining initial discovery and native AX notifications. Readiness now reports `workspaceEventsEnabled`; ordinary recording keeps listeners enabled by default.
+- Added two regressions for strict option requirements and absence of workspace registrations across start/stop/restart. All 76 tests (28 core, 48 platform) pass in debug and release; editor diagnostics and Ruby syntax are clean.
+- Added `check-ax-recorder.rb --poll-only`. It confirms zero observers and disabled workspace listeners before launching the accessory fixture. The live run passes with 19 polling ticks, no workspace launch/termination records, one matching create/destroy pair and clean native/workspace teardown. Unlike increment 27's run, initial enumeration and workspace launch delivery cannot explain attachment to this newly launched app.
+- The repeated diagnostics runner now includes polling-only discovery as its ninth mode. This establishes controlled discovery through periodic reconciliation when workspace events are unavailable. It does not prove recovery of events before attachment, discovery when every fresh channel is unavailable, absence-based termination or daily-app/restart parity. Management remains inactive.
 
 ## Validation on the initial host
 
