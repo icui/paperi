@@ -98,6 +98,7 @@ public enum Diagnostics {
         var windows: [(element: AXUIElement, id: UInt32)] = []
         var notifications = NotificationSubscriptions()
         let evidenceIdentities = EvidenceIdentities()
+        let selectionAssociations = SelectionAssociations()
         init(observer: AXObserver, owner: EventRecorder) {
             self.observer = observer
             self.owner = owner
@@ -178,7 +179,8 @@ public enum Diagnostics {
     public func tabEvidence(bundleID: String) -> [String: Any] {
         Diagnostics.tabEvidence(bundleID: bundleID,
             observedWindows: observers.mapValues { $0.windows.map(\.element) },
-            identities: observers.mapValues(\.evidenceIdentities))
+            identities: observers.mapValues(\.evidenceIdentities),
+            associations: observers.mapValues(\.selectionAssociations))
     }
 
     private func attach(_ pid: pid_t) {
@@ -268,6 +270,7 @@ public enum Diagnostics {
         emit(["event": notification, "pid": pid, "windowID": id,
               "uptime": ProcessInfo.processInfo.systemUptime])
         if notification == kAXUIElementDestroyedNotification {
+            observers[pid]?.selectionAssociations.invalidate()
             observers[pid]?.notifications.remove(element)
             observers[pid]?.windows.removeAll { CFEqual($0.element, element) }
         } else if notification == kAXWindowCreatedNotification {

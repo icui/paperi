@@ -185,6 +185,35 @@ checks[:tabGroupOwnershipAndSelection] = stages.all? do |stage|
   end
 end
 checks[:confirmedDestruction] = records.count { |row| row['event'] == 'AXUIElementDestroyed' } == expected_count
+checks[:candidateAssociationsSound] = stages.all? do |stage|
+  app_row = stage[:evidence]['applications'].first
+  candidates = app_row['selectionAssociations']
+  next false unless candidates && ['observed', 'unavailable'].include?(candidates['status'])
+  candidates['groups'].all? do |candidate|
+    node = app_row['nodes'].find { |entry| entry['axIdentity'] == candidate['group'] }
+    owner = node && node['windowID']
+    native = stage[:fixture]['tabWindows'].find { |window| window['visible'] && window['selected'] == owner && window['members'].length > 1 }
+    next false unless native
+    bindings = candidate['bindings']
+    learned = bindings.map { |binding| binding['windowID'] }
+    controls = bindings.map { |binding| binding['control'] }
+    (learned - native['members']).empty? && learned.uniq.length == learned.length &&
+      (controls - candidate['controls']).empty? &&
+      candidate['unresolvedControls'] == candidate['controls'].reject { |control| controls.include?(control) } &&
+      (!candidate['complete'] || learned.sort == native['members'].sort)
+  end
+end
+learned_stage = stages.find { |stage| stage[:fixture]['event'] == 'action-7.0' }
+learned = learned_stage[:evidence]['applications'].first['selectionAssociations']
+checks[:visitedGroupsLearned] = learned && learned['status'] == 'observed' &&
+  learned['groups'].length == (multi ? 2 : 1) && learned['groups'].all? { |group| group['complete'] }
+regrouped_stage = stages.find { |stage| stage[:fixture]['event'] == 'action-11.0' }
+regrouped = regrouped_stage[:evidence]['applications'].first['selectionAssociations']
+checks[:regroupingDropsBindings] = regrouped && ['observed', 'unavailable'].include?(regrouped['status']) &&
+  regrouped['groups'].all? { |group| !group['complete'] && group['bindings'].length <= 1 }
+closed_stage = stages.find { |stage| stage[:fixture]['event'] == 'action-15.0' }
+closed_candidates = closed_stage[:evidence]['applications'].first['selectionAssociations']
+checks[:closedCandidatesCleared] = closed_candidates && closed_candidates['groups'].empty?
 structural_checks = checks.reject { |name, _| name == :enumeratedRepresentatives }
 observation = if structural_checks.values.all?
   checks[:enumeratedRepresentatives] ? 'fixture tab structure verified; member mapping unresolved' :
@@ -226,7 +255,7 @@ identity_comparisons = (multi ? [[0, 1], [2, 3]] : [[0, 1]]).map do |indices|
     sameOrderedControlTokens: ready ? samples.map { |sample| sample[:controls] }.uniq.length == 1 : nil,
     returnRestoresTokens: ready ? samples.first[:controls] == samples.last[:controls] : nil }
 end
-File.write(output, JSON.pretty_generate(schemaVersion: 4, fixtureMode: multi ? 'multiple containers' : 'single container', observation: observation, checks: checks, identityComparisons: identity_comparisons, stages: stages, events: event_counts,
+File.write(output, JSON.pretty_generate(schemaVersion: 5, fixtureMode: multi ? 'multiple containers' : 'single container', observation: observation, checks: checks, identityComparisons: identity_comparisons, stages: stages, events: event_counts,
   scope: 'Controlled fixture evidence only. Native-tab grouping is not inferred from equal frames or titles.'))
 summary = stages.map do |stage|
   apps = stage[:evidence]['applications']
@@ -235,6 +264,7 @@ summary = stages.map do |stage|
     axWindowIDs: nodes.select { |node| node.key?('enumeratedWindowIndex') }.map { |node| node['windowID'] },
     observedWindowIDs: nodes.select { |node| node.key?('observedWindowIndex') }.map { |node| node['windowID'] },
     windowsErrors: apps.map { |app| app['windowsError'] },
+    candidateAssociations: apps.map { |app| app['selectionAssociations'] },
     tabControls: nodes.select { |node| ['AXTabGroup', 'AXRadioButton'].include?(node['AXRole']) }.map do |node|
       node.select { |key, _| ['node', 'AXRole', 'AXValue', 'AXSelected', 'AXChildren', 'AXSelectedChildren', 'AXWindow'].include?(key) }
     end,

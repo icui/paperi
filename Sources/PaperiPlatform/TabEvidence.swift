@@ -10,7 +10,8 @@ extension Diagnostics {
     }
 
     @MainActor static func tabEvidence(bundleID: String, observedWindows: [pid_t: [AXUIElement]],
-                                      identities: [pid_t: EvidenceIdentities] = [:]) -> [String: Any] {
+                                      identities: [pid_t: EvidenceIdentities] = [:],
+                                      associations: [pid_t: SelectionAssociations] = [:]) -> [String: Any] {
         var applications: [[String: Any]] = []
         for app in NSWorkspace.shared.runningApplications where app.bundleIdentifier == bundleID {
             let application = AXUIElementCreateApplication(app.processIdentifier)
@@ -83,6 +84,11 @@ extension Diagnostics {
             if let identity {
                 report["identityScope"] = identity.scope
                 report["identityTruncated"] = identity.exhausted
+                if let tracker = associations[app.processIdentifier] {
+                    let selections = TabSelectionEvidence.parse(nodes: rows, roots: roots + observedRoots,
+                        complete: !truncated && !identity.exhausted)
+                    report["selectionAssociations"] = tracker.observe(scope: identity.scope, groups: selections).json
+                }
             }
             applications.append(report)
         }

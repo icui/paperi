@@ -137,6 +137,14 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Added two platform regressions for equality/difference, scope separation, bounded capacity and preservation of known tokens after exhaustion. Debug build and all 42 tests (26 core, 16 platform) pass; editor diagnostics report no errors. Ruby syntax and physical-owner guards were verified, including against the completed capture.
 - This supports association after observing selection in unchanged fixture groups only. Unvisited-member assignment, identity continuity through regrouping/destruction, daily-app parity, enumeration failures and the other native release gates remain open. No production association resolver, reducer integration or management effect was enabled; the app remains diagnostic-only.
 
+## Increment 16: conservative diagnostic selection-association tracker
+
+- Added an in-memory candidate tracker to persistent tab evidence. It learns only selected-control/physical-owner pairs; unvisited controls stay unresolved, and completeness requires every current control to have been visited. The AX adapter requires current root ownership, complete metadata and exactly one known selection. These candidates are not native-window classification or management authorization.
+- Scope, group-set and ordered-control changes discard learned bindings. Incomplete evidence, group disappearance and confirmed window destruction invalidate learning without treating absent windows as closed. Duplicate/shared identities and conflicting physical owners fail closed and quarantine the observer until its scope changes. No deferred association replay is introduced.
+- Added nine regressions covering partial learning, topology/order/scope/destruction resets, missing metadata, conflict quarantine, duplicate physical IDs/control tokens, graph ownership, selection ambiguity and native AX metadata types. The first live integration attempt exposed an Int32-vs-Int AX-result parsing mismatch; it is fixed and covered by a native AX/CFBoolean regression.
+- Debug build and all 51 tests (26 core, 25 platform) pass. The corrected live five-window run passes all nine harness checks, including candidate soundness, visited-group completion, regrouping invalidation and final cleanup. Both groups are partial after learning one member, complete after visiting both, then partial/unavailable again after topology changes. AX enumeration succeeds in this capture; earlier empty captures remain unexplained and are not superseded as a general guarantee.
+- Native-vs-content-tab classification, unvisited members, daily-app parity and the other platform release gates remain open. The candidate tracker is diagnostic-only and disconnected from the layout reducer and effect scheduling. No window-management behavior is enabled.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)
