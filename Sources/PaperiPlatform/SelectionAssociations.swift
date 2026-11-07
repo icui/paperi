@@ -122,7 +122,7 @@ enum TabSelectionEvidence {
     /// Complete structure and ownership are required. Missing/ambiguous selection
     /// withholds only that known group; never fill it from spare physical roots.
     static func parse(nodes: [[String: Any]], roots: [Int], complete: Bool) -> [TabSelection]? {
-        guard complete, roots.allSatisfy({ nodes.indices.contains($0) }) else { return nil }
+        guard complete, !roots.isEmpty, roots.allSatisfy({ nodes.indices.contains($0) }) else { return nil }
         var result: [TabSelection] = []
         func relation(_ node: [String: Any], _ name: String) -> [Int]? {
             guard let value = node[name] as? [String: Any],

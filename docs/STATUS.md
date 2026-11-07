@@ -3,9 +3,9 @@
 ## Current checkpoint: 2026-11-07
 
 - Diagnostic-only: no window effects, management hotkeys or native observer-to-reducer integration.
-- All 70 regressions pass in debug and release (28 core, 42 platform).
+- All 72 regressions pass in debug and release (28 core, 44 platform).
 - Two rounds of eight live fixtures: 14 pass, two restart cases remain inconclusive because empty AX enumeration prevents rediscovery. Source teardown passes; missing references are never interpreted as closed windows.
-- Latest work adds scoped popup evidence, safe unknown presentation state, isolated missing tab-selection metadata, repeated diagnostic checks, stale-callback rejection and validated fresh focus/main discovery channels.
+- Latest work adds scoped popup evidence, safe unknown presentation state, isolated missing tab-selection metadata, repeated diagnostic checks, stale-callback rejection, validated fresh focus/main discovery channels and explicit sampled-reference coverage.
 - Next priorities: startup/restart window rediscovery, daily-app native-tab classification, actual OS/cross-display popup recovery and display/Space feasibility. Historical increments below retain their original observations and limits.
 
 ## Increment 1: repository, diagnostic shell, and initial core
@@ -226,6 +226,13 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Three isolated regressions cover empty-enumeration fallback, equality/provenance deduplication, foreign/missing PID, missing/non-window roles, sheet references and wholly absent input. All 70 regressions (28 core, 42 platform) pass in debug and release; editor diagnostics and patch formatting are clean.
 - Two live native restart runs pass all required checks while initial physical inventory remains incomplete. In the second run, all eight discovery passes show AXFocusedWindow/AXMainWindow returning -25212; every accepted reference came from AXWindows. Thus this host did not affirmatively exercise the fallback. The unit checks establish its filtering behavior, not daily-app support or a fix for the prior empty-enumeration failures.
 - Restart/inactive-member rediscovery remains open when all fresh channels are unavailable. The app remains diagnostic-only, with no layout integration or window-management effects.
+
+## Increment 26: distinguish empty captures from confirmed empty inventories
+
+- Tab and window-policy reports now expose `windowCoverage`: no references, unusable references, usable sampled roots or truncation, plus a usable-root count. These describe reference coverage for the collector, not full inventory, eligibility, token availability or native-tab classification. The current protocol never sets `confirmsEmptyWindowSet` true.
+- Tab associations are unavailable when no usable window roots exist. The graph adapter also rejects a rootless empty graph, clearing learned bindings rather than presenting an observed empty topology. Confirmed destruction still removes each known reference; it does not establish that an app has no undiscovered windows.
+- Two regressions cover rootless capture after prior learning, unusable/truncated roots and partial sampled coverage. All 72 regressions (28 core, 44 platform) pass in debug and release. Native fixture schema 12 and popup closure checks assert the same distinction in live captures.
+- The native pair fixture passes all ten checks, including an unavailable association report and unconfirmed no-reference coverage after final close. The popup fixture passes all 13 checks, including the same coverage distinction after document closure. Editor diagnostics, Ruby syntax and patch formatting are clean. No management effects or layout integration were enabled; restart rediscovery and the other platform gates remain open.
 
 ## Validation on the initial host
 

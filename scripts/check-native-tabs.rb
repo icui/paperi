@@ -295,6 +295,10 @@ checks[:regroupingDropsBindings] = regrouped && (content ? ['observed', 'unavail
 closed_stage = stages.find { |stage| stage[:fixture]['event'] == 'action-15.0' }
 closed_candidates = closed_stage[:evidence]['applications'].first['selectionAssociations']
 checks[:closedCandidatesCleared] = closed_candidates && closed_candidates['groups'].empty?
+closed_app = closed_stage[:evidence]['applications'].first
+checks[:emptyCaptureStaysUnconfirmed] = closed_candidates['status'] == 'unavailable' &&
+  closed_app.dig('windowCoverage', 'status') == 'noReferences' &&
+  closed_app.dig('windowCoverage', 'confirmsEmptyWindowSet') == false
 if restart
   after_restart = stages.find { |stage| stage[:fixture]['event'] == 'action-8.0' }[:evidence]['applications'].first
   before_restart = learned_stage[:evidence]['applications'].first
@@ -396,7 +400,7 @@ identity_comparisons = (unvisited ? [[0, 1, 2]] : (multi ? [[0, 1], partial ? [2
     sameOrderedControlTokens: ready ? samples.map { |sample| sample[:controls] }.uniq.length == 1 : nil,
     returnRestoresTokens: ready ? samples.first[:controls] == samples.last[:controls] : nil }
 end
-File.write(output, JSON.pretty_generate(schemaVersion: 11, fixtureMode: configuration[2], observation: observation, checks: checks, identityComparisons: identity_comparisons,
+File.write(output, JSON.pretty_generate(schemaVersion: 12, fixtureMode: configuration[2], observation: observation, checks: checks, identityComparisons: identity_comparisons,
   discoveryPasses: records.select { |row| row['event'] == 'windowDiscovery' }, stages: stages, events: event_counts,
   scope: 'Controlled fixture evidence only. Native-tab grouping is not inferred from equal frames or titles.'))
 summary = stages.map do |stage|

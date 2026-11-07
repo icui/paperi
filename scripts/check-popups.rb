@@ -120,6 +120,8 @@ checks[:eventsContinueAfterDismissal] = [5, 9].all? do |n|
   end
 end
 checks[:closedDocumentCleared] = app_at.call(11)['windows'].none? { |row| row['windowID'] == document_id }
+checks[:emptyCaptureStaysUnconfirmed] = app_at.call(11).dig('windowCoverage', 'status') == 'noReferences' &&
+  app_at.call(11).dig('windowCoverage', 'confirmsEmptyWindowSet') == false
 checks[:nativeSourcesRemoved] = records.find { |row| row['event'] == 'recordingEnded' }.dig('teardown', 'sourcesStillInstalled') == 0
 forbidden = %w[title label description AXTitle AXDescription AXValue axFrame]
 private_values = lambda do |value|

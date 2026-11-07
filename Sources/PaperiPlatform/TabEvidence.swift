@@ -92,17 +92,22 @@ extension Diagnostics {
             }
             let roots = windows.compactMap { visit($0, depth: 0) }
             let observedRoots = observed.compactMap { visit($0, depth: 0) }
+            let allRoots = Set(roots + observedRoots)
+            let usableRoots = allRoots.filter { index in
+                rows[index]["AXRole"] as? String == "AXWindow" && (rows[index]["windowID"] as? UInt32 ?? 0) > 0
+            }
+            let coverage = WindowCoverage(rootCount: allRoots.count, usableRootCount: usableRoots.count, truncated: truncated)
             var report: [String: Any] = ["pid": app.processIdentifier, "windowsError": error.rawValue,
                                  "rawWindowCount": (value as? [Any])?.count ?? -1,
                                  "applicationRole": applicationRole,
                                  "roots": roots, "observedRoots": observedRoots,
-                                 "nodes": rows, "truncated": truncated]
+                                 "nodes": rows, "truncated": truncated, "windowCoverage": coverage.json]
             if let identity {
                 report["identityScope"] = identity.scope
                 report["identityTruncated"] = identity.exhausted
                 if let tracker = associations[app.processIdentifier] {
                     let selections = TabSelectionEvidence.parse(nodes: rows, roots: roots + observedRoots,
-                        complete: !truncated && !identity.exhausted)
+                        complete: coverage.status == .referencesAvailable && !identity.exhausted)
                     report["selectionAssociations"] = tracker.observe(scope: identity.scope, groups: selections).json
                 }
             }

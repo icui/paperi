@@ -101,9 +101,16 @@ extension Diagnostics {
                 return index
             }
             let roots = (enumerated + observed).compactMap { visit($0, depth: 0) }
+            let uniqueRoots = Set(roots)
+            let usableRoots = uniqueRoots.filter { index in
+                let role = (rows[index]["facts"] as? [String: Any])?["role"] as? String
+                return (role == "AXWindow" || role == "AXSheet") && (rows[index]["windowID"] as? UInt32 ?? 0) > 0
+            }
+            let coverage = WindowCoverage(rootCount: uniqueRoots.count, usableRootCount: usableRoots.count, truncated: truncated)
             var report: [String: Any] = ["pid": app.processIdentifier, "applicationActive": app.isActive,
                 "windowsError": enumerationError.map { $0 as Any } ?? NSNull(),
-                "roots": Array(Set(roots)).sorted(), "windows": rows, "focusedUI": focus, "truncated": truncated]
+                "roots": uniqueRoots.sorted(), "windows": rows, "focusedUI": focus,
+                "truncated": truncated, "windowCoverage": coverage.json]
             report["applicationQueryErrors"] = applicationErrors
             if let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() {
                 report["focusedWindowID"] = paperi_window_id((focused as! AXUIElement))

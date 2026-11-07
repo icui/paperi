@@ -39,6 +39,8 @@ Run `ruby scripts/check-native-tabs.rb [new-output.json]` for eight timed stages
 
 The diagnostic records window enumeration errors and bounded AX structure, including `AXTabs`, children, selected children, window/top-level relationships and boolean selection values. Titles, labels, descriptions and string values are not queried. Depth/node/time truncation is explicit; local node numbers are not persistent identities. Empty successful enumeration and unsupported `AXTabs` must remain distinct from proof of an empty/closed tab group.
 
+Both tab and window-policy samples now expose `windowCoverage`, distinguishing no references, unusable references, usable sampled roots and truncation. `referencesAvailable` does not imply complete inventory, identity-token availability, management eligibility or native-tab classification. `confirmsEmptyWindowSet` is always false under the current evidence protocol. With no usable window roots, tab associations become unavailable and lose learned bindings rather than reporting an observed empty topology. This remains true after all fixture windows have confirmed destruction: those individual closures do not prove that the entire application has no undiscovered windows. Native fixture schema 12 and the popup harness check this distinction at their final stages.
+
 Initial-host finding: the fixture confirmed merge/selection/detach/close, but AX returned an empty window array with success at every stage. Making the fixture key did not change this. The captures are inconclusive for grouping. Next investigate observer-supplied window references and real daily native-tab apps; no native-tab feasibility gate is complete.
 
 ### Persistent observer capture
