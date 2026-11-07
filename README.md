@@ -16,6 +16,8 @@ Requires macOS 14+ and Swift 6+ (Xcode or Command Line Tools). The initial host 
 ./scripts/swift.sh run paperi record 30 > captures/session.jsonl
 ```
 
+When running through a restricted coding-agent sandbox, an active-developer-directory or toolchain-access failure can reflect sandbox restrictions even when Command Line Tools are installed. Retry the same build/test command with approved access outside the sandbox before changing the system developer directory or installing another toolchain. The full debug build and 26 core regressions have passed this way; see [validation results](docs/STATUS.md#validation-on-the-initial-host).
+
 Create `captures/` before redirecting; captures are ignored by Git. Snapshot and event recording never reposition or focus windows or register management shortcuts, so they can be used alongside Hammerspoon. Titles are omitted unless `snapshot --include-titles` is explicitly requested. IDs, bundle identifiers and geometry can still reveal activity; review captures before sharing.
 
 Accessibility access is needed to enumerate and observe application windows. Without it, snapshots still report available display/Space information. No automatic permission prompt is shown by CLI diagnostics. Build the app and launch its menu to request access:

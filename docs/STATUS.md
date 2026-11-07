@@ -63,6 +63,18 @@ The platform adapter must confirm these events for the entire logical container;
 
 ## Validation on the initial host
 
+### Revalidation after increment 5 (2026-11-06 local time)
+
+- The full debug build and all 26 Swift Testing regressions in three suites pass, including the 15 tests added in increments 2–5. This supersedes the unexecuted-test limitations recorded in those implementation sessions.
+- The installed Command Line Tools are functional. Earlier failures to resolve the active developer directory occurred inside the restricted execution sandbox; running `./scripts/swift.sh test` with approved access outside that sandbox succeeded. No toolchain installation or global developer-directory change was necessary.
+- Existing toolchain framework/library search-path warnings remain nonfatal. This run validates the debug build and core tests, not release signing or notarization.
+- A fresh read-only debug snapshot confirms Accessibility trust and available Space queries on macOS 26.7.2 / arm64. One built-in display is connected, and separate Spaces remains disabled. Sampled fullscreen and nonstandard windows were excluded; this snapshot does not establish popup recovery, native-tab grouping, transfers, or independent-display behavior.
+- Snapshot discovery took about 3.28 seconds. This is discovery duration, not input-to-window-motion latency. No window titles were requested, and no raw capture was committed.
+
+Next integration priorities remain affirmative native-tab evidence, popup interaction traces, and confirmed display/Space ownership. The app remains diagnostic-only until the feasibility gates are verified.
+
+### Original increment 1 validation
+
 - Swift 6.4 / Command Line Tools; macOS 26.7.2, arm64. The SDK is macOS 27; deployment target is macOS 14. Older OS support has not been exercised.
 - 11 Swift Testing regressions pass. Editor diagnostics report no errors.
 - Release app builds and is locally ad hoc signed. This is not a notarized release.
