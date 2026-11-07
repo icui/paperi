@@ -91,34 +91,140 @@ public enum Diagnostics {
 
 /// Read-only AX trace. Runs on the main run loop; no window writes or hotkeys.
 @MainActor public final class EventRecorder {
-    private var observers: [AXObserver] = []
-    public init() {}
-    public func start() {
-        for app in NSWorkspace.shared.runningApplications {
-            var observer: AXObserver?
-            let result = AXObserverCreate(app.processIdentifier, { _, element, notification, _ in
-                Diagnostics.printJSON(["event": notification as String, "windowID": paperi_window_id(element),
-                    "uptime": ProcessInfo.processInfo.systemUptime], pretty: false)
-            }, &observer)
-            guard result == .success, let observer else { continue }
-            let element = AXUIElementCreateApplication(app.processIdentifier)
-            AXUIElementSetMessagingTimeout(element, 0.15)
-            for name in [kAXWindowCreatedNotification, kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification] {
-                AXObserverAddNotification(observer, element, name as CFString, nil)
-            }
-            if let windows = Diagnostics.attribute(element, kAXWindowsAttribute) as? [AXUIElement] {
-                for window in windows {
-                    for name in [kAXUIElementDestroyedNotification, kAXMovedNotification, kAXResizedNotification, kAXTitleChangedNotification] {
-                        AXObserverAddNotification(observer, window, name as CFString, nil)
-                    }
-                }
-            }
-            CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
-            observers.append(observer)
+    private final class Subscription {
+        let observer: AXObserver
+        weak var owner: EventRecorder?
+        var windows: [(element: AXUIElement, id: UInt32)] = []
+        init(observer: AXObserver, owner: EventRecorder) {
+            self.observer = observer
+            self.owner = owner
+        }
+        deinit {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
         }
     }
+    private final class WorkspaceObservation {
+        let token: NSObjectProtocol
+        let center: NotificationCenter
+        init(_ token: NSObjectProtocol, center: NotificationCenter) { self.token = token; self.center = center }
+        deinit { center.removeObserver(token) }
+    }
+    private var observers: [pid_t: Subscription] = [:]
+    private var workspaceTokens: [WorkspaceObservation] = []
+    private var running = false
+    public init() {}
+    public func start() {
+        guard !running else { return }
+        running = true
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+            workspaceTokens.append(WorkspaceObservation(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
+                guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+                let pid = app.processIdentifier
+                let event = notification.name.rawValue
+                let launched = notification.name == NSWorkspace.didLaunchApplicationNotification
+                MainActor.assumeIsolated {
+                    guard let self, self.running else { return }
+                    if launched {
+                        self.attach(pid)
+                    } else {
+                        self.detach(pid)
+                    }
+                    Diagnostics.printJSON(["event": event, "pid": pid,
+                                           "uptime": ProcessInfo.processInfo.systemUptime], pretty: false)
+                }
+            }, center: center))
+        }
+        for app in NSWorkspace.shared.runningApplications {
+            attach(app.processIdentifier)
+        }
+        Diagnostics.printJSON(["event": "recorderReady", "observerCount": observers.count,
+                               "windowReferenceCount": observers.values.reduce(0) { $0 + $1.windows.count },
+                               "uptime": ProcessInfo.processInfo.systemUptime], pretty: false)
+    }
+
+    private func attach(_ pid: pid_t) {
+        guard pid != ProcessInfo.processInfo.processIdentifier, observers[pid] == nil else { return }
+        var value: AXObserver?
+        let result = AXObserverCreate(pid, { observer, element, notification, context in
+            guard let context else { return }
+            // Every observer source is installed exclusively on the main run loop.
+            MainActor.assumeIsolated {
+                Unmanaged<Subscription>.fromOpaque(context).takeUnretainedValue().owner?
+                    .receive(observer, element: element, notification: notification as String)
+            }
+        }, &value)
+        guard result == .success, let observer = value else {
+            report(result, pid: pid, notification: "AXObserverCreate")
+            return
+        }
+        observers[pid] = Subscription(observer: observer, owner: self)
+        let element = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(element, 0.15)
+        for name in [kAXWindowCreatedNotification, kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification,
+                     kAXApplicationHiddenNotification, kAXApplicationShownNotification] {
+            subscribe(observer, element: element, name: name, pid: pid)
+        }
+        if let windows = Diagnostics.attribute(element, kAXWindowsAttribute) as? [AXUIElement] {
+            for window in windows { attachWindow(window, pid: pid) }
+        }
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
+    }
+
+    private func attachWindow(_ window: AXUIElement, pid: pid_t) {
+        guard let subscription = observers[pid],
+              !subscription.windows.contains(where: { CFEqual($0.element, window) }) else { return }
+        AXUIElementSetMessagingTimeout(window, 0.15)
+        subscription.windows.append((window, paperi_window_id(window)))
+        for name in [kAXUIElementDestroyedNotification, kAXMovedNotification, kAXResizedNotification,
+                     kAXTitleChangedNotification, kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification] {
+            subscribe(subscription.observer, element: window, name: name, pid: pid)
+        }
+    }
+
+    private func subscribe(_ observer: AXObserver, element: AXUIElement, name: String, pid: pid_t) {
+        guard let subscription = observers[pid] else { return }
+        let result = AXObserverAddNotification(observer, element, name as CFString, Unmanaged.passUnretained(subscription).toOpaque())
+        if result != .success && result != .notificationAlreadyRegistered { report(result, pid: pid, notification: name) }
+    }
+
+    private func report(_ error: AXError, pid: pid_t, notification: String) {
+        Diagnostics.printJSON(["event": "subscriptionFailed", "pid": pid, "notification": notification,
+                               "axError": error.rawValue, "uptime": ProcessInfo.processInfo.systemUptime], pretty: false)
+    }
+
+    private func receive(_ observer: AXObserver, element: AXUIElement, notification: String) {
+        guard running, let pid = observers.first(where: { CFEqual($0.value.observer, observer) })?.key else { return }
+        let cachedID = observers[pid]?.windows.first(where: { CFEqual($0.element, element) })?.id ?? 0
+        let id = cachedID != 0 ? cachedID : paperi_window_id(element)
+        Diagnostics.printJSON(["event": notification, "pid": pid, "windowID": id,
+                               "uptime": ProcessInfo.processInfo.systemUptime], pretty: false)
+        if notification == kAXUIElementDestroyedNotification {
+            observers[pid]?.windows.removeAll { CFEqual($0.element, element) }
+        } else if notification == kAXWindowCreatedNotification {
+            attachWindow(element, pid: pid)
+        } else if notification == kAXFocusedWindowChangedNotification || notification == kAXMainWindowChangedNotification {
+            if Diagnostics.attribute(element, kAXRoleAttribute) as? String == kAXWindowRole {
+                attachWindow(element, pid: pid)
+            } else {
+                let application = AXUIElementCreateApplication(pid)
+                AXUIElementSetMessagingTimeout(application, 0.15)
+                if let window = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
+                   CFGetTypeID(window) == AXUIElementGetTypeID() {
+                    attachWindow(window as! AXUIElement, pid: pid)
+                }
+            }
+        }
+    }
+
+    private func detach(_ pid: pid_t) {
+        guard let subscription = observers.removeValue(forKey: pid) else { return }
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(subscription.observer), .commonModes)
+    }
+
     public func stop() {
-        for observer in observers { CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes) }
-        observers.removeAll()
+        running = false
+        workspaceTokens.removeAll()
+        for pid in Array(observers.keys) { detach(pid) }
     }
 }

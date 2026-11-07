@@ -61,6 +61,15 @@ The reducer remains in-memory and disconnected from native observers. Metadata r
 
 The platform adapter must confirm these events for the entire logical container; absence from AX enumeration is insufficient. Native observer wiring, metadata retry scheduling, ownership reconciliation, recorded fixture parity, and feasibility gates remain open. The app remains diagnostic-only.
 
+## Increment 6: incremental read-only event recording
+
+- The AX recorder now follows workspace app launch/termination and subscribes window creation/focus discoveries, instead of retaining only the processes/windows seen at startup. Startup is idempotent; stop removes workspace observers and AX run-loop sources. Subscription ownership also removes sources on release and uses weak recorder references in callbacks.
+- Added application hide/show and window minimize/deminimize subscriptions. Event records now include PID and use cached window IDs when destruction makes the AX element unavailable. No titles or window contents are collected.
+- Added explicit `subscriptionFailed` diagnostics and a `recorderReady` marker after initial setup. Observer/reference counts are attempted coverage, not proof of successful subscriptions. Apps can reject notifications, and launch-time retry/reconciliation remains open.
+- Validation: debug build and all 26 core regressions pass. Read-only one-second recording smoke checks exit cleanly; applications report subscription errors that were previously silent. Controlled app-launch/window-create/destroy delivery, repeat-start/stop behavior, and popup/tab traces remain to be exercised. No native feasibility gate is claimed complete by this instrumentation change.
+
+This recorder is not the live management registry and does not feed the lifecycle reducer. Fullscreen state still needs snapshot confirmation; a resize notification is insufficient. The app remains diagnostic-only.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)
