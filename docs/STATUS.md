@@ -15,11 +15,21 @@ Incomplete release gates:
 
 - Step 1: real baseline traces and installed-manager performance measurements.
 - Step 2: affirmative native-tab grouping, live multi-display validation, popup reproducer and no-injection Space transfer. The bridge currently only queries Spaces/window IDs.
-- Step 3: resize/split commands, floating state transitions, full event reducer, tab reconciliation, fixture parity against recorded interactions, and broader invariants.
+- Step 3: full event reducer, tab reconciliation, fixture parity against recorded interactions, and broader invariants.
 - Steps 4–6: effect scheduler, hotkeys, live incremental registry, configuration, recovery, daily-use soak, notarization and distribution.
 - Stretch: native touch capture, page frame placement, animation and live performance validation. Section anchors currently describe pages; the ordinary strip placement function does not yet consume section packing.
 
 The current binary never writes window geometry, changes focus, moves Spaces or installs management shortcuts. Keep it diagnostic-only until the platform feasibility gates are verified.
+
+## Increment 2: additional pure core commands
+
+- Added canvas-relative width and stacked-height resizing. Width stays within the usable canvas; height redistribution keeps sibling rows positive and preserves their relative weights beyond a reserved minimum.
+- Added the two-column split command: the left and focused columns occupy equal halves with one gap, including on displays with negative origins. No left column means no change.
+- Added a Codable layout state separating tiled and user-floating logical slots. Floating toggles retain native-tab membership and preferred column width, remove empty columns, and reject excluded/pending classifications. Retiling inserts a column after the current tiled focus; this is a deterministic policy awaiting recorded parity fixtures.
+- Added four regression tests covering resizing, split geometry, floating tab containers, exclusion, and invalid input.
+- Validation in this implementation session: editor diagnostics report no errors. `./scripts/swift.sh test` could not start because `xcode-select` reports no active developer directory. These new tests have not been executed; the host results below apply to increment 1.
+
+These are in-memory commands only; they do not enable window management or resolve the native feasibility gates.
 
 ## Validation on the initial host
 

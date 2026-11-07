@@ -2,7 +2,7 @@
 
 Standalone macOS scrolling window manager in development. See [PLAN.md](PLAN.md) for the intended behavior and release gates.
 
-The first increment provides a pure Swift layout core, regression tests, read-only native diagnostics, and an inactive menu bar shell. **It does not yet manage windows.** Native tabs, Space transfers, full keyboard parity, and trackpad capture remain feasibility work.
+The current implementation provides a pure Swift layout core (including resize, split, and floating transitions), regression tests, read-only native diagnostics, and an inactive menu bar shell. **It does not yet manage windows.** Native tabs, Space transfers, full keyboard parity, and trackpad capture remain feasibility work.
 
 ## Development
 

@@ -1,0 +1,85 @@
+import Foundation
+
+extension Layout {
+    /// Resize by a fraction of the usable canvas; positive values grow the column.
+    public mutating func resizeWidth(by fraction: Double, in canvas: Rect) throws {
+        try validate()
+        guard canvas.isValid, fraction.isFinite else { throw LayoutError.invalidGeometry }
+        guard let focused, let i = index(of: focused) else { return }
+        let delta = canvas.width * fraction
+        guard delta.isFinite else { throw LayoutError.invalidGeometry }
+        columns[i.column].width = min(canvas.width, max(min(1, canvas.width), min(columns[i.column].width, canvas.width) + delta))
+    }
+
+    /// Redistribute the remaining stack proportionally, retaining positive row heights.
+    public mutating func resizeHeight(by fraction: Double, in canvas: Rect, gap: Double = 8) throws {
+        let frames = try placements(in: canvas, gap: gap)
+        guard fraction.isFinite, (canvas.height * fraction).isFinite else { throw LayoutError.invalidGeometry }
+        guard let focused, let i = index(of: focused), columns[i.column].slots.count > 1 else { return }
+        let column = columns[i.column]
+        let heights = column.slots.map { slot in frames.first { $0.slotID == slot.id }!.frame.height }
+        let available = heights.reduce(0, +)
+        let minimum = min(1, available / Double(heights.count * 2))
+        let target = min(available - minimum * Double(heights.count - 1), max(minimum, heights[i.row] + canvas.height * fraction))
+        let remainder = available - target
+        // Reserve a minimum for every sibling before distributing its share.
+        let distributable = max(0, remainder - minimum * Double(heights.count - 1))
+        let largest = column.weights.enumerated().filter { $0.offset != i.row }.map(\.element).max()!
+        let normalized = column.weights.enumerated().map { $0.offset == i.row ? 0 : $0.element / largest }
+        let total = normalized.reduce(0, +)
+        columns[i.column].weights = heights.indices.map { row in
+            row == i.row ? target : minimum + distributable * normalized[row] / total
+        }
+    }
+
+    /// Place the left and focused columns across two equal halves, separated by one gap.
+    public mutating func split(in canvas: Rect, gap: Double = 8) throws {
+        try validate()
+        guard canvas.isValid, gap.isFinite, gap >= 0, gap < canvas.width else { throw LayoutError.invalidGeometry }
+        guard let focused, let i = index(of: focused), i.column > 0 else { return }
+        let width = (canvas.width - gap) / 2
+        columns[i.column - 1].width = width
+        columns[i.column].width = width
+        offset = -columns.prefix(i.column - 1).reduce(0) { $0 + min($1.width, canvas.width) + gap }
+    }
+}
+
+/// Floating documents remain logical slots, including all confirmed native-tab members.
+/// The caller supplies current classification; excluded or pending windows cannot toggle.
+public struct LayoutState: Codable, Equatable, Sendable {
+    public var tiled: Layout
+    public private(set) var floating: [Column]
+
+    public init(tiled: Layout = Layout(), floating: [Column] = []) {
+        self.tiled = tiled
+        self.floating = floating
+    }
+
+    public func validate() throws {
+        try tiled.validate()
+        guard floating.allSatisfy({ $0.slots.count == 1 }) else { throw LayoutError.invalidMembership }
+        try Layout(columns: tiled.columns + floating).validate()
+    }
+
+    @discardableResult
+    public mutating func toggleFloating(slotID: String, classification: Classification) throws -> Bool {
+        try validate()
+        guard classification.eligibility == .tiled || classification.eligibility == .floating else { return false }
+        if let i = tiled.index(of: slotID) {
+            let slot = tiled.columns[i.column].slots.remove(at: i.row)
+            tiled.columns[i.column].weights.remove(at: i.row)
+            floating.append(Column(slots: [slot], width: tiled.columns[i.column].width))
+            if tiled.columns[i.column].slots.isEmpty { tiled.columns.remove(at: i.column) }
+            if tiled.focused == slotID {
+                tiled.focused = tiled.columns.isEmpty ? nil : tiled.columns[min(i.column, tiled.columns.count - 1)].slots.first?.id
+            }
+            return true
+        }
+        guard let i = floating.firstIndex(where: { $0.slots[0].id == slotID }) else { return false }
+        let column = floating.remove(at: i)
+        let insertion = tiled.focused.flatMap { tiled.index(of: $0)?.column }.map { $0 + 1 } ?? tiled.columns.count
+        tiled.columns.insert(column, at: insertion)
+        tiled.focused = slotID
+        return true
+    }
+}

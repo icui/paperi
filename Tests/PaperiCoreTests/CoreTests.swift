@@ -2,6 +2,55 @@ import Testing
 @testable import PaperiCore
 
 struct CoreTests {
+    @Test func testResizeClampsWidthAndRedistributesHeight() throws {
+        let canvas = Rect(x: -1000, y: 20, width: 1000, height: 800)
+        var layout = Layout(columns: [Column(slots: [slot(1), slot(2), slot(3)], width: 400)], focused: "2")
+        let before = try layout.placements(in: canvas)
+        try layout.resizeWidth(by: 0.1, in: canvas)
+        try layout.resizeHeight(by: 0.1, in: canvas)
+        let after = try layout.placements(in: canvas)
+        checkEqual(after[1].frame.width, 500)
+        checkEqual(after[1].frame.height - before[1].frame.height, 80, accuracy: 0.00001)
+        checkEqual(after[0].frame.height, after[2].frame.height, accuracy: 0.00001)
+        checkEqual(after.last!.frame.y + after.last!.frame.height, 820, accuracy: 0.00001)
+        try layout.resizeHeight(by: 100, in: canvas)
+        try layout.resizeWidth(by: -100, in: canvas)
+        checkTrue(try layout.placements(in: canvas).allSatisfy { $0.frame.isValid })
+        checkEqual(layout.columns[0].width, 1)
+    }
+    @Test func testSplitHasEqualHalvesAndOneGap() throws {
+        let canvas = Rect(x: -1000, y: 20, width: 1000, height: 800)
+        var layout = Layout(columns: (1...3).map { Column(slots: [slot(UInt32($0))], width: 300) }, focused: "3")
+        try layout.split(in: canvas)
+        let frames = try layout.placements(in: canvas)
+        checkEqual(frames[1].frame, Rect(x: -1000, y: 20, width: 496, height: 800))
+        checkEqual(frames[2].frame, Rect(x: -496, y: 20, width: 496, height: 800))
+        layout.focused = "1"
+        let before = layout
+        try layout.split(in: canvas)
+        checkEqual(layout, before)
+    }
+    @Test func testFloatingPreservesTabsAndRejectsExcludedWindows() throws {
+        let tabs = Slot(id: "tabs", members: [1, 2], activeMember: 2)
+        var state = LayoutState(tiled: Layout(columns: [Column(slots: [tabs], width: 400)], focused: "tabs"))
+        checkTrue(try state.toggleFloating(slotID: "tabs", classification: Classification(eligibility: .tiled, reason: "document")))
+        try state.validate()
+        checkTrue(state.tiled.columns.isEmpty)
+        checkEqual(state.floating[0].slots[0], tabs)
+        let before = state
+        checkEqual(try state.toggleFloating(slotID: "tabs", classification: Classification(eligibility: .excluded, reason: "overlay")), false)
+        checkEqual(state, before)
+        checkTrue(try state.toggleFloating(slotID: "tabs", classification: Classification(eligibility: .floating, reason: "user floating")))
+        try state.validate()
+        checkEqual(state.tiled.focused, "tabs")
+        checkEqual(state.tiled.columns[0].slots[0], tabs)
+    }
+    @Test func testInvalidResizeDoesNotMutate() throws {
+        var layout = Layout(columns: [Column(slots: [slot(1)], width: 400)], focused: "1")
+        let before = layout
+        #expect(throws: (any Error).self) { try layout.resizeWidth(by: .nan, in: Rect(x: 0, y: 0, width: 1000, height: 800)) }
+        checkEqual(layout, before)
+    }
     func slot(_ id: UInt32) -> Slot { Slot(id: "\(id)", members: [id], activeMember: id) }
     @Test func testControlCenterNeverFloatsOrTiles() {
         let facts = WindowFacts(bundleID: "com.apple.controlcenter", role: "AXWindow", subrole: "AXStandardWindow", isRoot: true, movable: true, resizable: true)
