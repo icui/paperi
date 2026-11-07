@@ -12,6 +12,7 @@ import AppKit
         if CommandLine.arguments.count >= 2 { logURL = URL(fileURLWithPath: CommandLine.arguments[1]) }
         log("launched")
         NSApp.setActivationPolicy(.regular)
+        if CommandLine.arguments.contains("--unvisited-tabs") { runUnvisitedTabs(); return }
         if CommandLine.arguments.contains("--multi-tabs") { runMultipleTabGroups(); return }
         if CommandLine.arguments.contains("--tabs") { runTabs(); return }
         after(1) {
@@ -44,6 +45,23 @@ import AppKit
             self.tabWindows[1].orderFrontRegardless()
         }
         after(11) { self.tabWindows[0].addTabbedWindow(self.tabWindows[1], ordered: .above) }
+        after(13) { self.tabWindows[0].tabGroup?.selectedWindow?.close() }
+        after(15) { for window in self.tabWindows { window.close() } }
+        after(17) { self.log("terminating"); NSApp.terminate(nil) }
+    }
+
+    private func runUnvisitedTabs() {
+        after(1) { self.tabWindows = (0..<3).map { self.makeTabWindow($0) } }
+        after(3) {
+            self.tabWindows[0].addTabbedWindow(self.tabWindows[1], ordered: .above)
+            self.tabWindows[0].addTabbedWindow(self.tabWindows[2], ordered: .above)
+            self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0]
+        }
+        after(5) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1] }
+        after(7) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0] }
+        after(9) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[2] }
+        after(10) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0] }
+        after(11) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1] }
         after(13) { self.tabWindows[0].tabGroup?.selectedWindow?.close() }
         after(15) { for window in self.tabWindows { window.close() } }
         after(17) { self.log("terminating"); NSApp.terminate(nil) }
@@ -103,7 +121,8 @@ import AppKit
     }
 
     private func after(_ seconds: Double, action: @escaping @MainActor () -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+        let delay = CommandLine.arguments.contains("--unvisited-tabs") ? seconds * 1.5 : seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             action()
             self.log("action-\(seconds)")
         }

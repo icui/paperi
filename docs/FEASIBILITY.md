@@ -53,6 +53,12 @@ Learning is scoped to an observer. Changes to the group set or ordered controls 
 
 The live multiple-container check verifies that each pair is partial after the second member is first learned and complete after both have been selected. Detach/regrouping and incomplete metadata drop the old bindings; closure clears candidates. Daily-app native-vs-content-tab classification, unvisited tabs and full lifecycle reconciliation remain unresolved. This tracker does not feed the core reducer or enable any window effects.
 
+### Unvisited native member
+
+Run `ruby scripts/check-native-tabs.rb --unvisited [new-output.json]` for a three-window native group. It selects the first two members and returns to the first before visiting the third. All three physical windows are already available through observer roots. On the initial host, however, the third control omits `AXValue` until first selected. Complete-metadata parsing therefore returns `unavailable`, with no candidate bindings; the physical inventory cannot fill the missing selection value.
+
+Selecting the third member supplies that value and starts fresh learning with only its selected-control binding. Revisiting the first two members then completes the same group and ordered controls within the same observer scope. Closure invalidates those bindings. The nine-stage fixture uses longer intervals to capture both revisits. These checks establish safe withholding and recovery for this fixture, not support for discovering unvisited members in daily apps.
+
 ### Content-tab negative control
 
 Run `ruby scripts/check-native-tabs.rb --content [new-output.json]` for the five-window native fixture with an ordinary two-item `NSTabView` inside the independent window. The fixture switches content selection 0→1→0→1 while also switching the native groups. The independent window must remain outside native tab membership. Harness-only ground truth separates native and content controls; no fixture ID or app exception is used by the diagnostic tracker.

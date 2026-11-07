@@ -161,6 +161,14 @@ This recorder is not the live management registry and does not feed the lifecycl
 - The mixed live fixture passes all 15 checks, including complete learning of both native groups while only the content group is quarantined. The native-only positive control passes all nine checks. The harness now checks isolated quarantine explicitly and uses report schema 7.
 - This closes the controlled mixed-group conflict-isolation gap. Whole-capture metadata failures still withhold learning; daily-app classification, unvisited members, popup recovery, displays, Spaces and lifecycle release gates remain open. No reducer integration or window-management effects were enabled.
 
+## Increment 19: live unvisited-member withholding and recovery
+
+- Added `check-native-tabs.rb --unvisited`, a disposable three-window native group with nine captured stages. Two members are selected first, then the third is visited and the earlier members revisited. The slower fixture runs for about 29 seconds; report schema is now 8.
+- The first live run found that AppKit omits `AXValue` for the unvisited control. The existing complete-metadata requirement correctly withholds the entire candidate, even though all three physical windows are already known. Initial assertions expecting partial learning failed; the final harness explicitly verifies missing-value withholding rather than weakening the parser.
+- Selecting the third member starts fresh with only that observed binding. Revisiting the first two completes the same group and ordered controls in the same observer scope. Closing a member clears the previous bindings. The final live fixture passes all 12 checks, including physical inventory, selection structure, missing-value withholding, fresh learning, completion and cleanup.
+- Debug build and all 55 tests (26 core, 29 platform) pass. The existing mixed native/content fixture still passes all 15 checks. Editor diagnostics and Ruby syntax checks are clean. Production association logic is unchanged; no unvisited binding is inferred or replayed.
+- Controlled unvisited-member behavior is now validated. Daily-app classification and unvisited discovery, whole-capture metadata failures, popup recovery, displays, Spaces and remaining lifecycle release gates stay open. No window-management effects were enabled.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)
