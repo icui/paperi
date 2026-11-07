@@ -95,6 +95,7 @@ public enum Diagnostics {
         let observer: AXObserver
         weak var owner: EventRecorder?
         var windows: [(element: AXUIElement, id: UInt32)] = []
+        var notifications = NotificationSubscriptions()
         init(observer: AXObserver, owner: EventRecorder) {
             self.observer = observer
             self.owner = owner
@@ -219,7 +220,9 @@ public enum Diagnostics {
 
     private func subscribe(_ observer: AXObserver, element: AXUIElement, name: String, pid: pid_t) {
         guard let subscription = observers[pid] else { return }
-        let result = AXObserverAddNotification(observer, element, name as CFString, Unmanaged.passUnretained(subscription).toOpaque())
+        guard let result = subscription.notifications.register(element, name: name, perform: {
+            AXObserverAddNotification(observer, element, name as CFString, Unmanaged.passUnretained(subscription).toOpaque())
+        }) else { return }
         if result != .success && result != .notificationAlreadyRegistered { report(result, pid: pid, notification: name) }
     }
 
@@ -235,6 +238,7 @@ public enum Diagnostics {
         Diagnostics.printJSON(["event": notification, "pid": pid, "windowID": id,
                                "uptime": ProcessInfo.processInfo.systemUptime], pretty: false)
         if notification == kAXUIElementDestroyedNotification {
+            observers[pid]?.notifications.remove(element)
             observers[pid]?.windows.removeAll { CFEqual($0.element, element) }
         } else if notification == kAXWindowCreatedNotification {
             attachWindow(element, pid: pid)

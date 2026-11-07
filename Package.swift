@@ -10,7 +10,8 @@ let package = Package(
         .target(name: "PaperiBridge", linkerSettings: [.linkedFramework("ApplicationServices")]),
         .target(name: "PaperiPlatform", dependencies: ["PaperiCore", "PaperiBridge"]),
         .executableTarget(name: "Paperi", dependencies: ["PaperiCore", "PaperiPlatform"]),
-        .testTarget(name: "PaperiCoreTests", dependencies: ["PaperiCore"])
+        .testTarget(name: "PaperiCoreTests", dependencies: ["PaperiCore"]),
+        .testTarget(name: "PaperiPlatformTests", dependencies: ["PaperiPlatform"])
     ],
     swiftLanguageModes: [.v6]
 )

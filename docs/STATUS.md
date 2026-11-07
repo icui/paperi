@@ -77,6 +77,13 @@ This recorder is not the live management registry and does not feed the lifecycl
 - `subscriptionRetry` marks attempted reconciliation, not successful delivery. Continuous reconciliation, controlled launch/termination and repeat-start/stop validation remain open.
 - Validation: debug build and all 26 core regressions pass; editor diagnostics report no errors. An eight-second read-only recorder smoke run emitted one readiness marker and 236 retry-pass records and exited cleanly. Native-tab, popup, display and Space-transfer feasibility gates remain open. The app remains diagnostic-only.
 
+## Increment 8: subscription retry deduplication
+
+- Recorder subscriptions now retain successful notification registrations per observer and AX element. Startup reconciliation and repeated focus discovery skip confirmed registrations, while failed requests remain eligible for retry. `notificationAlreadyRegistered` also confirms coverage; it does not establish event delivery.
+- Destroy notifications discard cached registration state for that element. Observer teardown releases the entire cache, so replacement observers must register afresh. Equal AX references share registration state without merging distinct elements or notification names.
+- Added a platform test target and three regressions using synthetic AX application references and injected registration results. They cover successful-request deduplication, failure recovery, element/notification isolation, removal, and replacement-observer state. These tests make no live notification registrations and need no Accessibility permission.
+- Validation: debug build, all 26 core tests and all three platform tests pass. Editor diagnostics report no errors. Controlled live launch/termination, repeated recorder start/stop, and native feasibility validation remain open. The app remains diagnostic-only.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)
