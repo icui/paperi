@@ -61,11 +61,17 @@ The harness's `identityComparisons` compares both fixture groups at merge, selec
 
 ### Conservative diagnostic candidate tracker
 
-Persistent reports expose `selectionAssociations` with `observed`, `unavailable` or `conflict` status, selected-control bindings, unresolved controls and per-candidate completeness. The graph adapter requires complete traversal/identity coverage, a current physical window root, matching group/control ownership, known boolean selection for every control and exactly one selected control. It accepts native AX result-code types as well as JSON-style integers. Missing evidence clears learning rather than filling gaps from spare physical roots.
+Persistent reports expose `selectionAssociations` with `observed`, `unavailable` or `conflict` status, selected-control bindings, unresolved controls and per-candidate completeness. The graph adapter requires complete traversal/identity coverage, current physical window roots and matching group/control ownership. Learning within each group requires known boolean selection for every control and exactly one selected control. It accepts native AX result-code types as well as JSON-style integers. Missing evidence clears affected learning rather than filling gaps from spare physical roots.
 
 Learning is scoped to an observer. Changes to the group set or ordered controls clear all learned bindings for that process; incomplete captures and confirmed window destruction invalidate them too. A control changing physical identity, two controls claiming the same window, or shared control/group identities fails closed and remains quarantined until a new scope. No deferred associations are replayed. Completeness means all controls were actually visited in the current diagnostic topology, not that a native-window group is safe to manage.
 
 The live multiple-container check verifies that each pair is partial after the second member is first learned and complete after both have been selected. Detach/regrouping and incomplete metadata drop the old bindings; closure clears candidates. Daily-app native-vs-content-tab classification, unvisited tabs and full lifecycle reconciliation remain unresolved. This tracker does not feed the core reducer or enable any window effects.
+
+### Isolated selection metadata failures
+
+Run `ruby scripts/check-native-tabs.rb --partial [new-output.json]` for six windows: a two-tab group, a three-tab group and an independent window. The third member of the second group is never selected. With complete structure and ownership, that group's missing or ambiguous selection is represented by `selectionKnown: false` and `unavailableGroups`, with no bindings and no completeness. The first group can learn both visited members without being invalidated by the unrelated missing value. Recovering selection starts that group fresh; earlier bindings are never replayed. Unknown topology/control shape/ownership, identity exhaustion or traversal truncation still withholds all candidates. Current owners of unavailable groups still participate in collision quarantine, and shared identities still quarantine the observer. Topology changes and confirmed destruction continue to clear all learned bindings conservatively.
+
+The initial-host partial fixture verifies both behaviors through the same observer, while successful AX window enumeration remains empty. Observer structure and inventory checks pass independently; no empty-layout inference or daily-app grouping claim is made. Report schema 10 adds the explicit selection-availability fields and the partial-fixture mode.
 
 ### Unvisited native member
 

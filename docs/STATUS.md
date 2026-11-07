@@ -187,6 +187,15 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Debug build and all 62 tests (28 core, 34 platform) pass; editor diagnostics, Ruby syntax and patch formatting are clean. The live popup check passes twice. Existing toolchain linker-path warnings remain nonfatal.
 - Production remains diagnostic-only, with no reducer wiring or window-management effects.
 
+## Increment 22: isolate missing selection within known tab groups
+
+- Missing/ambiguous selection now withholds only a group whose structure, tokens and physical ownership are otherwise complete. `selectionKnown` and `unavailableGroups` make that state explicit; all its bindings clear immediately and recovery starts fresh. Unrelated groups keep learning under unchanged topology.
+- Current physical owners of unavailable groups still participate in collision detection. Shared identity corruption remains observer-wide quarantine. Unknown structure/control shape/ownership, identity exhaustion and capture truncation still withhold the whole capture; topology changes and confirmed destruction still clear all learned bindings conservatively.
+- Added four regressions for isolated clearing/recovery, current-owner collisions, shared control tokens, and parser-to-tracker behavior with unknown ownership. All 66 tests (28 core, 38 platform) pass; editor diagnostics are clean.
+- Added six-window `--partial` fixture and report schema 10. All ten required live checks pass: the visited two-tab group completes while the three-tab group with an unvisited member retains zero bindings. `enumeratedRepresentatives` is separately false because AX enumeration is empty; physical observer roots and group structure are complete. No absent-window or title/geometry inference is used.
+- Unvisited-member recovery and mixed content-tab quarantine also pass all required checks after the change; both separately report empty AX enumeration. Ruby syntax and patch formatting are clean.
+- Native-tab classification, unknown structural metadata, daily-app unvisited discovery and other platform release gates remain open. No window-management effects or reducer integration were enabled.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

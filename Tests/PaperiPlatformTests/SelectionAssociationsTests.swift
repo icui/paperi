@@ -134,7 +134,8 @@ struct SelectionAssociationsTests {
         #expect(TabSelectionEvidence.parse(nodes: nodes(), roots: [0], complete: true) == [selection()])
         var missing = nodes()
         missing[3].removeValue(forKey: "AXValue")
-        #expect(TabSelectionEvidence.parse(nodes: missing, roots: [0], complete: true) == nil)
+        #expect(TabSelectionEvidence.parse(nodes: missing, roots: [0], complete: true) ==
+            [TabSelection(group: 1, controls: [11, 12], selected: nil, window: 101)])
         var foreign = nodes()
         foreign[3]["AXWindow"] = ["error": 0, "nodes": [3]]
         #expect(TabSelectionEvidence.parse(nodes: foreign, roots: [0], complete: true) == nil)
@@ -145,7 +146,8 @@ struct SelectionAssociationsTests {
     @Test func graphAdapterRejectsDuplicateSelectionAndIncompleteTabs() {
         var multiple = nodes()
         multiple[3]["AXValue"] = true
-        #expect(TabSelectionEvidence.parse(nodes: multiple, roots: [0], complete: true) == nil)
+        #expect(TabSelectionEvidence.parse(nodes: multiple, roots: [0], complete: true) ==
+            [TabSelection(group: 1, controls: [11, 12], selected: nil, window: 101)])
         var partial = nodes()
         partial[1]["AXTabs"] = ["error": 0, "count": 3, "nodes": [2, 3]]
         #expect(TabSelectionEvidence.parse(nodes: partial, roots: [0], complete: true) == nil)
@@ -160,6 +162,72 @@ struct SelectionAssociationsTests {
         native[2]["AXValue"] = kCFBooleanTrue as CFBoolean
         native[3]["AXValue"] = kCFBooleanFalse as CFBoolean
         #expect(TabSelectionEvidence.parse(nodes: native, roots: [0], complete: true) == [selection()])
+    }
+
+    @Test func missingSelectionOnlyClearsItsKnownGroupAndNeverReplaysBindings() {
+        let tracker = SelectionAssociations()
+        let missing = TabSelection(group: 2, controls: [21, 22], selected: nil, window: 201)
+        let other = selection(21, window: 201, controls: [21, 22], group: 2)
+        _ = tracker.observe(scope: "one", groups: [selection(), other])
+        let partial = tracker.observe(scope: "one", groups: [selection(12, window: 102), missing])
+        #expect(partial.status == .observed)
+        #expect(partial.bindings == [1: [11: 101, 12: 102]])
+        #expect(partial.unavailableGroups == [2])
+        #expect(!partial.quarantined)
+        let json = partial.json["groups"] as! [[String: Any]]
+        #expect(json[0]["complete"] as? Bool == true)
+        #expect(json[1]["selectionKnown"] as? Bool == false)
+        #expect(json[1]["complete"] as? Bool == false)
+        let recovered = tracker.observe(scope: "one", groups: [selection(),
+            selection(22, window: 202, controls: [21, 22], group: 2)])
+        #expect(recovered.bindings[2] == [22: 202])
+        #expect(recovered.bindings[1] == [11: 101, 12: 102])
+        let unavailable = tracker.observe(scope: "one", groups: [missing])
+        #expect(unavailable.status == .unavailable)
+        #expect(unavailable.unavailableGroups == [2])
+        #expect(unavailable.bindings.isEmpty)
+    }
+
+    @Test func unavailableGroupStillReservesItsCurrentOwnerForCollisionChecks() {
+        let tracker = SelectionAssociations()
+        let unknown = TabSelection(group: 2, controls: [21, 22], selected: nil, window: 101)
+        let report = tracker.observe(scope: "one", groups: [selection(), unknown,
+            selection(31, window: 301, controls: [31, 32], group: 3)])
+        #expect(report.quarantinedGroups == [1, 2])
+        #expect(report.unavailableGroups == [2])
+        #expect(report.bindings == [3: [31: 301]])
+    }
+
+    @Test func partialSelectionCannotHideSharedControlIdentities() {
+        let unknown = TabSelection(group: 2, controls: [11, 22], selected: nil, window: 201)
+        let report = SelectionAssociations().observe(scope: "one", groups: [selection(), unknown])
+        #expect(report.scopeQuarantined)
+        #expect(report.bindings.isEmpty)
+    }
+
+    @Test func graphSelectionIsolationStillRejectsUnknownOwnershipForWholeCapture() {
+        var graph = nodes()
+        graph[3].removeValue(forKey: "AXValue")
+        let owner: [String: Any] = ["error": 0, "nodes": [4]]
+        graph += [
+            ["AXRole": "AXWindow", "windowID": UInt32(201)],
+            ["AXRole": "AXTabGroup", "axIdentity": 2, "AXWindow": owner,
+             "AXTabs": ["error": 0, "count": 2, "nodes": [6, 7]]],
+            ["AXRole": "AXRadioButton", "AXSubrole": "AXTabButton", "axIdentity": 21,
+             "AXValue": true, "AXWindow": owner],
+            ["AXRole": "AXRadioButton", "AXSubrole": "AXTabButton", "axIdentity": 22,
+             "AXValue": false, "AXWindow": owner]
+        ]
+        let tracker = SelectionAssociations()
+        let report = tracker.observe(scope: "one", groups: TabSelectionEvidence.parse(nodes: graph, roots: [0, 4], complete: true))
+        #expect(report.status == .observed)
+        #expect(report.unavailableGroups == [1])
+        #expect(report.bindings == [2: [21: 201]])
+        graph[3]["AXWindow"] = owner
+        #expect(TabSelectionEvidence.parse(nodes: graph, roots: [0, 4], complete: true) == nil)
+        let unknown = tracker.observe(scope: "one", groups: TabSelectionEvidence.parse(nodes: graph, roots: [0, 4], complete: true))
+        #expect(unknown.status == .unavailable)
+        #expect(unknown.groups.isEmpty && unknown.bindings.isEmpty)
     }
 
     @Test func radioSelectionNumbersAreExplicitlyBoundedAndRoleScoped() {

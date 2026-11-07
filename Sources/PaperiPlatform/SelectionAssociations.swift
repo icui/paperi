@@ -3,7 +3,7 @@ import Foundation
 struct TabSelection: Equatable {
     let group: Int
     let controls: [Int]
-    let selected: Int
+    let selected: Int?
     let window: UInt32
 }
 
@@ -15,17 +15,20 @@ struct SelectionAssociationReport {
     let scopeQuarantined: Bool
     let quarantinedGroups: Set<Int>
     var quarantined: Bool { scopeQuarantined || !quarantinedGroups.isEmpty }
+    var unavailableGroups: Set<Int> { Set(groups.filter { $0.selected == nil }.map(\.group)) }
 
     var json: [String: Any] {
         ["status": status.rawValue, "quarantined": quarantined,
          "scopeQuarantined": scopeQuarantined, "quarantinedGroups": quarantinedGroups.sorted(),
+         "unavailableGroups": unavailableGroups.sorted(),
          "groups": groups.map { group in
             let known = bindings[group.group] ?? [:]
             return ["group": group.group, "controls": group.controls,
                     "bindings": known.keys.sorted().map { ["control": $0, "windowID": known[$0]!] as [String: Any] },
                     "unresolvedControls": group.controls.filter { known[$0] == nil },
                     "quarantined": quarantinedGroups.contains(group.group),
-                    "complete": !quarantinedGroups.contains(group.group) && known.count == group.controls.count] as [String: Any]
+                    "selectionKnown": group.selected != nil,
+                    "complete": group.selected != nil && !quarantinedGroups.contains(group.group) && known.count == group.controls.count] as [String: Any]
         }]
     }
 }
@@ -61,19 +64,23 @@ final class SelectionAssociations {
         guard Set(groupIDs).count == groupIDs.count,
               Set(controls).count == controls.count,
               Set(groupIDs).isDisjoint(with: Set(controls)),
-              groups.allSatisfy({ $0.group > 0 && !$0.controls.isEmpty && $0.controls.allSatisfy { $0 > 0 } &&
-                  $0.controls.contains($0.selected) && $0.window > 0 }) else { return conflict() }
+              groups.allSatisfy({ group in group.group > 0 && !group.controls.isEmpty && group.controls.allSatisfy { $0 > 0 } &&
+                  (group.selected.map { group.controls.contains($0) } ?? true) && group.window > 0 }) else { return conflict() }
         let next = groups.map { Structure(group: $0.group, controls: $0.controls) }
         if structure != next {
             bindings.removeAll()
             structure = next
         }
-        for group in groups where !quarantinedGroups.contains(group.group) {
-            if let old = bindings[group.group]?[group.selected], old != group.window {
+        for group in groups {
+            guard let selected = group.selected, !quarantinedGroups.contains(group.group) else {
+                bindings.removeValue(forKey: group.group)
+                continue
+            }
+            if let old = bindings[group.group]?[selected], old != group.window {
                 quarantinedGroups.insert(group.group)
                 continue
             }
-            bindings[group.group, default: [:]][group.selected] = group.window
+            bindings[group.group, default: [:]][selected] = group.window
         }
         // Inspect every claimant before removing any: a collision must quarantine
         // both groups, independent of iteration order. Include already blocked
@@ -82,7 +89,7 @@ final class SelectionAssociations {
         for group in groups {
             let known = bindings[group.group] ?? [:]
             for window in known.values { owners[window, default: []].append(group.group) }
-            if known[group.selected] != group.window {
+            if group.selected.flatMap({ known[$0] }) != group.window {
                 owners[group.window, default: []].append(group.group)
             }
         }
@@ -91,7 +98,8 @@ final class SelectionAssociations {
         }
         for group in quarantinedGroups { bindings.removeValue(forKey: group) }
         let blocked = !groups.isEmpty && groups.allSatisfy { quarantinedGroups.contains($0.group) }
-        return SelectionAssociationReport(status: blocked ? .conflict : .observed, groups: groups,
+        let unavailable = !groups.isEmpty && groups.allSatisfy { $0.selected == nil || quarantinedGroups.contains($0.group) }
+        return SelectionAssociationReport(status: blocked ? .conflict : (unavailable ? .unavailable : .observed), groups: groups,
                                           bindings: bindings, scopeQuarantined: false,
                                           quarantinedGroups: quarantinedGroups)
     }
@@ -111,7 +119,8 @@ final class SelectionAssociations {
 }
 
 enum TabSelectionEvidence {
-    /// Reject partial metadata; never fill an unknown control from spare roots.
+    /// Complete structure and ownership are required. Missing/ambiguous selection
+    /// withholds only that known group; never fill it from spare physical roots.
     static func parse(nodes: [[String: Any]], roots: [Int], complete: Bool) -> [TabSelection]? {
         guard complete, roots.allSatisfy({ nodes.indices.contains($0) }) else { return nil }
         var result: [TabSelection] = []
@@ -131,18 +140,20 @@ enum TabSelectionEvidence {
                   Set(tabs).count == tabs.count, tabs.allSatisfy({ nodes.indices.contains($0) }) else { return nil }
             var controls: [Int] = []
             var selected: [Int] = []
+            var selectionKnown = true
             for index in tabs {
                 let control = nodes[index]
                 guard control["AXRole"] as? String == "AXRadioButton",
                       control["AXSubrole"] as? String == "AXTabButton",
                       let token = control["axIdentity"] as? Int,
-                      let value = control["AXValue"] as? Bool,
                       relation(control, "AXWindow") == owner else { return nil }
                 controls.append(token)
-                if value { selected.append(token) }
+                if let value = control["AXValue"] as? Bool {
+                    if value { selected.append(token) }
+                } else { selectionKnown = false }
             }
-            guard selected.count == 1 else { return nil }
-            result.append(TabSelection(group: id, controls: controls, selected: selected[0], window: window))
+            result.append(TabSelection(group: id, controls: controls,
+                selected: selectionKnown && selected.count == 1 ? selected[0] : nil, window: window))
         }
         return result
     }

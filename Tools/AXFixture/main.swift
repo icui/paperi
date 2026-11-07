@@ -118,7 +118,8 @@ import AppKit
 
     private func runMultipleTabGroups() {
         after(1) {
-            self.tabWindows = (0..<5).map { self.makeTabWindow($0) }
+            let count = CommandLine.arguments.contains("--partial-tabs") ? 6 : 5
+            self.tabWindows = (0..<count).map { self.makeTabWindow($0) }
             if CommandLine.arguments.contains("--content-tabs") {
                 let tabs = NSTabView(frame: self.tabWindows[4].contentView!.bounds)
                 tabs.autoresizingMask = [.width, .height]
@@ -135,6 +136,10 @@ import AppKit
         after(3) {
             self.tabWindows[0].addTabbedWindow(self.tabWindows[1], ordered: .above)
             self.tabWindows[2].addTabbedWindow(self.tabWindows[3], ordered: .above)
+            if CommandLine.arguments.contains("--partial-tabs") {
+                self.tabWindows[2].addTabbedWindow(self.tabWindows[5], ordered: .above)
+                self.tabWindows[2].tabGroup?.selectedWindow = self.tabWindows[2]
+            }
             self.contentTabs?.selectTabViewItem(at: 1)
         }
         after(5) {
