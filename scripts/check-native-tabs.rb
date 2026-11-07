@@ -193,7 +193,40 @@ else
   'inconclusive AX coverage'
 end
 event_counts = records.group_by { |row| row['event'] }.transform_values(&:length)
-File.write(output, JSON.pretty_generate(schemaVersion: 3, fixtureMode: multi ? 'multiple containers' : 'single container', observation: observation, checks: checks, stages: stages, events: event_counts,
+identity_comparisons = (multi ? [[0, 1], [2, 3]] : [[0, 1]]).map do |indices|
+  samples = [3, 5, 7].map do |n|
+    stage = stages.find { |entry| entry[:fixture]['event'] == "action-#{n}.0" }
+    app_row = stage[:evidence]['applications'].first
+    nodes = app_row['nodes']
+    selected = stage[:fixture]['tabWindows'][indices.first]['selected']
+    group = nodes.find { |node| node['AXRole'] == 'AXTabGroup' && node['windowID'] == selected }
+    controls = group ? (group.dig('AXTabs', 'nodes') || []).map { |index| nodes[index] } : []
+    { stage: n, scope: app_row['identityScope'], group: group && group['axIdentity'],
+      controls: controls.map { |node| node['axIdentity'] }, selectedWindow: selected,
+      observedWindow: group && group['windowID'],
+      selectedControls: controls.select { |node| node['AXValue'] == true }.map { |node| node['axIdentity'] },
+      truncated: app_row['identityTruncated'] || app_row['truncated'] }
+  end
+  ready = checks[:tabGroupOwnershipAndSelection] && samples.all? do |sample|
+    sample[:scope] && sample[:group] && sample[:controls].length == 2 &&
+      sample[:observedWindow].is_a?(Integer) && sample[:observedWindow] > 0 &&
+      sample[:controls].none?(&:nil?) && sample[:selectedControls].length == 1 && !sample[:truncated]
+  end && samples.map { |sample| sample[:scope] }.uniq.length == 1
+  bindings = ready ? samples.group_by { |sample| sample[:selectedControls].first }.transform_values do |selected_samples|
+    selected_samples.map { |sample| sample[:observedWindow] }.uniq
+  end : {}
+  stable_controls = ready && samples.map { |sample| sample[:group] }.uniq.length == 1 &&
+    samples.map { |sample| sample[:controls] }.uniq.length == 1
+  expected_members = indices.map { |index| ordered_ids[index] }.sort
+  { fixtureMemberIDs: expected_members, comparable: ready, samples: samples,
+    selectedControlBindings: bindings,
+    selectionAssociationVerified: stable_controls && bindings.length == 2 &&
+      bindings.values.all? { |windows| windows.length == 1 } && bindings.values.flatten.sort == expected_members,
+    sameGroupToken: ready ? samples.map { |sample| sample[:group] }.uniq.length == 1 : nil,
+    sameOrderedControlTokens: ready ? samples.map { |sample| sample[:controls] }.uniq.length == 1 : nil,
+    returnRestoresTokens: ready ? samples.first[:controls] == samples.last[:controls] : nil }
+end
+File.write(output, JSON.pretty_generate(schemaVersion: 4, fixtureMode: multi ? 'multiple containers' : 'single container', observation: observation, checks: checks, identityComparisons: identity_comparisons, stages: stages, events: event_counts,
   scope: 'Controlled fixture evidence only. Native-tab grouping is not inferred from equal frames or titles.'))
 summary = stages.map do |stage|
   apps = stage[:evidence]['applications']
@@ -207,4 +240,5 @@ summary = stages.map do |stage|
     end,
     truncated: apps.any? { |app| app['truncated'] } }
 end
-puts JSON.pretty_generate(output: output, observation: observation, checks: checks, events: event_counts, stages: summary)
+puts JSON.pretty_generate(output: output, observation: observation, checks: checks,
+                          identityComparisons: identity_comparisons, events: event_counts, stages: summary)

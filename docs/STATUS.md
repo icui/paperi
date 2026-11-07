@@ -129,6 +129,14 @@ This recorder is not the live management registry and does not feed the lifecycl
 - AX window enumeration returns an empty array throughout both latest runs. Enumerated representatives therefore fail their own explicit check while observer structure remains verified. This revises no earlier capture result and establishes no cause for the difference; enumeration alone is insufficient evidence of an empty layout.
 - Validation: debug build and all 40 Swift regressions pass. Both live fixture modes were exercised; strengthened active-close/independent-window assertions were also checked against the completed captures. Direct inactive-member assignment, daily-app parity, popup recovery, independent displays, Space transfer and native source teardown/restart remain open. The app remains diagnostic-only.
 
+## Increment 15: AX equality continuity and observed-selection bindings
+
+- Added bounded diagnostic equality tokens for retained AX references in persistent tab captures. Each observer has a unique identity scope, retains at most 512 elements, never recycles its assigned tokens, reports exhaustion explicitly and releases its registry at teardown. Tokens use `CFEqual`; capture-local graph indices remain separate. They are not durable semantic tab IDs, especially after destruction/reuse or across scopes.
+- The harness now compares each fixture group's token and ordered tab-control tokens through selection of the first member, the second member and back. It records selected-control bindings using the observed physical owner ID and verifies them against fixture ground truth. Missing tokens, changed scopes or exhausted/truncated samples make comparisons inconclusive.
+- In two live multiple-container runs, both groups preserve their group/control equality tokens across the switches. Each selected control binds consistently to a distinct physical member, and selecting back restores the original binding. The final association checks pass independently for both groups, without identity-budget exhaustion. Observer structure, root identity and destruction checks still pass; enumerated representatives still fail independently.
+- Added two platform regressions for equality/difference, scope separation, bounded capacity and preservation of known tokens after exhaustion. Debug build and all 42 tests (26 core, 16 platform) pass; editor diagnostics report no errors. Ruby syntax and physical-owner guards were verified, including against the completed capture.
+- This supports association after observing selection in unchanged fixture groups only. Unvisited-member assignment, identity continuity through regrouping/destruction, daily-app parity, enumeration failures and the other native release gates remain open. No production association resolver, reducer integration or management effect was enabled; the app remains diagnostic-only.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

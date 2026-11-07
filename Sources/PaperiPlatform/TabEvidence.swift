@@ -9,7 +9,8 @@ extension Diagnostics {
         tabEvidence(bundleID: bundleID, observedWindows: [:])
     }
 
-    @MainActor static func tabEvidence(bundleID: String, observedWindows: [pid_t: [AXUIElement]]) -> [String: Any] {
+    @MainActor static func tabEvidence(bundleID: String, observedWindows: [pid_t: [AXUIElement]],
+                                      identities: [pid_t: EvidenceIdentities] = [:]) -> [String: Any] {
         var applications: [[String: Any]] = []
         for app in NSWorkspace.shared.runningApplications where app.bundleIdentifier == bundleID {
             let application = AXUIElementCreateApplication(app.processIdentifier)
@@ -18,6 +19,7 @@ extension Diagnostics {
             let error = AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value)
             let windows = value as? [AXUIElement] ?? []
             let observed = observedWindows[app.processIdentifier] ?? []
+            let identity = identities[app.processIdentifier]
             let applicationRole = attribute(application, kAXRoleAttribute) as? String ?? "unknown"
             var nodes: [AXUIElement] = []
             var rows: [[String: Any]] = []
@@ -35,6 +37,7 @@ extension Diagnostics {
                 rows.append([:])
                 AXUIElementSetMessagingTimeout(element, 0.15)
                 var row: [String: Any] = ["node": index]
+                if let token = identity?.token(for: element) { row["axIdentity"] = token }
                 if let root = windows.firstIndex(where: { CFEqual($0, element) }) { row["enumeratedWindowIndex"] = root }
                 if let root = observed.firstIndex(where: { CFEqual($0, element) }) { row["observedWindowIndex"] = root }
                 let id = paperi_window_id(element)
@@ -72,11 +75,16 @@ extension Diagnostics {
             }
             let roots = windows.compactMap { visit($0, depth: 0) }
             let observedRoots = observed.compactMap { visit($0, depth: 0) }
-            applications.append(["pid": app.processIdentifier, "windowsError": error.rawValue,
+            var report: [String: Any] = ["pid": app.processIdentifier, "windowsError": error.rawValue,
                                  "rawWindowCount": (value as? [Any])?.count ?? -1,
                                  "applicationRole": applicationRole,
                                  "roots": roots, "observedRoots": observedRoots,
-                                 "nodes": rows, "truncated": truncated])
+                                 "nodes": rows, "truncated": truncated]
+            if let identity {
+                report["identityScope"] = identity.scope
+                report["identityTruncated"] = identity.exhausted
+            }
+            applications.append(report)
         }
         return ["schemaVersion": 1, "bundleID": bundleID,
                 "os": ProcessInfo.processInfo.operatingSystemVersionString,

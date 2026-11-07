@@ -97,6 +97,7 @@ public enum Diagnostics {
         weak var owner: EventRecorder?
         var windows: [(element: AXUIElement, id: UInt32)] = []
         var notifications = NotificationSubscriptions()
+        let evidenceIdentities = EvidenceIdentities()
         init(observer: AXObserver, owner: EventRecorder) {
             self.observer = observer
             self.owner = owner
@@ -176,7 +177,8 @@ public enum Diagnostics {
 
     public func tabEvidence(bundleID: String) -> [String: Any] {
         Diagnostics.tabEvidence(bundleID: bundleID,
-            observedWindows: observers.mapValues { $0.windows.map(\.element) })
+            observedWindows: observers.mapValues { $0.windows.map(\.element) },
+            identities: observers.mapValues(\.evidenceIdentities))
     }
 
     private func attach(_ pid: pid_t) {
