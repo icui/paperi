@@ -4,7 +4,7 @@
 
 - Diagnostic-only: no window effects, management hotkeys or native observer-to-reducer integration.
 - All 76 regressions pass in debug and release (28 core, 48 platform).
-- Two rounds of eight live fixtures: 14 pass, two restart cases remain inconclusive because empty AX enumeration prevents rediscovery. Source teardown passes; missing references are never interpreted as closed windows.
+- Latest nine-mode integration: eight pass; the restart case lacks complete learning before replacement. A repeat passes, with no established cause for the difference. Earlier empty-enumeration restart failures remain open; source teardown and missing-reference handling are verified separately.
 - Latest work adds scoped popup evidence, safe unknown presentation state, isolated missing tab-selection metadata, repeated diagnostic checks, stale-callback rejection, fresh focus/main discovery, explicit sampled-reference coverage and opt-in periodic reconciliation.
 - Next priorities: startup/restart window rediscovery, daily-app native-tab classification, actual OS/cross-display popup recovery and display/Space feasibility. Historical increments below retain their original observations and limits.
 
@@ -248,6 +248,13 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Added two regressions for strict option requirements and absence of workspace registrations across start/stop/restart. All 76 tests (28 core, 48 platform) pass in debug and release; editor diagnostics and Ruby syntax are clean.
 - Added `check-ax-recorder.rb --poll-only`. It confirms zero observers and disabled workspace listeners before launching the accessory fixture. The live run passes with 19 polling ticks, no workspace launch/termination records, one matching create/destroy pair and clean native/workspace teardown. Unlike increment 27's run, initial enumeration and workspace launch delivery cannot explain attachment to this newly launched app.
 - The repeated diagnostics runner now includes polling-only discovery as its ninth mode. This establishes controlled discovery through periodic reconciliation when workspace events are unavailable. It does not prove recovery of events before attachment, discovery when every fresh channel is unavailable, absence-based termination or daily-app/restart parity. Management remains inactive.
+
+## Increment 29: integrated polling validation and intermediate association timeline
+
+- Ran all nine integrated fixtures against committed production revision a5dbc09. Eight pass, including polling-only accessory discovery. The restart case fails only its complete-learning precondition before replacement; capture coverage, teardown, fresh-scope partial learning and unique/complete window-event delivery all pass. This is distinct from the earlier empty-enumeration rediscovery failure.
+- At selection-back, the staged report retains only the current binding despite an unchanged staged scope/group/control sequence. The intervening samples were not retained, so the reason for discarding the earlier binding is unproven. No sampling-race or platform-failure cause is asserted.
+- Added native report schema 13 with compact association state for every structural sample, including captures between fixture stages, and an explicit list of failed required checks. A repeated restart capture passes every required check and shows complete pre-restart learning followed by a fresh partial scope. It does not reproduce or resolve the earlier failure, which remains recorded.
+- Production is unchanged from increment 28; all 76 regressions remain validated in debug/release. Ruby syntax, editor diagnostics and patch formatting are clean. No conservative invalidation rule, required assertion or management gate was weakened.
 
 ## Validation on the initial host
 

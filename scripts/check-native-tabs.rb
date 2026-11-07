@@ -357,6 +357,7 @@ if content
   checks[:onlyContentGroupQuarantined] = content_group && learned['quarantinedGroups'] == [content_group['axIdentity']]
 end
 structural_checks = checks.reject { |name, _| name == :enumeratedRepresentatives || name == :physicalInventoryComplete }
+failed_checks = structural_checks.reject { |_, value| value == true }.keys
 observation = if structural_checks.values.all?
   restart ? 'native observer restart verified; inactive-member rediscovery may be incomplete' :
     (unvisited ? 'unvisited selection withheld and fresh learning verified; daily-app support unresolved' :
@@ -364,7 +365,7 @@ observation = if structural_checks.values.all?
     (checks[:enumeratedRepresentatives] ? 'fixture tab structure verified; member mapping unresolved' :
     'observer tab structure verified; enumeration inconclusive; member mapping unresolved')))
 else
-  'inconclusive AX coverage'
+  restart && !checks[:visitedGroupsLearned] ? 'inconclusive restart precondition: group not fully learned before replacement' : 'inconclusive AX coverage'
 end
 event_counts = records.group_by { |row| row['event'] }.transform_values(&:length)
 identity_comparisons = (unvisited ? [[0, 1, 2]] : (multi ? [[0, 1], partial ? [2, 3, 5] : [2, 3]] : [[0, 1]])).map do |indices|
@@ -400,7 +401,14 @@ identity_comparisons = (unvisited ? [[0, 1, 2]] : (multi ? [[0, 1], partial ? [2
     sameOrderedControlTokens: ready ? samples.map { |sample| sample[:controls] }.uniq.length == 1 : nil,
     returnRestoresTokens: ready ? samples.first[:controls] == samples.last[:controls] : nil }
 end
-File.write(output, JSON.pretty_generate(schemaVersion: 12, fixtureMode: configuration[2], observation: observation, checks: checks, identityComparisons: identity_comparisons,
+association_timeline = records.select { |row| row['event'] == 'tabEvidence' }.map do |row|
+  { captureStartedUptime: row['captureStartedUptime'], uptime: row['uptime'],
+    applications: row['applications'].map do |app_row|
+      app_row.select { |key, _| %w[pid identityScope windowCoverage truncated identityTruncated selectionAssociations].include?(key) }
+    end }
+end
+File.write(output, JSON.pretty_generate(schemaVersion: 13, fixtureMode: configuration[2], observation: observation, checks: checks, failedChecks: failed_checks, identityComparisons: identity_comparisons,
+  associationTimeline: association_timeline,
   discoveryPasses: records.select { |row| row['event'] == 'windowDiscovery' }, stages: stages, events: event_counts,
   scope: 'Controlled fixture evidence only. Native-tab grouping is not inferred from equal frames or titles.'))
 summary = stages.map do |stage|
@@ -416,5 +424,5 @@ summary = stages.map do |stage|
     end,
     truncated: apps.any? { |app| app['truncated'] } }
 end
-puts JSON.pretty_generate(output: output, observation: observation, checks: checks,
+puts JSON.pretty_generate(output: output, observation: observation, checks: checks, failedChecks: failed_checks,
                           identityComparisons: identity_comparisons, events: event_counts, stages: summary)

@@ -64,6 +64,8 @@ It requires a GUI session and Accessibility trust for the built CLI. The fixture
 
 `record --poll-only` explicitly disables workspace launch/termination listeners and requires scoped periodic reconciliation. Initial discovery and native AX notifications remain enabled. `recorderReady` reports `workspaceEventsEnabled`. `ruby scripts/check-ax-recorder.rb --poll-only [new-output.json]` launches the accessory fixture after readiness and verifies discovery with no workspace callbacks, matching window identity and clean teardown. This isolates polling recovery without depending on whether this host happens to deliver accessory-app workspace events.
 
+Native fixture schema 13 preserves a compact `associationTimeline` for every structural sample, including intermediate captures between fixture stages. It also lists failed required checks separately from informational enumeration/inventory results. A repeated successful capture does not override an earlier inconclusive result.
+
 `ruby scripts/check-diagnostics.rb --cycles 2 [new-output-directory]` runs all nine controlled diagnostic modes sequentially and preserves individual reports/logs plus a cumulative summary. One cycle is the default; one to five cycles are accepted. Each cycle takes roughly four minutes. Required failures produce a nonzero exit; native enumeration and restart inventory remain explicit informational checks. The runner refuses an existing output directory. `check-ax-recorder.rb [new-output.json]` can also save its report separately from build output.
 
 See [implementation status](docs/STATUS.md) and [manual feasibility protocol](docs/FEASIBILITY.md).
