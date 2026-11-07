@@ -79,8 +79,45 @@ import Testing
         recorder.stop()
     }
 
+    @Test func queuedWorkspaceCallbackFromOldRunCannotAffectRestart() {
+        let center = CapturedWorkspaceCenter()
+        var records: [[String: Any]] = []
+        let recorder = EventRecorder(workspaceCenter: center,
+            runningApplications: { [] }, emit: { records.append($0) })
+        recorder.start()
+        let old = center.handlers.last!.callback
+        recorder.stop()
+        recorder.start()
+        let current = center.handlers.last!.callback
+        let notification = Notification(name: NSWorkspace.didTerminateApplicationNotification,
+            userInfo: [NSWorkspace.applicationUserInfoKey: NSRunningApplication.current])
+        // A notification may already have been queued when its observer is removed.
+        // Deliver a retained old callback after replacement, without real AX work.
+        old(notification)
+        #expect(records.count == 2)
+        current(notification)
+        #expect(records.count == 3)
+        #expect(records.last?["event"] as? String == NSWorkspace.didTerminateApplicationNotification.rawValue)
+        recorder.stop()
+    }
+
     private func post(_ name: Notification.Name, to center: NotificationCenter) {
         center.post(name: name, object: nil,
                     userInfo: [NSWorkspace.applicationUserInfoKey: NSRunningApplication.current])
     }
+}
+
+// Used only synchronously by the main-actor test. Retaining callbacks models
+// delivery already queued before removeObserver, without scheduling global work.
+private final class CapturedWorkspaceCenter: NotificationCenter, @unchecked Sendable {
+    struct Handler { let callback: @Sendable (Notification) -> Void }
+    var handlers: [Handler] = []
+
+    override func addObserver(forName name: NSNotification.Name?, object obj: Any?, queue: OperationQueue?,
+                              using block: @escaping @Sendable (Notification) -> Void) -> NSObjectProtocol {
+        handlers.append(Handler(callback: block))
+        return NSObject()
+    }
+
+    override func removeObserver(_ observer: Any) {}
 }

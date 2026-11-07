@@ -1,5 +1,13 @@
 # Implementation status
 
+## Current checkpoint: 2026-11-07
+
+- Diagnostic-only: no window effects, management hotkeys or native observer-to-reducer integration.
+- All 67 regressions pass in debug and release (28 core, 39 platform).
+- Two rounds of eight live fixtures: 14 pass, two restart cases remain inconclusive because empty AX enumeration prevents rediscovery. Source teardown passes; missing references are never interpreted as closed windows.
+- Latest work adds scoped popup evidence, safe unknown presentation state, isolated missing tab-selection metadata, repeated diagnostic checks and rejection of stale callbacks after restart.
+- Next priorities: startup/restart window rediscovery, daily-app native-tab classification, actual OS/cross-display popup recovery and display/Space feasibility. Historical increments below retain their original observations and limits.
+
 ## Increment 1: repository, diagnostic shell, and initial core
 
 Implemented:
@@ -202,6 +210,14 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Two complete rounds against production revision 0ec5ad0 ran all 16 fixture cases in about seven minutes. Fourteen passed all required checks. Both restart cases correctly remained inconclusive: empty successful AX enumeration left the replacement observer with zero existing window references, preventing tab-structure/reset verification and later destruction delivery. Native source removal and readiness counts still passed in both cases. The aggregate runner returned nonzero and retained the failed reports.
 - This supersedes any implication that the earlier single successful restart fixture established full restart recovery. Source ownership and inactive-window rediscovery are separate concerns. Missing references are not closed windows and are not repaired by replaying old-scope state.
 - All non-restart modes passed twice: recorder delivery, native pair, multiple groups, partial selection, content-tab withholding, unvisited recovery and popup policy. Raw reports/logs remain ignored local captures. No release gate or management effect was enabled.
+
+## Increment 24: reject callbacks from previous recorder runs
+
+- A deterministic test retained an old workspace termination callback, stopped/restarted the recorder, then delivered that callback. The previous running-flag check accepted it into the new run; the test reproduced extra event records before the fix.
+- Each start now creates a private run token, invalidated on stop. Workspace closures and native subscriptions carry their originating token and reject old-run delivery before mutating state or emitting events. Current-run callbacks still work, and retries retain their existing cancellation tokens.
+- All 67 regressions (28 core, 39 platform) pass in both debug and release, including the previously failing old-callback case. The live baseline recorder check still passes. Native restart metrics now distinguish duplicate delivery from complete create/destroy coverage; missing destruction is not labeled as duplication.
+- A final native restart capture after the fix passes every required check, including fresh partial learning, unique/complete window-event delivery and source removal. Its initial physical inventory and enumerated-representative checks still report incomplete coverage. This single successful recovery does not negate the two soak failures or establish a cause for differing rediscovery behavior.
+- This fixes stale-run acceptance, not the separate empty-enumeration rediscovery gap found by the soak. Production remains diagnostic-only and platform release gates remain open.
 
 ## Validation on the initial host
 

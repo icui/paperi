@@ -306,8 +306,11 @@ if restart
   checks[:nativeSourcesRemovedAtRestart] = restarts.length == 1 && restarts.first['teardown'] == {
     'detachedObserverCount' => 1, 'sourcesStillInstalled' => 0, 'workspaceObserverCount' => 0 }
   checks[:restartReadyOnce] = records.count { |row| row['event'] == 'recorderReady' } == 2
-  checks[:noDuplicateWindowEvents] = records.count { |row| row['event'] == 'AXWindowCreated' } == 2 &&
-    records.count { |row| row['event'] == 'AXUIElementDestroyed' } == 2
+  window_events = records.select { |row| ['AXWindowCreated', 'AXUIElementDestroyed'].include?(row['event']) }
+  checks[:noDuplicateWindowEvents] = window_events.group_by { |row| [row['event'], row['windowID']] }.values.all? { |events| events.length == 1 }
+  checks[:windowEventCoverageComplete] = ['AXWindowCreated', 'AXUIElementDestroyed'].all? do |event|
+    window_events.select { |row| row['event'] == event }.map { |row| row['windowID'] }.sort == ids
+  end
   checks[:finalNativeSourcesRemoved] = records.find { |row| row['event'] == 'recordingEnded' }.dig('teardown', 'sourcesStillInstalled') == 0
 end
 if content

@@ -96,15 +96,17 @@ public enum Diagnostics {
     private final class Subscription {
         let observer: AXObserver
         let source: RecorderSource
+        let runID: UUID
         weak var owner: EventRecorder?
         var windows: [(element: AXUIElement, id: UInt32)] = []
         var notifications = NotificationSubscriptions()
         let evidenceIdentities = EvidenceIdentities()
         let selectionAssociations = SelectionAssociations()
-        init(observer: AXObserver, owner: EventRecorder) {
+        init(observer: AXObserver, owner: EventRecorder, runID: UUID) {
             self.observer = observer
             self.source = RecorderSource(AXObserverGetRunLoopSource(observer))
             self.owner = owner
+            self.runID = runID
         }
     }
     private final class WorkspaceObservation {
@@ -117,6 +119,7 @@ public enum Diagnostics {
     private var workspaceTokens: [WorkspaceObservation] = []
     private let retries = RecorderRetries()
     private var running = false
+    private var runID = UUID()
     private let workspaceCenter: NotificationCenter
     private let runningApplications: () -> [NSRunningApplication]
     private let emit: ([String: Any]) -> Void
@@ -141,6 +144,8 @@ public enum Diagnostics {
     public func start() {
         guard !running else { return }
         running = true
+        let runID = UUID()
+        self.runID = runID
         let center = workspaceCenter
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             workspaceTokens.append(WorkspaceObservation(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
@@ -149,7 +154,7 @@ public enum Diagnostics {
                 let event = notification.name.rawValue
                 let launched = notification.name == NSWorkspace.didLaunchApplicationNotification
                 MainActor.assumeIsolated {
-                    guard let self, self.running else { return }
+                    guard let self, self.running, self.runID == runID else { return }
                     guard self.includes(app) else { return }
                     if launched {
                         self.attach(pid)
@@ -199,15 +204,16 @@ public enum Diagnostics {
             guard let context else { return }
             // Every observer source is installed exclusively on the main run loop.
             MainActor.assumeIsolated {
-                Unmanaged<Subscription>.fromOpaque(context).takeUnretainedValue().owner?
-                    .receive(observer, element: element, notification: notification as String)
+                let subscription = Unmanaged<Subscription>.fromOpaque(context).takeUnretainedValue()
+                subscription.owner?.receive(observer, element: element, notification: notification as String,
+                                            runID: subscription.runID)
             }
         }, &value)
         guard result == .success, let observer = value else {
             report(result, pid: pid, notification: "AXObserverCreate")
             return
         }
-        observers[pid] = Subscription(observer: observer, owner: self)
+        observers[pid] = Subscription(observer: observer, owner: self, runID: runID)
         reconcile(pid)
     }
 
@@ -267,8 +273,9 @@ public enum Diagnostics {
               "axError": error.rawValue, "uptime": ProcessInfo.processInfo.systemUptime])
     }
 
-    private func receive(_ observer: AXObserver, element: AXUIElement, notification: String) {
-        guard running, let pid = observers.first(where: { CFEqual($0.value.observer, observer) })?.key else { return }
+    private func receive(_ observer: AXObserver, element: AXUIElement, notification: String, runID: UUID) {
+        guard running, self.runID == runID,
+              let pid = observers.first(where: { CFEqual($0.value.observer, observer) })?.key else { return }
         let cachedID = observers[pid]?.windows.first(where: { CFEqual($0.element, element) })?.id ?? 0
         let id = cachedID != 0 ? cachedID : paperi_window_id(element)
         emit(["event": notification, "pid": pid, "windowID": id,
@@ -302,6 +309,7 @@ public enum Diagnostics {
     /// Reports actual native source removal before releasing observer ownership.
     @discardableResult public func stop() -> [String: Any] {
         running = false
+        runID = UUID()
         workspaceTokens.removeAll()
         retries.cancelAll()
         let count = observers.count
