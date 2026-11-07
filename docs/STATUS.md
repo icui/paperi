@@ -121,6 +121,14 @@ This recorder is not the live management registry and does not feed the lifecycl
 - `AXTabs` is available on a child `AXTabGroup`, not the window root. Two `AXTabButton` radio controls expose selection state, and the enumerated window ID follows the fixture's selected member. Both controls point back to the active window, so a direct inactive-member mapping is still missing. The difference from increment 12's empty one-shot enumeration is observed; its cause is not established.
 - Added a regression for opt-in scope/argument validation. Debug build and all 40 tests (26 core, 14 platform) pass; editor diagnostics report no errors. Captures remain local and ignored. Daily-app native grouping and disambiguation between multiple containers, popup recovery, independent displays, Space transfer and native source teardown/restart remain release gates. No grouping heuristic, reducer wiring or window-management effect was enabled.
 
+## Increment 14: multiple native-tab containers and independent enumeration checks
+
+- Added an opt-in five-window `--multi` fixture: two independent native-tab pairs and an unrelated window, all with identical titles. It switches both groups, detaches a member, moves it into the other group (three tabs), closes the selected member, then closes all remaining windows. Ground-truth checks confirm membership, exact active-member closure and continued independence of the unrelated window.
+- Generalized the harness's structural checks to validate each tab group's owner, tab count and selection against fixture ground truth. Physical observer roots and confirmed destruction are checked independently. No title/geometry association or production membership resolver was added.
+- Single- and multiple-container captures pass stage coverage, physical root identity, tab-group ownership/selection and destruction checks. The five-window run retains five roots until active close, then four, then zero; the observed tab-group counts progress from two two-tab groups to one three-tab group and then one two-tab group. All captures remain within their stages and traversal limits.
+- AX window enumeration returns an empty array throughout both latest runs. Enumerated representatives therefore fail their own explicit check while observer structure remains verified. This revises no earlier capture result and establishes no cause for the difference; enumeration alone is insufficient evidence of an empty layout.
+- Validation: debug build and all 40 Swift regressions pass. Both live fixture modes were exercised; strengthened active-close/independent-window assertions were also checked against the completed captures. Direct inactive-member assignment, daily-app parity, popup recovery, independent displays, Space transfer and native source teardown/restart remain open. The app remains diagnostic-only.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

@@ -1,6 +1,6 @@
 import AppKit
 
-// Disposable opt-in integration fixture. It operates only on its own window,
+// Disposable opt-in integration fixture. It operates only on its own windows,
 // never activates another app, and exits without opening or saving documents.
 @MainActor final class Fixture: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
@@ -11,6 +11,7 @@ import AppKit
         if CommandLine.arguments.count >= 2 { logURL = URL(fileURLWithPath: CommandLine.arguments[1]) }
         log("launched")
         NSApp.setActivationPolicy(.regular)
+        if CommandLine.arguments.contains("--multi-tabs") { runMultipleTabGroups(); return }
         if CommandLine.arguments.contains("--tabs") { runTabs(); return }
         after(1) {
             let window = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 420, height: 260),
@@ -32,16 +33,7 @@ import AppKit
 
     private func runTabs() {
         after(1) {
-            self.tabWindows = (0..<2).map { index in
-                let window = NSWindow(contentRect: NSRect(x: 120 + index * 80, y: 120, width: 420, height: 260),
-                                      styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-                window.title = "Paperi native-tab fixture \(index)"
-                window.tabbingMode = .disallowed
-                window.tabbingIdentifier = "PaperiFixtureTabs"
-                window.isReleasedWhenClosed = false
-                window.orderFrontRegardless()
-                return window
-            }
+            self.tabWindows = (0..<2).map { self.makeTabWindow($0) }
         }
         after(3) { self.tabWindows[0].addTabbedWindow(self.tabWindows[1], ordered: .above) }
         after(5) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1] }
@@ -52,6 +44,42 @@ import AppKit
         }
         after(11) { self.tabWindows[0].addTabbedWindow(self.tabWindows[1], ordered: .above) }
         after(13) { self.tabWindows[0].tabGroup?.selectedWindow?.close() }
+        after(15) { for window in self.tabWindows { window.close() } }
+        after(17) { self.log("terminating"); NSApp.terminate(nil) }
+    }
+
+    private func makeTabWindow(_ index: Int) -> NSWindow {
+        let window = NSWindow(contentRect: NSRect(x: 120 + index * 40, y: 120, width: 420, height: 260),
+                              styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        // Deliberately identical titles: no title-based association is valid.
+        window.title = "Paperi native-tab fixture"
+        window.tabbingMode = .disallowed
+        window.tabbingIdentifier = "PaperiFixtureTabs"
+        window.isReleasedWhenClosed = false
+        window.orderFrontRegardless()
+        return window
+    }
+
+    private func runMultipleTabGroups() {
+        after(1) { self.tabWindows = (0..<5).map { self.makeTabWindow($0) } }
+        after(3) {
+            self.tabWindows[0].addTabbedWindow(self.tabWindows[1], ordered: .above)
+            self.tabWindows[2].addTabbedWindow(self.tabWindows[3], ordered: .above)
+        }
+        after(5) {
+            self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1]
+            self.tabWindows[2].tabGroup?.selectedWindow = self.tabWindows[3]
+        }
+        after(7) {
+            self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0]
+            self.tabWindows[2].tabGroup?.selectedWindow = self.tabWindows[2]
+        }
+        after(9) {
+            self.tabWindows[0].tabGroup?.removeWindow(self.tabWindows[1])
+            self.tabWindows[1].orderFrontRegardless()
+        }
+        after(11) { self.tabWindows[2].addTabbedWindow(self.tabWindows[1], ordered: .above) }
+        after(13) { self.tabWindows[2].tabGroup?.selectedWindow?.close() }
         after(15) { for window in self.tabWindows { window.close() } }
         after(17) { self.log("terminating"); NSApp.terminate(nil) }
     }
