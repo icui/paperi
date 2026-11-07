@@ -71,6 +71,52 @@ struct SelectionAssociationsTests {
         #expect(SelectionAssociations().observe(scope: "", groups: [selection()]).status == .unavailable)
     }
 
+    @Test func contentConflictPreservesUnrelatedLearningAndRetainsQuarantine() {
+        let tracker = SelectionAssociations()
+        let other = selection(21, window: 201, controls: [21, 22], group: 2)
+        _ = tracker.observe(scope: "one", groups: [selection(), other])
+        let learned = tracker.observe(scope: "one", groups: [selection(12),
+            selection(22, window: 202, controls: [21, 22], group: 2)])
+        #expect(learned.status == .observed)
+        #expect(!learned.scopeQuarantined)
+        #expect(learned.quarantinedGroups == [1])
+        #expect(learned.bindings == [2: [21: 201, 22: 202]])
+        let blocked = learned.json["groups"] as! [[String: Any]]
+        #expect(blocked[0]["quarantined"] as? Bool == true)
+        #expect(blocked[0]["complete"] as? Bool == false)
+        #expect(blocked[1]["complete"] as? Bool == true)
+        #expect(tracker.observe(scope: "one", groups: nil).quarantinedGroups == [1])
+        _ = tracker.observe(scope: "one", groups: [])
+        tracker.invalidate()
+        let returned = tracker.observe(scope: "one", groups: [selection(12, controls: [12]), other])
+        #expect(returned.quarantinedGroups == [1])
+        #expect(returned.bindings == [2: [21: 201]])
+        #expect(tracker.observe(scope: "two", groups: [selection()]).quarantinedGroups.isEmpty)
+    }
+
+    @Test func crossGroupCollisionQuarantinesEveryClaimantButPreservesThirdGroup() {
+        for reversed in [false, true] {
+            let tracker = SelectionAssociations()
+            let groups = [selection(), selection(21, controls: [21, 22], group: 2),
+                          selection(31, window: 301, controls: [31, 32], group: 3)]
+            let report = tracker.observe(scope: "one", groups: reversed ? groups.reversed() : groups)
+            #expect(report.quarantinedGroups == [1, 2])
+            #expect(!report.scopeQuarantined)
+            #expect(report.bindings == [3: [31: 301]])
+            let stillColliding = tracker.observe(scope: "one", groups: [selection(),
+                selection(31, controls: [31, 32], group: 3)])
+            #expect(stillColliding.quarantinedGroups == [1, 2, 3])
+        }
+    }
+
+    @Test func sharedAXIdentitiesQuarantineTheWholeScope() {
+        let report = SelectionAssociations().observe(scope: "one", groups: [selection(),
+            selection(11, window: 201, controls: [11, 22], group: 2),
+            selection(31, window: 301, controls: [31, 32], group: 3)])
+        #expect(report.scopeQuarantined)
+        #expect(report.bindings.isEmpty)
+    }
+
     private func nodes() -> [[String: Any]] {
         let owner: [String: Any] = ["error": 0, "nodes": [0]]
         return [

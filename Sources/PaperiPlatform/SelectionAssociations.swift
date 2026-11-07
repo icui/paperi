@@ -12,15 +12,20 @@ struct SelectionAssociationReport {
     let status: Status
     let groups: [TabSelection]
     let bindings: [Int: [Int: UInt32]]
-    let quarantined: Bool
+    let scopeQuarantined: Bool
+    let quarantinedGroups: Set<Int>
+    var quarantined: Bool { scopeQuarantined || !quarantinedGroups.isEmpty }
 
     var json: [String: Any] {
-        ["status": status.rawValue, "quarantined": quarantined, "groups": groups.map { group in
+        ["status": status.rawValue, "quarantined": quarantined,
+         "scopeQuarantined": scopeQuarantined, "quarantinedGroups": quarantinedGroups.sorted(),
+         "groups": groups.map { group in
             let known = bindings[group.group] ?? [:]
             return ["group": group.group, "controls": group.controls,
                     "bindings": known.keys.sorted().map { ["control": $0, "windowID": known[$0]!] as [String: Any] },
                     "unresolvedControls": group.controls.filter { known[$0] == nil },
-                    "complete": known.count == group.controls.count] as [String: Any]
+                    "quarantined": quarantinedGroups.contains(group.group),
+                    "complete": !quarantinedGroups.contains(group.group) && known.count == group.controls.count] as [String: Any]
         }]
     }
 }
@@ -33,6 +38,7 @@ final class SelectionAssociations {
     private var structure: [Structure]?
     private var bindings: [Int: [Int: UInt32]] = [:]
     private var quarantined = false
+    private var quarantinedGroups: Set<Int> = []
 
     func invalidate() {
         bindings.removeAll()
@@ -45,6 +51,7 @@ final class SelectionAssociations {
             self.scope = scope
             invalidate()
             quarantined = false
+            quarantinedGroups.removeAll()
         }
         guard let input = groups else { return unavailable() }
         guard !quarantined else { return conflict() }
@@ -61,24 +68,45 @@ final class SelectionAssociations {
             bindings.removeAll()
             structure = next
         }
-        for group in groups {
-            if let old = bindings[group.group]?[group.selected], old != group.window { return conflict() }
+        for group in groups where !quarantinedGroups.contains(group.group) {
+            if let old = bindings[group.group]?[group.selected], old != group.window {
+                quarantinedGroups.insert(group.group)
+                continue
+            }
             bindings[group.group, default: [:]][group.selected] = group.window
         }
-        let windows = bindings.values.flatMap { $0.values }
-        guard Set(windows).count == windows.count else { return conflict() }
-        return SelectionAssociationReport(status: .observed, groups: groups, bindings: bindings, quarantined: false)
+        // Inspect every claimant before removing any: a collision must quarantine
+        // both groups, independent of iteration order. Include already blocked
+        // groups' current owners so another candidate cannot claim their window.
+        var owners: [UInt32: [Int]] = [:]
+        for group in groups {
+            let known = bindings[group.group] ?? [:]
+            for window in known.values { owners[window, default: []].append(group.group) }
+            if known[group.selected] != group.window {
+                owners[group.window, default: []].append(group.group)
+            }
+        }
+        for claimants in owners.values where claimants.count > 1 {
+            quarantinedGroups.formUnion(claimants)
+        }
+        for group in quarantinedGroups { bindings.removeValue(forKey: group) }
+        let blocked = !groups.isEmpty && groups.allSatisfy { quarantinedGroups.contains($0.group) }
+        return SelectionAssociationReport(status: blocked ? .conflict : .observed, groups: groups,
+                                          bindings: bindings, scopeQuarantined: false,
+                                          quarantinedGroups: quarantinedGroups)
     }
 
     private func unavailable() -> SelectionAssociationReport {
         bindings.removeAll()
-        return SelectionAssociationReport(status: .unavailable, groups: [], bindings: [:], quarantined: quarantined)
+        return SelectionAssociationReport(status: .unavailable, groups: [], bindings: [:],
+                                          scopeQuarantined: quarantined, quarantinedGroups: quarantinedGroups)
     }
 
     private func conflict() -> SelectionAssociationReport {
         quarantined = true
         bindings.removeAll()
-        return SelectionAssociationReport(status: .conflict, groups: [], bindings: [:], quarantined: true)
+        return SelectionAssociationReport(status: .conflict, groups: [], bindings: [:],
+                                          scopeQuarantined: true, quarantinedGroups: quarantinedGroups)
     }
 }
 

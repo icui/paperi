@@ -153,6 +153,14 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Debug build and all 52 tests (26 core, 26 platform) pass. The final mixed fixture passes all 13 harness checks: actual content AX visibility/selection, no complete content candidate, retained conflict quarantine, native structure, identity and cleanup. The native-only positive control still passes all nine checks and learns both groups. Earlier failed assertions distinguished unavailable metadata from retained quarantine; the final harness checks both explicitly.
 - This validates conservative withholding for the controlled content-tab case, not a general native-vs-content classifier. The current diagnostic policy can withhold a whole mixed app; daily-app support, narrower ambiguity recovery, unvisited members and the other release gates remain open. No layout/reducer integration or window-management effects were enabled.
 
+## Increment 18: isolate diagnostic group conflicts
+
+- Physical-owner conflicts now quarantine every implicated group while unrelated groups continue learning. Shared or malformed AX identities still quarantine the entire observer. Collision checks include currently observed owners of already blocked groups and do not choose a winning claimant.
+- Reports distinguish `scopeQuarantined`, retained `quarantinedGroups`, and per-candidate quarantine. Blocked candidates expose no bindings and cannot become complete. Group quarantine persists through missing evidence, disappearance, topology changes and destruction invalidation until observer replacement; normal topology changes still conservatively clear all learned bindings.
+- Added three regressions for mixed-group learning, retained quarantine, cross-group collisions and observer-wide identity corruption. All 55 tests (26 core, 29 platform) pass; editor diagnostics and patch formatting are clean.
+- The mixed live fixture passes all 15 checks, including complete learning of both native groups while only the content group is quarantined. The native-only positive control passes all nine checks. The harness now checks isolated quarantine explicitly and uses report schema 7.
+- This closes the controlled mixed-group conflict-isolation gap. Whole-capture metadata failures still withhold learning; daily-app classification, unvisited members, popup recovery, displays, Spaces and lifecycle release gates remain open. No reducer integration or window-management effects were enabled.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

@@ -218,10 +218,9 @@ checks[:candidateAssociationsSound] = stages.all? do |stage|
 end
 learned_stage = stages.find { |stage| stage[:fixture]['event'] == 'action-7.0' }
 learned = learned_stage[:evidence]['applications'].first['selectionAssociations']
-unless content
-  checks[:visitedGroupsLearned] = learned && learned['status'] == 'observed' &&
-    learned['groups'].length == (multi ? 2 : 1) && learned['groups'].all? { |group| group['complete'] }
-end
+native_candidates = learned ? learned['groups'].reject { |group| group['quarantined'] } : []
+checks[:visitedGroupsLearned] = learned && learned['status'] == 'observed' &&
+  native_candidates.length == (multi ? 2 : 1) && native_candidates.all? { |group| group['complete'] }
 regrouped_stage = stages.find { |stage| stage[:fixture]['event'] == 'action-11.0' }
 regrouped = regrouped_stage[:evidence]['applications'].first['selectionAssociations']
 checks[:regroupingDropsBindings] = regrouped && (content ? ['observed', 'unavailable', 'conflict'] : ['observed', 'unavailable']).include?(regrouped['status']) &&
@@ -256,7 +255,17 @@ if content
   end
   checks[:contentConflictQuarantined] = stages.select do |stage|
     [7, 9, 11, 13].any? { |n| stage[:fixture]['event'] == "action-#{n}.0" }
-  end.all? { |stage| stage[:evidence]['applications'].first.dig('selectionAssociations', 'quarantined') == true }
+  end.all? do |stage|
+    report = stage[:evidence]['applications'].first['selectionAssociations']
+    report['quarantined'] == true && report['scopeQuarantined'] == false &&
+      report['quarantinedGroups'].length == 1 &&
+      report['groups'].select { |group| group['quarantined'] }.all? { |group| group['bindings'].empty? && !group['complete'] }
+  end
+  learned_app = learned_stage[:evidence]['applications'].first
+  content_group = learned_app['nodes'].find do |node|
+    node['AXRole'] == 'AXTabGroup' && node['windowID'] == learned_stage[:fixture]['contentWindow']
+  end
+  checks[:onlyContentGroupQuarantined] = content_group && learned['quarantinedGroups'] == [content_group['axIdentity']]
 end
 structural_checks = checks.reject { |name, _| name == :enumeratedRepresentatives }
 observation = if structural_checks.values.all?
@@ -301,7 +310,7 @@ identity_comparisons = (multi ? [[0, 1], [2, 3]] : [[0, 1]]).map do |indices|
     returnRestoresTokens: ready ? samples.first[:controls] == samples.last[:controls] : nil }
 end
 mode = content ? 'native groups with content tabs' : (multi ? 'multiple containers' : 'single container')
-File.write(output, JSON.pretty_generate(schemaVersion: 6, fixtureMode: mode, observation: observation, checks: checks, identityComparisons: identity_comparisons, stages: stages, events: event_counts,
+File.write(output, JSON.pretty_generate(schemaVersion: 7, fixtureMode: mode, observation: observation, checks: checks, identityComparisons: identity_comparisons, stages: stages, events: event_counts,
   scope: 'Controlled fixture evidence only. Native-tab grouping is not inferred from equal frames or titles.'))
 summary = stages.map do |stage|
   apps = stage[:evidence]['applications']
