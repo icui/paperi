@@ -140,42 +140,122 @@ final class SelectionAssociations {
 }
 
 enum TabSelectionEvidence {
+    private static func errorCode(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        return (value as? Int32).map(Int.init)
+    }
+
+    struct Issue: Equatable {
+        enum Reason: String {
+            case incompleteCapture, noRoots, invalidRoot, rootReferenceUnavailable, nodeRoleUnavailable, groupIdentityUnavailable
+            case groupOwnerUnavailable, tabsUnavailable, controlMetadataUnavailable
+            case selectionValueUnavailable, selectionAmbiguous
+        }
+        let reason: Reason
+        var node: Int? = nil
+        var attribute: String? = nil
+        var error: Int? = nil
+
+        var json: [String: Any] {
+            var result: [String: Any] = ["reason": reason.rawValue]
+            if let node { result["node"] = node }
+            if let attribute { result["attribute"] = attribute }
+            if let error { result["error"] = error }
+            return result
+        }
+    }
+
+    struct Capture {
+        let groups: [TabSelection]?
+        let issues: [Issue]
+    }
+
     /// Complete structure and ownership are required. Missing/ambiguous selection
     /// withholds only that known group; never fill it from spare physical roots.
     static func parse(nodes: [[String: Any]], roots: [Int], complete: Bool) -> [TabSelection]? {
-        guard complete, !roots.isEmpty, roots.allSatisfy({ nodes.indices.contains($0) }) else { return nil }
+        inspect(nodes: nodes, roots: roots, complete: complete).groups
+    }
+
+    /// Explains the first structural rejection and every unavailable selection.
+    /// Node indices refer only to this capture, never to durable AX identities.
+    static func inspect(nodes: [[String: Any]], roots: [Int], complete: Bool) -> Capture {
+        guard complete else { return Capture(groups: nil, issues: [.init(reason: .incompleteCapture)]) }
+        guard !roots.isEmpty else { return Capture(groups: nil, issues: [.init(reason: .noRoots)]) }
+        guard roots.allSatisfy({ nodes.indices.contains($0) }) else {
+            return Capture(groups: nil, issues: [.init(reason: .invalidRoot)])
+        }
         var result: [TabSelection] = []
+        var issues: [Issue] = []
+        func reject(_ reason: Issue.Reason, node: Int, attribute: String) -> Capture {
+            let relation = nodes[node][attribute] as? [String: Any]
+            let error = errorCode(relation?["error"]) ?? errorCode(nodes[node][attribute + "Error"])
+            return Capture(groups: nil, issues: issues + [.init(reason: reason, node: node, attribute: attribute, error: error)])
+        }
         func relation(_ node: [String: Any], _ name: String) -> [Int]? {
             guard let value = node[name] as? [String: Any],
                   value["error"] as? Int == 0 || value["error"] as? Int32 == 0 else { return nil }
             return value["nodes"] as? [Int]
         }
-        for group in nodes where group["AXRole"] as? String == "AXTabGroup" {
-            guard let id = group["axIdentity"] as? Int,
-                  let owner = relation(group, "AXWindow"), owner.count == 1,
+        for index in Set(roots).sorted() {
+            if let validation = nodes[index]["rootValidation"] as? [String: Any],
+               validation["status"] as? String != "accepted" {
+                return Capture(groups: nil, issues: [.init(reason: .rootReferenceUnavailable, node: index)])
+            }
+        }
+        // An unreadable role may conceal an entire tab group. A bounded graph
+        // with such a node cannot affirm even an empty candidate topology.
+        for (index, node) in nodes.enumerated() {
+            guard let role = node["AXRole"] as? String, !role.isEmpty else {
+                return reject(.nodeRoleUnavailable, node: index, attribute: "AXRole")
+            }
+        }
+        for (index, group) in nodes.enumerated() where group["AXRole"] as? String == "AXTabGroup" {
+            guard let id = group["axIdentity"] as? Int else {
+                return reject(.groupIdentityUnavailable, node: index, attribute: "axIdentity")
+            }
+            guard let owner = relation(group, "AXWindow"), owner.count == 1,
                   let root = owner.first, roots.contains(root), nodes.indices.contains(root),
                   nodes[root]["AXRole"] as? String == "AXWindow",
-                  let window = nodes[root]["windowID"] as? UInt32, window > 0,
-                  let tabs = relation(group, "AXTabs"), !tabs.isEmpty,
+                  let window = nodes[root]["windowID"] as? UInt32, window > 0 else {
+                return reject(.groupOwnerUnavailable, node: index, attribute: "AXWindow")
+            }
+            guard let tabs = relation(group, "AXTabs"), !tabs.isEmpty,
                   let tabData = group["AXTabs"] as? [String: Any], tabData["count"] as? Int == tabs.count,
-                  Set(tabs).count == tabs.count, tabs.allSatisfy({ nodes.indices.contains($0) }) else { return nil }
+                  Set(tabs).count == tabs.count, tabs.allSatisfy({ nodes.indices.contains($0) }) else {
+                return reject(.tabsUnavailable, node: index, attribute: "AXTabs")
+            }
             var controls: [Int] = []
             var selected: [Int] = []
             var selectionKnown = true
             for index in tabs {
                 let control = nodes[index]
-                guard control["AXRole"] as? String == "AXRadioButton",
-                      control["AXSubrole"] as? String == "AXTabButton",
-                      let token = control["axIdentity"] as? Int,
-                      relation(control, "AXWindow") == owner else { return nil }
+                guard control["AXRole"] as? String == "AXRadioButton" else {
+                    return reject(.controlMetadataUnavailable, node: index, attribute: "AXRole")
+                }
+                guard control["AXSubrole"] as? String == "AXTabButton" else {
+                    return reject(.controlMetadataUnavailable, node: index, attribute: "AXSubrole")
+                }
+                guard let token = control["axIdentity"] as? Int else {
+                    return reject(.controlMetadataUnavailable, node: index, attribute: "axIdentity")
+                }
+                guard relation(control, "AXWindow") == owner else {
+                    return reject(.controlMetadataUnavailable, node: index, attribute: "AXWindow")
+                }
                 controls.append(token)
                 if let value = control["AXValue"] as? Bool {
                     if value { selected.append(token) }
-                } else { selectionKnown = false }
+                } else {
+                    selectionKnown = false
+                    issues.append(.init(reason: .selectionValueUnavailable, node: index, attribute: "AXValue",
+                                        error: errorCode(control["AXValueError"])))
+                }
+            }
+            if selectionKnown && selected.count != 1 {
+                issues.append(.init(reason: .selectionAmbiguous, node: index, attribute: "AXTabs"))
             }
             result.append(TabSelection(group: id, controls: controls,
                 selected: selectionKnown && selected.count == 1 ? selected[0] : nil, window: window))
         }
-        return result
+        return Capture(groups: result, issues: issues)
     }
 }

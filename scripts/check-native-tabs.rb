@@ -5,15 +5,17 @@ require 'json'
 require 'open3'
 require 'timeout'
 require 'tmpdir'
+require_relative 'window-event-evidence'
 
 root = File.expand_path('..', __dir__)
 arguments = ARGV.dup
 unvisited = arguments.delete('--unvisited') != nil
 restart = arguments.delete('--restart') != nil
+reconcile = arguments.delete('--reconcile') != nil
 content = arguments.delete('--content') != nil
 partial = arguments.delete('--partial') != nil
 multi = arguments.delete('--multi') != nil || content || partial
-abort 'Usage: check-native-tabs.rb [--multi|--content|--unvisited|--restart|--partial] [new-output.json]' if arguments.length > 1 || (unvisited && multi) || (restart && (unvisited || multi)) || (partial && content) || arguments.any? { |argument| argument.start_with?('-') }
+abort 'Usage: check-native-tabs.rb [--multi|--content|--unvisited|--restart [--reconcile]|--partial] [new-output.json]' if arguments.length > 1 || (unvisited && multi) || (restart && (unvisited || multi)) || (reconcile && !restart) || (partial && content) || arguments.any? { |argument| argument.start_with?('-') }
 wrapper = File.join(root, 'scripts', 'swift.sh')
 abort 'Build failed' unless system(wrapper, 'build')
 bin, status = Open3.capture2(wrapper, 'build', '--show-bin-path')
@@ -35,7 +37,7 @@ configuration = {
   single: ['NativeTab', 'native-tab', 'single container']
 }.fetch(mode_key)
 bundle_id = "dev.paperi.#{configuration[0]}Fixture"
-filename = "#{configuration[1]}-fixture.json"
+filename = "#{configuration[1]}#{reconcile ? '-reconciled' : ''}-fixture.json"
 output = arguments.first || File.join(root, 'captures', filename)
 abort "Output already exists: #{output}" if File.exist?(output)
 stages = []
@@ -60,6 +62,7 @@ Dir.mktmpdir('paperi-tabs-', File.join(root, '.build')) do |temporary|
   log = File.join(temporary, 'fixture.jsonl')
   recorder_args = ['record', restart ? '42' : (unvisited ? '29' : '20'), '--bundle-id', bundle_id, '--tab-evidence']
   recorder_args += ['--restart-after', '18.5'] if restart
+  recorder_args += ['--reconcile-every', '1'] if reconcile
   input, stream, recorder = Open3.popen2(File.join(bin, 'paperi'), *recorder_args)
   input.close
   queue = Queue.new
@@ -299,6 +302,7 @@ closed_app = closed_stage[:evidence]['applications'].first
 checks[:emptyCaptureStaysUnconfirmed] = closed_candidates['status'] == 'unavailable' &&
   closed_app.dig('windowCoverage', 'status') == 'noReferences' &&
   closed_app.dig('windowCoverage', 'confirmsEmptyWindowSet') == false
+event_evidence = WindowEventEvidence.summarize(records, expected_ids: ids)
 if restart
   after_restart = stages.find { |stage| stage[:fixture]['event'] == 'action-8.0' }[:evidence]['applications'].first
   before_restart = learned_stage[:evidence]['applications'].first
@@ -310,11 +314,9 @@ if restart
   checks[:nativeSourcesRemovedAtRestart] = restarts.length == 1 && restarts.first['teardown'] == {
     'detachedObserverCount' => 1, 'sourcesStillInstalled' => 0, 'workspaceObserverCount' => 0 }
   checks[:restartReadyOnce] = records.count { |row| row['event'] == 'recorderReady' } == 2
-  window_events = records.select { |row| ['AXWindowCreated', 'AXUIElementDestroyed'].include?(row['event']) }
-  checks[:noDuplicateWindowEvents] = window_events.group_by { |row| [row['event'], row['windowID']] }.values.all? { |events| events.length == 1 }
-  checks[:windowEventCoverageComplete] = ['AXWindowCreated', 'AXUIElementDestroyed'].all? do |event|
-    window_events.select { |row| row['event'] == event }.map { |row| row['windowID'] }.sort == ids
-  end
+  checks[:noDuplicateKnownWindowEvents] = event_evidence[:duplicateKnownEvents].empty?
+  checks[:windowEventIdentitiesComplete] = event_evidence[:identitiesComplete]
+  checks[:windowEventCoverageComplete] = event_evidence[:coverageComplete]
   checks[:finalNativeSourcesRemoved] = records.find { |row| row['event'] == 'recordingEnded' }.dig('teardown', 'sourcesStillInstalled') == 0
 end
 if content
@@ -355,6 +357,37 @@ if content
     node['AXRole'] == 'AXTabGroup' && node['windowID'] == learned_stage[:fixture]['contentWindow']
   end
   checks[:onlyContentGroupQuarantined] = content_group && learned['quarantinedGroups'] == [content_group['axIdentity']]
+end
+checks[:associationEvidenceIssuesReported] = records.select { |row| row['event'] == 'tabEvidence' }.all? do |row|
+  row.fetch('applications').all? do |app_row|
+    app_row.dig('selectionAssociations', 'evidenceIssues').is_a?(Array)
+  end
+end
+checks[:periodicReconciliationObserved] = records.any? { |row| row['event'] == 'recorderReconciled' } if reconcile
+checks[:rootValidationReported] = records.select { |row| row['event'] == 'tabEvidence' }.all? do |row|
+  row.fetch('applications').all? do |app_row|
+    roots = (app_row['roots'] + app_row['observedRoots']).uniq.sort
+    validations = app_row['rootValidations']
+    next false unless validations.is_a?(Array) && validations.map { |entry| entry['node'] } == roots
+    validations.all? do |entry|
+      node = app_row['nodes'][entry['node']]
+      if entry['status'] == 'accepted'
+        entry['pidError'] == 0 && %w[AXWindow AXSheet].include?(entry['role'])
+      else
+        entry['status'] == 'unavailable' &&
+          %w[ownerUnavailable foreignOwner roleUnavailable nonWindowRole notRead].include?(entry['reason']) &&
+          (node.keys & %w[AXTabs AXChildren AXSelectedChildren AXWindow AXTopLevelUIElement]).empty? &&
+          app_row.dig('selectionAssociations', 'status') == 'unavailable'
+      end
+    end
+  end
+end
+checks[:truncationReasonsReported] = records.select { |row| row['event'] == 'tabEvidence' }.all? do |row|
+  row.fetch('applications').all? do |app_row|
+    reasons = app_row['truncationReasons']
+    reasons.is_a?(Array) && (reasons - %w[timeBudget depthLimit nodeLimit]).empty? &&
+      app_row['truncated'] == !reasons.empty?
+  end
 end
 structural_checks = checks.reject { |name, _| name == :enumeratedRepresentatives || name == :physicalInventoryComplete }
 failed_checks = structural_checks.reject { |_, value| value == true }.keys
@@ -404,10 +437,10 @@ end
 association_timeline = records.select { |row| row['event'] == 'tabEvidence' }.map do |row|
   { captureStartedUptime: row['captureStartedUptime'], uptime: row['uptime'],
     applications: row['applications'].map do |app_row|
-      app_row.select { |key, _| %w[pid identityScope windowCoverage truncated identityTruncated selectionAssociations].include?(key) }
+      app_row.select { |key, _| %w[pid identityScope windowCoverage rootValidations truncated truncationReasons identityTruncated selectionAssociations].include?(key) }
     end }
 end
-File.write(output, JSON.pretty_generate(schemaVersion: 13, fixtureMode: configuration[2], observation: observation, checks: checks, failedChecks: failed_checks, identityComparisons: identity_comparisons,
+File.write(output, JSON.pretty_generate(schemaVersion: 18, fixtureMode: configuration[2], reconciliationEnabled: reconcile, observation: observation, checks: checks, failedChecks: failed_checks, identityComparisons: identity_comparisons, windowEventEvidence: event_evidence,
   associationTimeline: association_timeline,
   discoveryPasses: records.select { |row| row['event'] == 'windowDiscovery' }, stages: stages, events: event_counts,
   scope: 'Controlled fixture evidence only. Native-tab grouping is not inferred from equal frames or titles.'))

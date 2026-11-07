@@ -175,6 +175,97 @@ struct SelectionAssociationsTests {
         #expect(TabSelectionEvidence.parse(nodes: nodes(), roots: [0], complete: false) == nil)
     }
 
+    @Test func graphIssuesIdentifySelectionReadFailuresWithoutChangingGroupIsolation() {
+        var graph = nodes()
+        graph[3].removeValue(forKey: "AXValue")
+        graph[3]["AXValueError"] = AXError.noValue.rawValue
+        let capture = TabSelectionEvidence.inspect(nodes: graph, roots: [0], complete: true)
+        #expect(capture.groups == [TabSelection(group: 1, controls: [11, 12], selected: nil, window: 101)])
+        #expect(capture.issues == [.init(reason: .selectionValueUnavailable, node: 3, attribute: "AXValue",
+                                       error: Int(AXError.noValue.rawValue))])
+        #expect(capture.issues[0].json["error"] as? Int == Int(AXError.noValue.rawValue))
+        graph[3]["AXValueError"] = 0
+        #expect(TabSelectionEvidence.inspect(nodes: graph, roots: [0], complete: true).issues[0].error == 0)
+        graph[3]["AXValue"] = true
+        #expect(TabSelectionEvidence.inspect(nodes: graph, roots: [0], complete: true).issues ==
+            [.init(reason: .selectionAmbiguous, node: 1, attribute: "AXTabs")])
+        #expect(TabSelectionEvidence.inspect(nodes: nodes(), roots: [0], complete: true).issues.isEmpty)
+    }
+
+    @Test func graphIssuesDistinguishCaptureStructureAndOwnershipRejections() {
+        #expect(TabSelectionEvidence.inspect(nodes: nodes(), roots: [0], complete: false).issues ==
+            [.init(reason: .incompleteCapture)])
+        #expect(TabSelectionEvidence.inspect(nodes: nodes(), roots: [], complete: true).issues ==
+            [.init(reason: .noRoots)])
+        #expect(TabSelectionEvidence.inspect(nodes: nodes(), roots: [99], complete: true).issues ==
+            [.init(reason: .invalidRoot)])
+        for (node, attribute, reason) in [
+            (1, "axIdentity", TabSelectionEvidence.Issue.Reason.groupIdentityUnavailable),
+            (1, "AXWindow", .groupOwnerUnavailable), (1, "AXTabs", .tabsUnavailable),
+            (2, "AXRole", .nodeRoleUnavailable), (2, "AXSubrole", .controlMetadataUnavailable),
+            (2, "axIdentity", .controlMetadataUnavailable), (2, "AXWindow", .controlMetadataUnavailable)
+        ] {
+            var graph = nodes()
+            graph[node].removeValue(forKey: attribute)
+            let capture = TabSelectionEvidence.inspect(nodes: graph, roots: [0], complete: true)
+            #expect(capture.groups == nil)
+            #expect(capture.issues == [.init(reason: reason, node: node, attribute: attribute)])
+        }
+        var graph = nodes()
+        graph[1]["AXTabs"] = ["error": AXError.cannotComplete.rawValue]
+        #expect(TabSelectionEvidence.inspect(nodes: graph, roots: [0], complete: true).issues ==
+            [.init(reason: .tabsUnavailable, node: 1, attribute: "AXTabs", error: Int(AXError.cannotComplete.rawValue))])
+    }
+
+    @Test func unreadableRolesCannotBecomeAnObservedEmptyTabTopology() {
+        for index in [0, 1, 2, 3] {
+            var graph = nodes()
+            graph[index].removeValue(forKey: "AXRole")
+            graph[index]["AXRoleError"] = AXError.cannotComplete.rawValue
+            let tracker = SelectionAssociations()
+            _ = tracker.observe(scope: "one", groups: [selection()])
+            let capture = TabSelectionEvidence.inspect(nodes: graph, roots: [0], complete: true)
+            #expect(capture.groups == nil)
+            #expect(capture.issues == [.init(reason: .nodeRoleUnavailable, node: index, attribute: "AXRole",
+                                           error: Int(AXError.cannotComplete.rawValue))])
+            let report = tracker.observe(scope: "one", groups: capture.groups)
+            #expect(report.status == .unavailable)
+            #expect(report.bindings.isEmpty)
+            #expect(report.resets == [.init(reason: .captureUnavailable, group: 1, discardedBindings: 1)])
+            #expect(tracker.observe(scope: "one", groups: [selection(12, window: 102)]).bindings == [1: [12: 102]])
+        }
+    }
+
+    @Test func rejectedRootWithholdsOtherwiseUsableLearningUntilFreshRecovery() {
+        for reason in ["foreignOwner", "ownerUnavailable", "nonWindowRole", "roleUnavailable", "notRead"] {
+            var graph = nodes()
+            graph[0]["rootValidation"] = ["status": "accepted", "pidError": 0]
+            graph.append(["AXRole": "AXApplication", "rootValidation": ["status": "unavailable", "reason": reason]])
+            let tracker = SelectionAssociations()
+            _ = tracker.observe(scope: "one", groups: [selection()])
+            _ = tracker.observe(scope: "one", groups: [selection(12, window: 102)])
+            let capture = TabSelectionEvidence.inspect(nodes: graph, roots: [0, 4, 4], complete: true)
+            #expect(capture.groups == nil)
+            #expect(capture.issues == [.init(reason: .rootReferenceUnavailable, node: 4)])
+            let unavailable = tracker.observe(scope: "one", groups: capture.groups)
+            #expect(unavailable.status == .unavailable)
+            #expect(unavailable.bindings.isEmpty)
+            #expect(unavailable.resets == [.init(reason: .captureUnavailable, group: 1, discardedBindings: 2)])
+            graph.removeLast()
+            let recovered = TabSelectionEvidence.inspect(nodes: graph, roots: [0], complete: true)
+            #expect(recovered.groups == [selection()])
+            #expect(tracker.observe(scope: "one", groups: recovered.groups).bindings == [1: [11: 101]])
+        }
+    }
+
+    @Test func missingRootValidationStatusCannotAffirmAcceptedOwnership() {
+        var graph = nodes()
+        graph[0]["rootValidation"] = ["pidError": 0]
+        #expect(TabSelectionEvidence.inspect(nodes: graph, roots: [0], complete: true).groups == nil)
+        graph[0]["rootValidation"] = ["status": "accepted", "pidError": 0]
+        #expect(TabSelectionEvidence.inspect(nodes: graph, roots: [0], complete: true).groups == [selection()])
+    }
+
     @Test func graphAdapterRejectsDuplicateSelectionAndIncompleteTabs() {
         var multiple = nodes()
         multiple[3]["AXValue"] = true

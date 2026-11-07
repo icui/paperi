@@ -38,14 +38,29 @@ extension Diagnostics {
             var nodes: [AXUIElement] = []
             var rows: [[String: Any]] = []
             var truncated = false
+            var truncationReasons: Set<String> = []
             let deadline = ProcessInfo.processInfo.systemUptime + 1
             func withinBudget() -> Bool {
-                guard ProcessInfo.processInfo.systemUptime < deadline else { truncated = true; return false }
+                guard ProcessInfo.processInfo.systemUptime < deadline else {
+                    truncated = true
+                    truncationReasons.insert("timeBudget")
+                    return false
+                }
                 return true
             }
             func visit(_ element: AXUIElement, depth: Int) -> Int? {
                 if let index = nodes.firstIndex(where: { CFEqual($0, element) }) { return index }
-                guard depth <= 5, nodes.count < 128, withinBudget() else { truncated = true; return nil }
+                guard depth <= 5 else {
+                    truncated = true
+                    truncationReasons.insert("depthLimit")
+                    return nil
+                }
+                guard nodes.count < 128 else {
+                    truncated = true
+                    truncationReasons.insert("nodeLimit")
+                    return nil
+                }
+                guard withinBudget() else { return nil }
                 let index = nodes.count
                 nodes.append(element)
                 rows.append([:])
@@ -58,12 +73,35 @@ extension Diagnostics {
                 if id != 0 { row["windowID"] = id }
                 for name in [kAXRoleAttribute, kAXSubroleAttribute] {
                     guard withinBudget() else { break }
-                    if let value = attribute(element, name) as? String { row[name] = value }
+                    var value: CFTypeRef?
+                    let result = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+                    row[name + "Error"] = result.rawValue
+                    if result == .success, let value = value as? String { row[name] = value }
+                }
+                if row["enumeratedWindowIndex"] != nil || row["observedWindowIndex"] != nil {
+                    var owner: pid_t = 0
+                    let result = AXUIElementGetPid(element, &owner)
+                    var validation: [String: Any] = ["pidError": result.rawValue, "status": "accepted"]
+                    if let rejection = WindowReferenceValidation.rejection(
+                        pid: result == .success ? owner : nil, role: row[kAXRoleAttribute] as? String,
+                        expectedPID: app.processIdentifier) {
+                        validation["status"] = "unavailable"
+                        validation["reason"] = rejection.rawValue
+                        row["rootValidation"] = validation
+                        // Preserve the rejected root itself, but do not walk an
+                        // application/menu tree or an invalid/foreign reference.
+                        rows[index] = row
+                        return index
+                    }
+                    row["rootValidation"] = validation
                 }
                 for name in ["AXSelected", "AXValue"] {
                     guard withinBudget() else { break }
                     if name == "AXValue", row[kAXRoleAttribute] as? String != "AXRadioButton" { continue }
-                    if let value = attribute(element, name),
+                    var value: CFTypeRef?
+                    let result = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+                    row[name + "Error"] = result.rawValue
+                    if result == .success, let value,
                        let selection = TabSelectionValue.read(value, role: row[kAXRoleAttribute] as? String, attribute: name) {
                         row[name] = selection.value
                         row[name + "Encoding"] = selection.encoding
@@ -94,21 +132,33 @@ extension Diagnostics {
             let observedRoots = observed.compactMap { visit($0, depth: 0) }
             let allRoots = Set(roots + observedRoots)
             let usableRoots = allRoots.filter { index in
-                rows[index]["AXRole"] as? String == "AXWindow" && (rows[index]["windowID"] as? UInt32 ?? 0) > 0
+                (rows[index]["rootValidation"] as? [String: Any])?["status"] as? String == "accepted" &&
+                    rows[index]["AXRole"] as? String == "AXWindow" && (rows[index]["windowID"] as? UInt32 ?? 0) > 0
+            }
+            let rootValidations: [[String: Any]] = allRoots.sorted().map { index in
+                var facts = rows[index]["rootValidation"] as? [String: Any] ?? ["status": "unavailable", "reason": "notRead"]
+                facts["node"] = index
+                if let role = rows[index]["AXRole"] { facts["role"] = role }
+                if let error = rows[index]["AXRoleError"] { facts["roleError"] = error }
+                return facts
             }
             let coverage = WindowCoverage(rootCount: allRoots.count, usableRootCount: usableRoots.count, truncated: truncated)
             var report: [String: Any] = ["pid": app.processIdentifier, "windowsError": error.rawValue,
                                  "rawWindowCount": (value as? [Any])?.count ?? -1,
                                  "applicationRole": applicationRole,
                                  "roots": roots, "observedRoots": observedRoots,
-                                 "nodes": rows, "truncated": truncated, "windowCoverage": coverage.json]
+                                 "rootValidations": rootValidations,
+                                 "nodes": rows, "truncated": truncated,
+                                 "truncationReasons": truncationReasons.sorted(), "windowCoverage": coverage.json]
             if let identity {
                 report["identityScope"] = identity.scope
                 report["identityTruncated"] = identity.exhausted
                 if let tracker = associations[app.processIdentifier] {
-                    let selections = TabSelectionEvidence.parse(nodes: rows, roots: roots + observedRoots,
+                    let capture = TabSelectionEvidence.inspect(nodes: rows, roots: roots + observedRoots,
                         complete: coverage.status == .referencesAvailable && !identity.exhausted)
-                    report["selectionAssociations"] = tracker.observe(scope: identity.scope, groups: selections).json
+                    var association = tracker.observe(scope: identity.scope, groups: capture.groups).json
+                    association["evidenceIssues"] = capture.issues.map(\.json)
+                    report["selectionAssociations"] = association
                 }
             }
             applications.append(report)

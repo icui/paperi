@@ -262,7 +262,10 @@ public enum Diagnostics {
         let enumerated = read(kAXWindowsAttribute) as? [AXUIElement] ?? []
         let focused = reference(read(kAXFocusedWindowAttribute))
         let main = reference(read(kAXMainWindowAttribute))
-        let discovery = RecorderWindowDiscovery.collect(enumerated: enumerated, focused: focused, main: main, pid: pid) { window in
+        // Inspect only direct children, never descend into application/menu trees.
+        let children = read(kAXChildrenAttribute) as? [AXUIElement] ?? []
+        let discovery = RecorderWindowDiscovery.collect(enumerated: enumerated, focused: focused, main: main,
+                                                      children: Array(children.prefix(128)), pid: pid) { window in
             AXUIElementSetMessagingTimeout(window, 0.15)
             var owner: pid_t = 0
             let result = AXUIElementGetPid(window, &owner)
@@ -271,6 +274,7 @@ public enum Diagnostics {
         for window in discovery.windows { attachWindow(window.element, pid: pid) }
         emit(["event": "windowDiscovery", "pid": pid, "queryErrors": errors,
               "enumeratedCount": enumerated.count, "rejectedCount": discovery.rejectedCount,
+              "directChildCount": children.count, "directChildrenTruncated": children.count > 128,
               "windows": discovery.windows.map { window in
                   ["windowID": observers[pid]?.windows.first(where: { CFEqual($0.element, window.element) })?.id ?? 0,
                    "sources": window.sources.sorted()] as [String: Any]

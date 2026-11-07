@@ -4,6 +4,7 @@ require 'fileutils'
 require 'json'
 require 'open3'
 require 'time'
+require 'digest'
 
 arguments = ARGV.dup
 cycles = 1
@@ -22,6 +23,21 @@ STDOUT.sync = true
 started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 revision, revision_status = Open3.capture2('/usr/bin/git', '-C', root, 'rev-parse', 'HEAD')
 abort 'Cannot identify repository revision' unless revision_status.success?
+working_tree, tree_status = Open3.capture2('/usr/bin/git', '-C', root, 'status', '--porcelain')
+abort 'Cannot identify working-tree state' unless tree_status.success?
+# Include untracked build inputs too. A base commit alone does not identify a
+# run against local edits, and changing sources during a cycle invalidates it.
+fingerprint = lambda do
+  paths = Dir.glob('{Package.swift,Sources/**/*,Tests/**/*,Tools/**/*,scripts/*}', base: root)
+             .select { |path| File.file?(File.join(root, path)) }.sort
+  digest = Digest::SHA256.new
+  paths.each do |path|
+    data = File.binread(File.join(root, path))
+    digest << "#{path.bytesize}:#{path}#{data.bytesize}:" << data
+  end
+  { sha256: digest.hexdigest, fileCount: paths.length }
+end
+initial_fingerprint = fingerprint.call
 steps = [
   ['recorder', 'check-ax-recorder.rb', []],
   ['poll-only', 'check-ax-recorder.rb', ['--poll-only']],
@@ -31,14 +47,21 @@ steps = [
   ['content', 'check-native-tabs.rb', ['--content']],
   ['unvisited', 'check-native-tabs.rb', ['--unvisited']],
   ['restart', 'check-native-tabs.rb', ['--restart']],
+  ['restart-reconciled', 'check-native-tabs.rb', ['--restart', '--reconcile']],
   ['popups', 'check-popups.rb', []]
 ]
 results = []
+source_unchanged = true
 write_report = lambda do
-  report = { schemaVersion: 1, revision: revision.strip, cycles: cycles,
+  current_fingerprint = fingerprint.call
+  source_unchanged &&= current_fingerprint == initial_fingerprint
+  report = { schemaVersion: 2, revision: revision.strip,
+             workingTreeDirty: !working_tree.empty?,
+             sourceFingerprint: initial_fingerprint, currentSourceFingerprint: current_fingerprint,
+             sourceUnchanged: source_unchanged, cycles: cycles,
              elapsedSeconds: Process.clock_gettime(Process::CLOCK_MONOTONIC) - started,
              completedSteps: results.length, expectedSteps: cycles * steps.length,
-             result: results.length == cycles * steps.length && results.all? { |row| row[:passed] } ? 'passed' : 'incomplete or failed',
+             result: source_unchanged && results.length == cycles * steps.length && results.all? { |row| row[:passed] } ? 'passed' : 'incomplete or failed',
              results: results,
              scope: 'Controlled AppKit fixtures only. Enumeration/inventory gaps remain explicit; no daily-app, OS focus, display or Space-transfer release gate is closed.' }
   File.write(File.join(output, 'summary.json'), JSON.pretty_generate(report))
@@ -61,7 +84,7 @@ cycles.times do |cycle|
             elapsedSeconds: Process.clock_gettime(Process::CLOCK_MONOTONIC) - step_start }
     begin
       report = JSON.parse(File.read(capture))
-      informational = name == 'restart' ? %w[enumeratedRepresentatives physicalInventoryComplete] : %w[enumeratedRepresentatives]
+      informational = name.start_with?('restart') ? %w[enumeratedRepresentatives physicalInventoryComplete] : %w[enumeratedRepresentatives]
       checks = report.fetch('checks', {})
       required = checks.reject { |key, _| informational.include?(key) }
       row[:requiredChecks] = required
@@ -79,5 +102,6 @@ cycles.times do |cycle|
     puts JSON.generate(event: 'fixtureCompleted', fixture: label, passed: row[:passed], informationalChecks: row[:informationalChecks])
   end
 end
-puts JSON.generate(event: 'diagnosticsCompleted', report: File.join(output, 'summary.json'), passed: results.all? { |row| row[:passed] })
-exit(results.all? { |row| row[:passed] } ? 0 : 1)
+passed = source_unchanged && fingerprint.call == initial_fingerprint && results.all? { |row| row[:passed] }
+puts JSON.generate(event: 'diagnosticsCompleted', report: File.join(output, 'summary.json'), passed: passed)
+exit(passed ? 0 : 1)

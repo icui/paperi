@@ -3,6 +3,21 @@ import Testing
 @testable import PaperiPlatform
 
 struct RecorderWindowDiscoveryTests {
+    @Test func directChildrenRecoverWindowsWithoutTraversingOtherRoles() {
+        let window = AXUIElementCreateApplication(12345)
+        let menu = AXUIElementCreateApplication(12346)
+        let foreign = AXUIElementCreateApplication(12347)
+        let result = RecorderWindowDiscovery.collect(enumerated: [], focused: nil, main: nil,
+                                                     children: [window, menu, foreign], pid: 42) { element in
+            if CFEqual(element, window) { return (42, "AXWindow") }
+            if CFEqual(element, menu) { return (42, "AXMenuBar") }
+            return (99, "AXWindow")
+        }
+        #expect(result.windows.count == 1)
+        #expect(result.windows.first?.sources == ["AXChildren"])
+        #expect(result.rejectedCount == 2)
+    }
+
     @Test func freshFocusAndMainReferencesRecoverEmptyEnumeration() {
         let focused = AXUIElementCreateApplication(12345)
         let main = AXUIElementCreateApplication(12346)
@@ -19,12 +34,13 @@ struct RecorderWindowDiscoveryTests {
         let first = AXUIElementCreateApplication(12345)
         let equal = AXUIElementCreateApplication(12345)
         var reads = 0
-        let result = RecorderWindowDiscovery.collect(enumerated: [first, equal], focused: equal, main: first, pid: 42) { _ in
+        let result = RecorderWindowDiscovery.collect(enumerated: [first, equal], focused: equal, main: first,
+                                                     children: [equal], pid: 42) { _ in
             reads += 1
             return (42, "AXWindow")
         }
         #expect(result.windows.count == 1)
-        #expect(result.windows[0].sources == ["AXWindows", "AXFocusedWindow", "AXMainWindow"])
+        #expect(result.windows[0].sources == ["AXWindows", "AXFocusedWindow", "AXMainWindow", "AXChildren"])
         #expect(reads == 1)
     }
 
