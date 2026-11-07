@@ -3,6 +3,30 @@ import Testing
 @testable import PaperiPlatform
 
 @MainActor struct EventRecorderLifecycleTests {
+    @Test func explicitReconciliationUsesFreshEnumerationAndStopsWithRecorder() {
+        var enumerations = 0
+        var records: [[String: Any]] = []
+        let recorder = EventRecorder(workspaceCenter: NotificationCenter(), runningApplications: {
+            enumerations += 1
+            return [NSRunningApplication.current]
+        }, bundleIDs: [], emit: { records.append($0) })
+        recorder.reconcileNow()
+        #expect(enumerations == 0 && records.isEmpty)
+        recorder.start()
+        recorder.reconcileNow()
+        recorder.reconcileNow()
+        #expect(enumerations == 3)
+        #expect(records.filter { $0["event"] as? String == "recorderReconciled" }.count == 2)
+        #expect(records.last?["applicationAttempts"] as? Int == 0)
+        recorder.stop()
+        recorder.reconcileNow()
+        #expect(enumerations == 3)
+        recorder.start()
+        recorder.reconcileNow()
+        #expect(enumerations == 5)
+        recorder.stop()
+    }
+
     @Test func repeatedStartAndStopDoNotDuplicateWorkspaceObservers() {
         let center = NotificationCenter()
         var records: [[String: Any]] = []

@@ -13,7 +13,7 @@ import AppKit
     func applicationDidFinishLaunching(_ notification: Notification) {
         if CommandLine.arguments.count >= 2 { logURL = URL(fileURLWithPath: CommandLine.arguments[1]) }
         log("launched")
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(CommandLine.arguments.contains("--accessory") ? .accessory : .regular)
         if CommandLine.arguments.contains("--popups") { runPopups(); return }
         if CommandLine.arguments.contains("--unvisited-tabs") { runUnvisitedTabs(); return }
         if CommandLine.arguments.contains("--multi-tabs") { runMultipleTabGroups(); return }
@@ -170,7 +170,8 @@ import AppKit
         } else {
             delay = CommandLine.arguments.contains("--unvisited-tabs") ? seconds * 1.5 : seconds
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+        let startupDelay = CommandLine.arguments.contains("--accessory") ? 3.0 : 0
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay + startupDelay) {
             action()
             self.log("action-\(seconds)")
         }

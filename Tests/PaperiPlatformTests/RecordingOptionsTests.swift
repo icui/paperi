@@ -2,6 +2,22 @@ import Testing
 @testable import PaperiPlatform
 
 struct RecordingOptionsTests {
+    @Test func periodicReconciliationIsExplicitBoundedAndAppScoped() throws {
+        #expect(try RecordingOptions(arguments: []).reconcileEvery == nil)
+        let options = try RecordingOptions(arguments: ["--bundle-id", "test.one", "--reconcile-every", "1.5"])
+        #expect(options.reconcileEvery == 1.5)
+        for value in ["0", "0.5", "31", "nan", "inf", "invalid"] {
+            #expect(throws: RecordingOptions.InvalidArguments.self) {
+                try RecordingOptions(arguments: ["--bundle-id", "test.one", "--reconcile-every", value])
+            }
+        }
+        for arguments in [["--reconcile-every"], ["--reconcile-every", "1"],
+                          ["--bundle-id", "test.one", "--bundle-id", "test.two", "--reconcile-every", "1"],
+                          ["--bundle-id", "test.one", "--reconcile-every", "1", "--reconcile-every", "2"]] {
+            #expect(throws: RecordingOptions.InvalidArguments.self) { try RecordingOptions(arguments: arguments) }
+        }
+    }
+
     @Test func defaultAndFilteredRecording() throws {
         let defaults = try RecordingOptions(arguments: [])
         #expect(defaults.seconds == 30)

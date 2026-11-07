@@ -176,6 +176,23 @@ public enum Diagnostics {
               "uptime": ProcessInfo.processInfo.systemUptime])
     }
 
+    /// Explicit fresh discovery. Missing apps/windows never become removal events.
+    public func reconcileNow() {
+        guard running else { return }
+        var attempted = 0
+        for app in runningApplications() where includes(app) && !app.isTerminated &&
+            app.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            let pid = app.processIdentifier
+            let needsStartup = observers[pid] == nil
+            attach(pid)
+            if needsStartup { scheduleRetries(pid) }
+            attempted += 1
+        }
+        emit(["event": "recorderReconciled", "applicationAttempts": attempted,
+              "observerCount": observers.count,
+              "uptime": ProcessInfo.processInfo.systemUptime])
+    }
+
     private func includes(_ app: NSRunningApplication) -> Bool {
         guard let bundleIDs else { return true }
         return app.bundleIdentifier.map { bundleIDs.contains($0) } ?? false

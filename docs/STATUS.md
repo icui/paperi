@@ -3,9 +3,9 @@
 ## Current checkpoint: 2026-11-07
 
 - Diagnostic-only: no window effects, management hotkeys or native observer-to-reducer integration.
-- All 72 regressions pass in debug and release (28 core, 44 platform).
+- All 74 regressions pass in debug and release (28 core, 46 platform).
 - Two rounds of eight live fixtures: 14 pass, two restart cases remain inconclusive because empty AX enumeration prevents rediscovery. Source teardown passes; missing references are never interpreted as closed windows.
-- Latest work adds scoped popup evidence, safe unknown presentation state, isolated missing tab-selection metadata, repeated diagnostic checks, stale-callback rejection, validated fresh focus/main discovery channels and explicit sampled-reference coverage.
+- Latest work adds scoped popup evidence, safe unknown presentation state, isolated missing tab-selection metadata, repeated diagnostic checks, stale-callback rejection, fresh focus/main discovery, explicit sampled-reference coverage and opt-in periodic reconciliation.
 - Next priorities: startup/restart window rediscovery, daily-app native-tab classification, actual OS/cross-display popup recovery and display/Space feasibility. Historical increments below retain their original observations and limits.
 
 ## Increment 1: repository, diagnostic shell, and initial core
@@ -233,6 +233,14 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Tab associations are unavailable when no usable window roots exist. The graph adapter also rejects a rootless empty graph, clearing learned bindings rather than presenting an observed empty topology. Confirmed destruction still removes each known reference; it does not establish that an app has no undiscovered windows.
 - Two regressions cover rootless capture after prior learning, unusable/truncated roots and partial sampled coverage. All 72 regressions (28 core, 44 platform) pass in debug and release. Native fixture schema 12 and popup closure checks assert the same distinction in live captures.
 - The native pair fixture passes all ten checks, including an unavailable association report and unconfirmed no-reference coverage after final close. The popup fixture passes all 13 checks, including the same coverage distinction after document closure. Editor diagnostics, Ruby syntax and patch formatting are clean. No management effects or layout integration were enabled; restart rediscovery and the other platform gates remain open.
+
+## Increment 27: opt-in periodic reconciliation and accessory lifecycle check
+
+- Added app-scoped `record --reconcile-every 1..30`. It is disabled by default and requires exactly one bundle ID. Each tick reads the current app list and performs fresh validated discovery/subscription reconciliation; it never treats a missing app or window as removed. Recording end invalidates the timer, and explicit reconciliation is ignored while stopped.
+- Added two regressions for option bounds/filter requirements and fresh enumeration across recorder start/stop/restart. All 74 regressions (28 core, 46 platform) pass in debug and release; editor diagnostics and patch formatting are clean.
+- Added `check-ax-recorder.rb --accessory`, with delayed window creation and one-second polling. The live check passes: 19 reconciliation ticks, single create/move/resize/minimize/restore/destroy delivery, matching discovered/destroyed identity and clean source/listener teardown. It received one workspace launch event, so this run does not prove polling-only initial app discovery. No termination event arrived; the remaining native observer was removed at recording end.
+- The original regular fixture still passes with no periodic reconciliation enabled. Both harness modes now require exactly one matching create/destroy pair and explicit zero native/workspace sources at session end.
+- This supplies an opt-in recovery opportunity after startup retries, not evidence of recovering past events or resolving all missing-window channels. Polling-only accessory discovery, absence-based process lifecycle, restart/inactive-member recovery and other platform release gates remain open. No management effects or reducer integration were enabled.
 
 ## Validation on the initial host
 

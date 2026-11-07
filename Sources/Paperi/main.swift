@@ -39,13 +39,18 @@ case "window-evidence":
     Diagnostics.printJSON(Diagnostics.windowEvidence(bundleID: args[1]))
 case "record":
     guard let options = try? RecordingOptions(arguments: Array(args.dropFirst())) else {
-        print("Usage: paperi record [seconds: >0 and <=300] [--bundle-id identifier ...] [--tab-evidence] [--window-evidence] [--restart-after seconds] (evidence requires one bundle)")
+        print("Usage: paperi record [seconds: >0 and <=300] [--bundle-id identifier ...] [--tab-evidence] [--window-evidence] [--restart-after seconds] [--reconcile-every 1..30] (evidence/reconciliation requires one bundle)")
         exit(2)
     }
     guard AXIsProcessTrusted() else { print("Accessibility access is required. Run the app and select Request Accessibility Access."); exit(1) }
     Diagnostics.printJSON(["event": "recordingStarted", "durationSeconds": options.seconds], pretty: false)
     let recorder = EventRecorder(bundleIDs: options.bundleIDs)
     recorder.start()
+    let reconcileTimer = options.reconcileEvery.map { interval in
+        Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            MainActor.assumeIsolated { recorder.reconcileNow() }
+        }
+    }
     let restartTimer = options.restartAfter.map { delay in
         Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in
             MainActor.assumeIsolated {
@@ -81,6 +86,7 @@ case "record":
     }
     RunLoop.main.run(until: Date(timeIntervalSinceNow: options.seconds))
     evidenceTimer?.invalidate()
+    reconcileTimer?.invalidate()
     restartTimer?.invalidate()
     let teardown = recorder.stop()
     Diagnostics.printJSON(["event": "recordingEnded", "teardown": teardown], pretty: false)
@@ -106,7 +112,7 @@ default:
       paperi snapshot [--include-titles]  Read-only JSON snapshot
       paperi tab-evidence identifier     Bounded read-only AX tab structure for one app
       paperi window-evidence identifier  Bounded read-only window policy/focus metadata for one app
-      paperi record [seconds] [--bundle-id identifier ...] [--tab-evidence] [--window-evidence] [--restart-after seconds]
+      paperi record [seconds] [--bundle-id identifier ...] [--tab-evidence] [--window-evidence] [--restart-after seconds] [--reconcile-every 1..30]
                                         Read-only AX event JSONL (default 30, max 300)
       paperi benchmark-core              Measure cached layout calculation only
       paperi --menu                      Run diagnostic menu bar shell
