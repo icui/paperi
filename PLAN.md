@@ -2,6 +2,8 @@
 
 Draft plan for a standalone macOS scrolling window manager that reproduces this user's PaperWM.spoon workflow with lower latency and resource use.
 
+Implementation has started. See [current status](docs/STATUS.md), [development instructions](README.md), and [feasibility protocol](docs/FEASIBILITY.md). Release gates below remain open until verified; an in-memory tab-slot model does not establish working native-tab discovery.
+
 ## Recommendation
 
 Build a native Swift menu bar app using AppKit, Accessibility observers, and a small Objective-C/C adapter for private window/Spaces APIs. Keep the layout engine independent of macOS APIs. Start with keyboard-driven parity and immediate frame changes; add animation only after measuring performance.

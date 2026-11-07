@@ -1,0 +1,7 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "Build Paperi", "type": "shell", "command": "./scripts/swift.sh build", "group": "build", "problemMatcher": [] },
+    { "label": "Test Paperi", "type": "shell", "command": "./scripts/swift.sh test --disable-xctest", "group": "test", "problemMatcher": [] }
+  ]
+}
