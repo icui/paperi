@@ -111,6 +111,7 @@ public enum Diagnostics {
     }
     private var observers: [pid_t: Subscription] = [:]
     private var workspaceTokens: [WorkspaceObservation] = []
+    private var retryTasks: [pid_t: Task<Void, Never>] = [:]
     private var running = false
     public init() {}
     public func start() {
@@ -127,6 +128,7 @@ public enum Diagnostics {
                     guard let self, self.running else { return }
                     if launched {
                         self.attach(pid)
+                        self.scheduleRetries(pid)
                     } else {
                         self.detach(pid)
                     }
@@ -137,6 +139,7 @@ public enum Diagnostics {
         }
         for app in NSWorkspace.shared.runningApplications {
             attach(app.processIdentifier)
+            scheduleRetries(app.processIdentifier)
         }
         Diagnostics.printJSON(["event": "recorderReady", "observerCount": observers.count,
                                "windowReferenceCount": observers.values.reduce(0) { $0 + $1.windows.count },
@@ -144,7 +147,11 @@ public enum Diagnostics {
     }
 
     private func attach(_ pid: pid_t) {
-        guard pid != ProcessInfo.processInfo.processIdentifier, observers[pid] == nil else { return }
+        guard pid != ProcessInfo.processInfo.processIdentifier else { return }
+        if observers[pid] != nil {
+            reconcile(pid)
+            return
+        }
         var value: AXObserver?
         let result = AXObserverCreate(pid, { observer, element, notification, context in
             guard let context else { return }
@@ -159,6 +166,12 @@ public enum Diagnostics {
             return
         }
         observers[pid] = Subscription(observer: observer, owner: self)
+        reconcile(pid)
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
+    }
+
+    private func reconcile(_ pid: pid_t) {
+        guard let observer = observers[pid]?.observer else { return }
         let element = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(element, 0.15)
         for name in [kAXWindowCreatedNotification, kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification,
@@ -168,14 +181,36 @@ public enum Diagnostics {
         if let windows = Diagnostics.attribute(element, kAXWindowsAttribute) as? [AXUIElement] {
             for window in windows { attachWindow(window, pid: pid) }
         }
-        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
+    }
+
+    /// Three startup passes at approximately 1, 3 and 7 seconds. Absence from
+    /// enumeration never removes a reference or implies that a window closed.
+    private func scheduleRetries(_ pid: pid_t) {
+        guard pid != ProcessInfo.processInfo.processIdentifier, retryTasks[pid] == nil else { return }
+        retryTasks[pid] = Task { @MainActor [weak self] in
+            for delay in [1, 2, 4] {
+                do { try await Task.sleep(for: .seconds(delay)) }
+                catch { return }
+                guard let self, self.running,
+                      let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return }
+                self.attach(pid)
+                Diagnostics.printJSON(["event": "subscriptionRetry", "pid": pid,
+                                       "uptime": ProcessInfo.processInfo.systemUptime], pretty: false)
+            }
+            self?.retryTasks.removeValue(forKey: pid)
+        }
     }
 
     private func attachWindow(_ window: AXUIElement, pid: pid_t) {
-        guard let subscription = observers[pid],
-              !subscription.windows.contains(where: { CFEqual($0.element, window) }) else { return }
+        guard let subscription = observers[pid] else { return }
         AXUIElementSetMessagingTimeout(window, 0.15)
-        subscription.windows.append((window, paperi_window_id(window)))
+        if let index = subscription.windows.firstIndex(where: { CFEqual($0.element, window) }) {
+            if subscription.windows[index].id == 0 {
+                subscription.windows[index].id = paperi_window_id(window)
+            }
+        } else {
+            subscription.windows.append((window, paperi_window_id(window)))
+        }
         for name in [kAXUIElementDestroyedNotification, kAXMovedNotification, kAXResizedNotification,
                      kAXTitleChangedNotification, kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification] {
             subscribe(subscription.observer, element: window, name: name, pid: pid)
@@ -218,6 +253,7 @@ public enum Diagnostics {
     }
 
     private func detach(_ pid: pid_t) {
+        retryTasks.removeValue(forKey: pid)?.cancel()
         guard let subscription = observers.removeValue(forKey: pid) else { return }
         CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(subscription.observer), .commonModes)
     }
@@ -225,6 +261,8 @@ public enum Diagnostics {
     public func stop() {
         running = false
         workspaceTokens.removeAll()
+        for task in retryTasks.values { task.cancel() }
+        retryTasks.removeAll()
         for pid in Array(observers.keys) { detach(pid) }
     }
 }

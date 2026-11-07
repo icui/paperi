@@ -70,6 +70,13 @@ The platform adapter must confirm these events for the entire logical container;
 
 This recorder is not the live management registry and does not feed the lifecycle reducer. Fullscreen state still needs snapshot confirmation; a resize notification is insufficient. The app remains diagnostic-only.
 
+## Increment 7: bounded recorder startup reconciliation
+
+- Initial and newly launched applications receive three bounded subscription/enumeration retry passes, nominally at 1, 3, and 7 seconds. This retries observer creation and app/window subscriptions and discovers windows omitted during startup. AX work can delay the passes.
+- Existing references are deduplicated; unresolved cached window IDs can be refreshed. Missing enumeration entries never imply closure. Application termination and recorder stop cancel pending retry tasks, including processes whose observer creation failed.
+- `subscriptionRetry` marks attempted reconciliation, not successful delivery. Continuous reconciliation, controlled launch/termination and repeat-start/stop validation remain open.
+- Validation: debug build and all 26 core regressions pass; editor diagnostics report no errors. An eight-second read-only recorder smoke run emitted one readiness marker and 236 retry-pass records and exited cleanly. Native-tab, popup, display and Space-transfer feasibility gates remain open. The app remains diagnostic-only.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)
