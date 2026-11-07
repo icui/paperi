@@ -97,6 +97,14 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Added four deterministic platform regressions with a controllable sleeper: exact pass limit and duplicate suppression, early-exit/error cleanup, cancellation followed by same-PID replacement, and stop/release cancellation. The sleeper deliberately resumes after cancellation to exercise stale-work protection without real delays or AX calls.
 - Validation: debug build, all 26 core tests and all ten platform tests pass. These tests cover retry ownership independently of native processes. Live AX run-loop source cleanup, controlled launch/window-create/destroy/termination, native tabs, popup recovery, display ownership and Space-transfer gates remain open. The app remains diagnostic-only.
 
+## Increment 11: controlled live recorder validation
+
+- Added optional repeatable `record --bundle-id` filters across initial discovery and workspace launch/termination handling, with strict duration/argument parsing. JSON output now reaches pipes immediately, allowing a harness to launch interactions only after `recorderReady`.
+- Added a disposable regular AppKit fixture and an opt-in `ruby scripts/check-ax-recorder.rb` check. The fixture is launched in the background, changes only its own window, and quits without opening/saving documents. Temporary bundle/logs are removed; only event counts are reported. Unit tests never launch it.
+- Live check passed on the initial host with the existing CLI run loop: one launch, create, move, resize, minimize, restore, destroy and termination event, three retry passes, and clean recording end. Created/destroyed IDs match and are nonzero. No subscription failures were reported in the successful controlled capture.
+- An accessory-app version completed all fixture actions but produced no workspace launch/termination events, including when tested with a full AppKit event loop. Newly launched accessory apps remain a discovery limitation. The final check uses a regular app and does not generalize its success to accessory apps or other applications; no event-loop change was retained.
+- Added three option/filter regressions. The debug build and all 39 tests (26 core, 13 platform) pass. Native-tab grouping, popup recovery, independent displays, Space transfer, and native source teardown/restart validation remain open. The app remains diagnostic-only.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

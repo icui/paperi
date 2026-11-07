@@ -65,6 +65,20 @@ import Testing
         recorder.stop()
     }
 
+    @Test func bundleFilterExcludesInitialAppsAndWorkspaceEvents() {
+        let center = NotificationCenter()
+        var records: [[String: Any]] = []
+        let recorder = EventRecorder(workspaceCenter: center,
+            runningApplications: { [NSRunningApplication.current] },
+            bundleIDs: [], emit: { records.append($0) })
+        recorder.start()
+        post(NSWorkspace.didLaunchApplicationNotification, to: center)
+        post(NSWorkspace.didTerminateApplicationNotification, to: center)
+        #expect(records.count == 1)
+        #expect(records[0]["observerCount"] as? Int == 0)
+        recorder.stop()
+    }
+
     private func post(_ name: Notification.Name, to center: NotificationCenter) {
         center.post(name: name, object: nil,
                     userInfo: [NSWorkspace.applicationUserInfoKey: NSRunningApplication.current])

@@ -14,6 +14,7 @@ Requires macOS 14+ and Swift 6+ (Xcode or Command Line Tools). The initial host 
 ./scripts/swift.sh run -c release paperi benchmark-core
 ./scripts/swift.sh run paperi snapshot
 ./scripts/swift.sh run paperi record 30 > captures/session.jsonl
+./scripts/swift.sh run paperi record 30 --bundle-id com.apple.finder > captures/finder.jsonl
 ```
 
 When running through a restricted coding-agent sandbox, an active-developer-directory or toolchain-access failure can reflect sandbox restrictions even when Command Line Tools are installed. Retry the same build/test command with approved access outside the sandbox before changing the system developer directory or installing another toolchain. The full debug build and 26 core regressions have passed this way; see [validation results](docs/STATUS.md#validation-on-the-initial-host).
@@ -34,5 +35,15 @@ Snapshots include raw AppKit display coordinates and AX window coordinates with 
 Event recording observes existing apps/windows, follows app launch/termination, and subscribes windows reported by creation or focus notifications. It reports `subscriptionFailed` records with PID, notification name, and AX error code rather than silently implying full coverage. `recorderReady` marks the end of initial subscription setup; the requested recording interval starts after setup, so total runtime can be longer. Observer/window-reference counts describe attempted coverage, not successful delivery. Applications can reject notifications or be unready at launch; retry coverage is bounded to three startup passes. `AXTabs` is captured in snapshots when exposed, but absence does not establish that a window has no native tabs. No tab-group discovery is claimed.
 
 The recorder makes three bounded subscription/enumeration retry passes for each initial or newly launched app, with nominal delays of 1, 2, and 4 seconds between passes. Confirmed notification registrations are cached per observer and AX element; failed requests remain retryable. `subscriptionRetry` marks an attempted pass, not successful coverage. AX calls can delay these passes and event delivery. Stop and application termination cancel pending retries. Missing windows are never treated as closed by reconciliation; continuous reconciliation remains future work.
+
+Repeat `--bundle-id` to record several specific apps; omitting it records all discovered apps. Filters apply to initial discovery and workspace launch/termination notifications. JSONL output is written immediately so a pipe reader can wait for `recorderReady` before interacting.
+
+An opt-in live integration check creates a disposable AppKit app, records only its bundle ID, and checks launch, create, move, resize, minimize, restore, close, and termination delivery, including stable create/destroy window IDs:
+
+```sh
+ruby scripts/check-ax-recorder.rb
+```
+
+It requires a GUI session and Accessibility trust for the built CLI. The fixture briefly shows a background window and Dock icon, changes only its own window, then quits. Its temporary bundle and logs are removed after the check. It runs separately from unit tests. This validates a regular AppKit fixture, not other apps or the native-tab/popup/display/Space-transfer gates. The accessory-app fixture experiment on the initial host did not deliver workspace launch/termination events; newly launched accessory apps can therefore be missed until a fresh recording discovers them.
 
 See [implementation status](docs/STATUS.md) and [manual feasibility protocol](docs/FEASIBILITY.md).

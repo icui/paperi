@@ -10,6 +10,7 @@ let package = Package(
         .target(name: "PaperiBridge", linkerSettings: [.linkedFramework("ApplicationServices")]),
         .target(name: "PaperiPlatform", dependencies: ["PaperiCore", "PaperiBridge"]),
         .executableTarget(name: "Paperi", dependencies: ["PaperiCore", "PaperiPlatform"]),
+        .executableTarget(name: "PaperiAXFixture", path: "Tools/AXFixture"),
         .testTarget(name: "PaperiCoreTests", dependencies: ["PaperiCore"]),
         .testTarget(name: "PaperiPlatformTests", dependencies: ["PaperiPlatform"])
     ],

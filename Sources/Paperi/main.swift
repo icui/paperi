@@ -32,12 +32,15 @@ switch args.first {
 case "snapshot":
     Diagnostics.printJSON(Diagnostics.snapshot(includeTitles: args.contains("--include-titles")))
 case "record":
-    let seconds = args.count > 1 ? Double(args[1]) ?? 0 : 30
-    guard seconds > 0, seconds <= 300 else { print("Duration must be between 0 and 300 seconds"); exit(2) }
+    guard let options = try? RecordingOptions(arguments: Array(args.dropFirst())) else {
+        print("Usage: paperi record [seconds: >0 and <=300] [--bundle-id identifier ...]")
+        exit(2)
+    }
     guard AXIsProcessTrusted() else { print("Accessibility access is required. Run the app and select Request Accessibility Access."); exit(1) }
-    Diagnostics.printJSON(["event": "recordingStarted", "durationSeconds": seconds], pretty: false)
-    let recorder = EventRecorder(); recorder.start()
-    RunLoop.main.run(until: Date(timeIntervalSinceNow: seconds))
+    Diagnostics.printJSON(["event": "recordingStarted", "durationSeconds": options.seconds], pretty: false)
+    let recorder = EventRecorder(bundleIDs: options.bundleIDs)
+    recorder.start()
+    RunLoop.main.run(until: Date(timeIntervalSinceNow: options.seconds))
     recorder.stop()
     Diagnostics.printJSON(["event": "recordingEnded"], pretty: false)
 case "--menu":
@@ -60,7 +63,8 @@ default:
     print("""
     Paperi feasibility build (window management is inactive)
       paperi snapshot [--include-titles]  Read-only JSON snapshot
-      paperi record [seconds]            Read-only AX event JSONL (default 30, max 300)
+      paperi record [seconds] [--bundle-id identifier ...]
+                                        Read-only AX event JSONL (default 30, max 300)
       paperi benchmark-core              Measure cached layout calculation only
       paperi --menu                      Run diagnostic menu bar shell
     """)

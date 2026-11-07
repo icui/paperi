@@ -84,7 +84,8 @@ public enum Diagnostics {
     public static func printJSON(_ value: [String: Any], pretty: Bool = true) {
         do {
             let data = try JSONSerialization.data(withJSONObject: value, options: pretty ? [.prettyPrinted, .sortedKeys] : [.sortedKeys])
-            print(String(decoding: data, as: UTF8.self))
+            // Readiness must reach pipe consumers before interactions begin.
+            FileHandle.standardOutput.write(data + Data([0x0a]))
         } catch { FileHandle.standardError.write(Data("Cannot encode diagnostics: \(error)\n".utf8)) }
     }
 }
@@ -117,20 +118,23 @@ public enum Diagnostics {
     private let workspaceCenter: NotificationCenter
     private let runningApplications: () -> [NSRunningApplication]
     private let emit: ([String: Any]) -> Void
+    private let bundleIDs: Set<String>?
 
-    public convenience init() {
+    public convenience init(bundleIDs: Set<String>? = nil) {
         self.init(workspaceCenter: NSWorkspace.shared.notificationCenter,
                   runningApplications: { NSWorkspace.shared.runningApplications },
-                  emit: { Diagnostics.printJSON($0, pretty: false) })
+                  bundleIDs: bundleIDs, emit: { Diagnostics.printJSON($0, pretty: false) })
     }
 
     // Isolated workspace inputs allow lifecycle tests without observing other apps.
     init(workspaceCenter: NotificationCenter,
          runningApplications: @escaping () -> [NSRunningApplication],
+         bundleIDs: Set<String>? = nil,
          emit: @escaping ([String: Any]) -> Void) {
         self.workspaceCenter = workspaceCenter
         self.runningApplications = runningApplications
         self.emit = emit
+        self.bundleIDs = bundleIDs
     }
     public func start() {
         guard !running else { return }
@@ -144,6 +148,7 @@ public enum Diagnostics {
                 let launched = notification.name == NSWorkspace.didLaunchApplicationNotification
                 MainActor.assumeIsolated {
                     guard let self, self.running else { return }
+                    guard self.includes(app) else { return }
                     if launched {
                         self.attach(pid)
                         self.scheduleRetries(pid)
@@ -155,13 +160,18 @@ public enum Diagnostics {
                 }
             }, center: center))
         }
-        for app in runningApplications() {
+        for app in runningApplications() where includes(app) {
             attach(app.processIdentifier)
             scheduleRetries(app.processIdentifier)
         }
         emit(["event": "recorderReady", "observerCount": observers.count,
               "windowReferenceCount": observers.values.reduce(0) { $0 + $1.windows.count },
               "uptime": ProcessInfo.processInfo.systemUptime])
+    }
+
+    private func includes(_ app: NSRunningApplication) -> Bool {
+        guard let bundleIDs else { return true }
+        return app.bundleIdentifier.map { bundleIDs.contains($0) } ?? false
     }
 
     private func attach(_ pid: pid_t) {
