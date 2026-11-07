@@ -196,6 +196,13 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Unvisited-member recovery and mixed content-tab quarantine also pass all required checks after the change; both separately report empty AX enumeration. Ruby syntax and patch formatting are clean.
 - Native-tab classification, unknown structural metadata, daily-app unvisited discovery and other platform release gates remain open. No window-management effects or reducer integration were enabled.
 
+## Increment 23: repeated diagnostics and visible restart rediscovery failures
+
+- Added `check-diagnostics.rb --cycles 1..5 [new-output-directory]` to run all eight controlled modes sequentially. It preserves separate reports/logs, updates an aggregate summary after every fixture and exits nonzero on required failures. Native enumeration and restart inventory gaps remain explicit informational checks; structural/event/cleanup failures are not waived. The recorder harness can now save a fresh JSON report separately from build output.
+- Two complete rounds against production revision 0ec5ad0 ran all 16 fixture cases in about seven minutes. Fourteen passed all required checks. Both restart cases correctly remained inconclusive: empty successful AX enumeration left the replacement observer with zero existing window references, preventing tab-structure/reset verification and later destruction delivery. Native source removal and readiness counts still passed in both cases. The aggregate runner returned nonzero and retained the failed reports.
+- This supersedes any implication that the earlier single successful restart fixture established full restart recovery. Source ownership and inactive-window rediscovery are separate concerns. Missing references are not closed windows and are not repaired by replaying old-scope state.
+- All non-restart modes passed twice: recorder delivery, native pair, multiple groups, partial selection, content-tab withholding, unvisited recovery and popup policy. Raw reports/logs remain ignored local captures. No release gate or management effect was enabled.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

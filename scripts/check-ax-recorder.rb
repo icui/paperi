@@ -7,6 +7,9 @@ require 'timeout'
 require 'tmpdir'
 
 root = File.expand_path('..', __dir__)
+abort 'Usage: check-ax-recorder.rb [new-output.json]' if ARGV.length > 1
+output = ARGV.first
+abort "Output already exists: #{output}" if output && File.exist?(output)
 wrapper = File.join(root, 'scripts', 'swift.sh')
 abort 'Build failed' unless system(wrapper, 'build')
 bin, status = Open3.capture2(wrapper, 'build', '--show-bin-path')
@@ -84,8 +87,13 @@ Dir.mktmpdir('paperi-ax-', File.join(root, '.build')) do |temporary|
     destroyed = windows['AXUIElementDestroyed']
     abort 'Created/destroyed window identity was not retained' if created.empty? || (created & destroyed).empty?
     abort 'Recording did not end cleanly' unless counts['recordingEnded'] == 1
-    puts JSON.pretty_generate(result: 'passed', fixtureBundleID: bundle_id, events: counts,
-                              scope: 'Disposable AppKit fixture only; no native-tab, popup, display or Space-transfer gate verified')
+    report = { result: 'passed', fixtureBundleID: bundle_id, events: counts,
+               scope: 'Disposable AppKit fixture only; no native-tab, popup, display or Space-transfer gate verified' }
+    if output
+      FileUtils.mkdir_p(File.dirname(output))
+      File.write(output, JSON.pretty_generate(report))
+    end
+    puts JSON.pretty_generate(report)
   ensure
     if recorder_pid
       begin

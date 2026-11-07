@@ -52,6 +52,8 @@ ruby scripts/check-ax-recorder.rb
 
 It requires a GUI session and Accessibility trust for the built CLI. The fixture briefly shows a background window and Dock icon, changes only its own window, then quits. Its temporary bundle and logs are removed after the check. It runs separately from unit tests. This validates a regular AppKit fixture, not other apps or the native-tab/popup/display/Space-transfer gates. The accessory-app fixture experiment on the initial host did not deliver workspace launch/termination events; newly launched accessory apps can therefore be missed until a fresh recording discovers them.
 
+`ruby scripts/check-diagnostics.rb --cycles 2 [new-output-directory]` runs all eight controlled diagnostic modes sequentially and preserves individual reports/logs plus a cumulative summary. One cycle is the default; one to five cycles are accepted. Each cycle takes roughly three to four minutes. Required failures produce a nonzero exit; native enumeration and restart inventory remain explicit informational checks. The runner refuses an existing output directory. `check-ax-recorder.rb [new-output.json]` can also save its report separately from build output.
+
 See [implementation status](docs/STATUS.md) and [manual feasibility protocol](docs/FEASIBILITY.md).
 
 For native-tab investigation, `paperi tab-evidence bundle.identifier` captures a bounded AX structural graph for one app. It includes roles, boolean selection state, named relationships, attribute-query errors, and window IDs, with no titles or string values. Local graph node IDs are capture-local. Traversal stops at depth 5, 128 nodes, or a one-second per-app traversal budget (plus an in-flight AX call); truncation is explicit.

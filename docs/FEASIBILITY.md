@@ -19,6 +19,12 @@ Run `ruby scripts/check-ax-recorder.rb` in a GUI session with Accessibility trus
 
 Use `paperi record 30 --bundle-id identifier` for app-specific manual captures (repeat the flag for several apps). Output reaches pipes immediately. A successful fixture check validates notification delivery for that app/host only. In the initial accessory-app experiment, the fixture completed all actions but the recorder received no workspace launch/termination events, including with the full AppKit event loop. Regular-app delivery must not be generalized to newly launched accessory apps; startup enumeration and missing-notification reconciliation need separate coverage.
 
+## Repeated diagnostic fixtures
+
+Run `ruby scripts/check-diagnostics.rb --cycles 2 [new-output-directory]` to repeat recorder lifecycle, one native pair, multiple groups, isolated selection metadata, content-tab withholding, unvisited-member recovery, observer restart and popup policy checks. The runner executes fixtures sequentially, preserves separate machine-readable reports and build/fixture logs, updates a summary after every step, and exits nonzero if a required check fails. Existing output directories are never overwritten. Native enumeration and restart physical-inventory checks are informational only; structural, identity, cleanup and event-delivery failures still fail the run. These are controlled local fixtures, not a promotion of platform release gates.
+
+Repeated captures exposed an important restart limitation after the initial successful source-teardown experiment: if AX enumeration succeeds with an empty window array, a replacement observer can retain no existing window roots and miss subsequent destruction notifications. Source removal can still be correct while capture coverage and binding-reset verification remain inconclusive. Preserve those failures; do not repopulate the new scope with old references or infer that the application is empty.
+
 ## Controlled panel and sheet evidence
 
 Run `ruby scripts/check-popups.rb [new-output.json]` in an Accessibility-trusted GUI session. It starts a scoped `record --window-evidence` session before launching a disposable regular app. The app creates a normal document, shows/closes a nonactivating child panel, presents/dismisses an attached sheet, moves its document after each dismissal, then closes and quits. The fixture changes only its own windows and opens no files. Captures are local and ignored; existing output is preserved.
