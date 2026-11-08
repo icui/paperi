@@ -1,0 +1,284 @@
+import AppKit
+import ApplicationServices
+import PaperiBridge
+import PaperiCore
+
+extension Diagnostics {
+    /// Native notification → pure reducer → confirmed AX effects, isolated to a
+    /// freshly launched child. This is not the production management registry.
+    @MainActor public static func probeLifecycle(externalResize: Bool = false, interaction: Bool = false) -> [String: Any] {
+        var report: [String: Any] = ["schemaVersion": 1, "result": "failed",
+            "scope": "Two newly spawned non-tabbing fixture windows; no focus or Space writes"]
+        guard AXIsProcessTrusted() else { report["reason"] = "Accessibility trust required"; return report }
+        let child = Process()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("paperi-lifecycle-\(UUID())")
+        defer {
+            if child.isRunning { child.terminate(); child.waitUntilExit() }
+            try? FileManager.default.removeItem(at: directory)
+        }
+        do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
+        catch { report["reason"] = "Cannot create fixture log directory"; return report }
+        let log = directory.appendingPathComponent("fixture.jsonl")
+        child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+            .deletingLastPathComponent().appendingPathComponent("PaperiAXFixture")
+        child.arguments = [log.path, "--lifecycle-placement"] + (externalResize ? ["--external-resize"] : []) +
+            (interaction ? ["--interaction"] : [])
+        child.standardOutput = FileHandle.nullDevice
+        child.standardError = FileHandle.nullDevice
+        do { try child.run() }
+        catch { report["reason"] = "Build all products to supply sibling PaperiAXFixture"; return report }
+        let pid = child.processIdentifier
+        let started = ProcessInfo.processInfo.systemUptime
+        report["fixturePID"] = pid
+        var queued: [[String: Any]] = []
+        let recorder = EventRecorder(workspaceCenter: NotificationCenter(), runningApplications: {
+            NSRunningApplication(processIdentifier: pid).map { [$0] } ?? []
+        }, observeWorkspaceEvents: false, emit: { queued.append($0) })
+        recorder.start()
+        defer { recorder.stop() }
+        let application = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(application, 0.15)
+        var state = LifecycleState()
+        var references: [UInt32: AXUIElement] = [:]
+        var slots: [UInt32: String] = [:]
+        var created: [UInt32] = [], destroyed: [UInt32] = []
+        var timeline: [[String: Any]] = []
+        var failures: [String] = []
+        var echoCount = 0
+        var notificationCount = 0
+        var echoes = FrameEchoes()
+        var adoptedWidths: [Double] = []
+        var focusTimeline: [[String: Any]] = []
+        var commandTimeline: [[String: Any]] = []
+        var excludedIDs: Set<UInt32> = []
+        var commandIndex = 0
+        var nativeFocusCount = 0
+        var scopeSpace: UInt64?
+        // CG display bounds use the AX top-left coordinate domain.
+        let bounds = CGDisplayBounds(CGMainDisplayID())
+        let canvas = Rect(x: bounds.minX + 40, y: bounds.minY + 100,
+                          width: min(900, bounds.width - 80), height: min(360, bounds.height - 180))
+        guard canvas.isValid else { report["reason"] = "No usable fixture canvas"; return report }
+        func pause() { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.04)) }
+        func identityValid(_ element: AXUIElement, _ wid: UInt32) -> Bool {
+            var owner: pid_t = 0
+            return child.isRunning && AXUIElementGetPid(element, &owner) == .success && owner == pid &&
+                paperi_window_id(element) == wid && attribute(element, kAXRoleAttribute) as? String == "AXWindow"
+        }
+        func membership(_ wid: UInt32) -> UInt64? {
+            guard let spaces = paperi_copy_window_spaces(wid) as? [NSNumber], spaces.count == 1 else { return nil }
+            return spaces[0].uint64Value
+        }
+        func classification(_ element: AXUIElement, _ wid: UInt32) -> Classification {
+            var movable = DarwinBoolean(false), resizable = DarwinBoolean(false)
+            let move = AXUIElementIsAttributeSettable(element, kAXPositionAttribute as CFString, &movable)
+            let size = AXUIElementIsAttributeSettable(element, kAXSizeAttribute as CFString, &resizable)
+            let parent = attribute(element, kAXParentAttribute)
+            let level = (CGWindowListCopyWindowInfo(.optionIncludingWindow, wid) as? [[String: Any]])?
+                .first?[kCGWindowLayer as String] as? Int
+            return WindowPolicy.classify(WindowFacts(bundleID: "dev.paperi.disposable-lifecycle",
+                role: attribute(element, kAXRoleAttribute) as? String,
+                subrole: attribute(element, kAXSubroleAttribute) as? String,
+                isRoot: parent.map { CFEqual($0, application) },
+                movable: move == .success ? movable.boolValue : nil,
+                resizable: size == .success ? resizable.boolValue : nil,
+                fullscreen: attribute(element, "AXFullScreen") as? Bool,
+                minimized: attribute(element, kAXMinimizedAttribute) as? Bool, level: level))
+        }
+        func matches(_ a: Rect, _ b: Rect) -> Bool {
+            zip([a.x, a.y, a.width, a.height], [b.x, b.y, b.width, b.height]).allSatisfy { abs($0 - $1) <= 2 }
+        }
+        func refreshFocus() throws {
+            let focused = attribute(application, kAXFocusedWindowAttribute)
+            var id: UInt32?
+            var facts = WindowPolicy.classify(WindowFacts(bundleID: "dev.paperi.disposable-lifecycle"))
+            if let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() {
+                let ref = focused as! AXUIElement
+                let wid = paperi_window_id(ref)
+                AXUIElementSetMessagingTimeout(ref, 0.15)
+                if wid > 0, identityValid(ref, wid) { id = wid; facts = classification(ref, wid) }
+            }
+            try state.reduce(.focus(windowID: id, classification: facts))
+            focusTimeline.append(["windowID": id ?? 0, "eligibility": facts.eligibility.rawValue,
+                                  "suppressed": state.interactionSuppressed])
+        }
+        func apply() -> (writes: Int, confirmed: Bool) {
+            guard let placements = try? state.layout.placements(in: canvas) else { return (0, false) }
+            var writes = 0
+            for placement in placements {
+                let wid = placement.windowID
+                guard let ref = references[wid], identityValid(ref, wid), membership(wid) == scopeSpace,
+                      classification(ref, wid).eligibility == .tiled else { return (writes, false) }
+                // Expected AX echoes do not trigger another layout. Changed-frame
+                // comparison also avoids rewriting an unchanged surviving slot.
+                if let observed = frame(ref), matches(observed, placement.frame) { continue }
+                var point = CGPoint(x: placement.frame.x, y: placement.frame.y)
+                var size = CGSize(width: placement.frame.width, height: placement.frame.height)
+                guard let p = AXValueCreate(.cgPoint, &point), let s = AXValueCreate(.cgSize, &size) else { return (writes, false) }
+                echoes.expect(windowID: wid, frame: placement.frame, now: ProcessInfo.processInfo.systemUptime)
+                for (name, value) in [(kAXSizeAttribute, s), (kAXPositionAttribute, p), (kAXSizeAttribute, s)] {
+                    guard identityValid(ref, wid),
+                          AXUIElementSetAttributeValue(ref, name as CFString, value) == .success else { return (writes, false) }
+                    writes += 1
+                }
+            }
+            let deadline = ProcessInfo.processInfo.systemUptime + 1.5
+            repeat {
+                if placements.allSatisfy({ placement in
+                    guard let ref = references[placement.windowID], identityValid(ref, placement.windowID),
+                          let observed = frame(ref) else { return false }
+                    return matches(observed, placement.frame)
+                }) { return (writes, true) }
+                pause()
+            } while child.isRunning && ProcessInfo.processInfo.systemUptime < deadline
+            return (writes, false)
+        }
+        var consumed = 0
+        let deadline = ProcessInfo.processInfo.systemUptime + (interaction ? 18 : 15)
+        while child.isRunning && ProcessInfo.processInfo.systemUptime < deadline {
+            recorder.reconcileNow()
+            while consumed < queued.count {
+                let row = queued[consumed]; consumed += 1
+                guard row["pid"] as? Int32 == pid, let event = row["event"] as? String else { continue }
+                if interaction && [kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification].contains(event) {
+                    nativeFocusCount += 1
+                    do { try refreshFocus() } catch { failures.append("Invalid focus transition") }
+                    continue
+                }
+                guard
+                      let wid = row["windowID"] as? UInt32, wid > 0 else { continue }
+                do {
+                    let needsLayout: Bool
+                    var label = event
+                    if event == kAXMovedNotification || event == kAXResizedNotification {
+                        notificationCount += 1
+                        guard let ref = references[wid], identityValid(ref, wid), let observed = frame(ref) else { continue }
+                        if case .expected = echoes.observe(windowID: wid, frame: observed,
+                                                          now: ProcessInfo.processInfo.systemUptime) {
+                            echoCount += 1; continue
+                        }
+                        guard externalResize, event == kAXResizedNotification, membership(wid) == scopeSpace,
+                              let slot = slots[wid], let index = state.layout.index(of: slot),
+                              abs(state.layout.columns[index.column].width - observed.width) > 2 else { continue }
+                        let width = min(canvas.width, observed.width)
+                        needsLayout = try state.reduce(.resizeColumn(windowID: wid, width: width,
+                                                                       classification: classification(ref, wid)))
+                        guard needsLayout else { continue }
+                        adoptedWidths.append(width)
+                        label = "externalResize"
+                    } else if event == kAXWindowCreatedNotification {
+                        guard slots[wid] == nil else { failures.append("Duplicate create identity"); continue }
+                        let refs = attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? []
+                        func reference(_ name: String) -> AXUIElement? {
+                            guard let value = attribute(application, name), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+                            return (value as! AXUIElement)
+                        }
+                        let discovery = RecorderWindowDiscovery.collect(enumerated: refs,
+                            focused: reference(kAXFocusedWindowAttribute), main: reference(kAXMainWindowAttribute), pid: pid) { ref in
+                            var owner: pid_t = 0
+                            let result = AXUIElementGetPid(ref, &owner)
+                            return (result == .success ? owner : nil, attribute(ref, kAXRoleAttribute) as? String)
+                        }
+                        guard let ref = discovery.windows.map(\.element).first(where: { paperi_window_id($0) == wid }),
+                              identityValid(ref, wid) else { failures.append("Unavailable created window"); continue }
+                        AXUIElementSetMessagingTimeout(ref, 0.15)
+                        let eligibility = classification(ref, wid)
+                        if interaction && eligibility.eligibility == .excluded { excludedIDs.insert(wid); continue }
+                        guard eligibility.eligibility == .tiled else { failures.append("Ineligible fixture"); continue }
+                        guard let space = membership(wid) else { failures.append("Unavailable created window Space"); continue }
+                        if scopeSpace == nil { scopeSpace = space }
+                        guard space == scopeSpace else { failures.append("Cross-Space scope rejected"); continue }
+                        let slot = "container-\(UUID())"
+                        needsLayout = try state.reduce(.insert(Slot(id: slot, members: [wid], activeMember: wid),
+                            width: (canvas.width - 8) / 2, classification: eligibility))
+                        slots[wid] = slot; references[wid] = ref; created.append(wid)
+                    } else if event == kAXUIElementDestroyedNotification, let slot = slots.removeValue(forKey: wid) {
+                        needsLayout = try state.reduce(.remove(slotID: slot))
+                        references.removeValue(forKey: wid); destroyed.append(wid)
+                        echoes.remove(windowID: wid)
+                    } else { continue }
+                    let effects = needsLayout ? apply() : (writes: 0, confirmed: true)
+                    if !effects.confirmed { failures.append("Unconfirmed layout effect") }
+                    timeline.append(["event": label, "windowID": wid,
+                        "slotCount": state.layout.columns.reduce(0) { $0 + $1.slots.count },
+                        "writeCount": effects.writes, "confirmed": effects.confirmed])
+                } catch { failures.append("Reducer rejected lifecycle event") }
+            }
+            if interaction && commandIndex < 3 && ProcessInfo.processInfo.systemUptime - started >= [6.0, 8.0, 10.0][commandIndex] {
+                do {
+                    try refreshFocus() // Revalidate ownership immediately before dispatch.
+                    let before = state.layout
+                    let intent = try state.reduce(.resizeFocusedWidth(by: 0.1, canvas: canvas))
+                    let effects = intent ? apply() : (writes: 0, confirmed: true)
+                    commandTimeline.append(["phase": commandIndex, "suppressed": state.interactionSuppressed,
+                        "changed": state.layout != before, "intent": intent, "writeCount": effects.writes,
+                        "confirmed": effects.confirmed,
+                        "widths": state.layout.columns.map(\.width), "slots": state.layout.columns.flatMap { $0.slots.map(\.id) }])
+                    if !effects.confirmed { failures.append("Unconfirmed command effect") }
+                } catch { failures.append("Command dispatch failed") }
+                commandIndex += 1
+            }
+            if destroyed.count == 2 { break }
+            // Polling only discovers/subscribes; it never synthesizes removals.
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+        }
+        let teardown = recorder.stop()
+        let truthRows = ((try? String(contentsOf: log, encoding: .utf8))?.split(separator: "\n") ?? [])
+            .compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+        let truthIDs = Set(truthRows.flatMap { ($0["tabWindows"] as? [[String: Any]] ?? [])
+            .compactMap { $0["id"] as? UInt32 } })
+        let lifecycleRows = timeline.filter { $0["event"] as? String != "externalResize" }
+        var checks: [String: Bool] = [
+            "twoUniqueCreates": created.count == 2 && Set(created).count == 2,
+            "fixtureIdentitiesMatch": truthIDs.count == 2 && Set(created) == truthIDs,
+            "matchingDestroys": destroyed.count == 2 && Set(destroyed) == Set(created),
+            "lifecycleOrder": lifecycleRows.compactMap { $0["slotCount"] as? Int } == [1, 2, 1, 0],
+            "effectsConfirmed": timeline.count == (externalResize ? 5 : 4) && timeline.allSatisfy { $0["confirmed"] as? Bool == true },
+            "frameEffectsExercised": timeline.contains { ($0["writeCount"] as? Int ?? 0) > 0 },
+            "survivorReflowExercised": lifecycleRows.count == 4 && (lifecycleRows[2]["writeCount"] as? Int ?? 0) > 0,
+            "echoNotificationsObserved": echoCount > 0,
+            "finalLayoutEmpty": state.layout.columns.isEmpty && slots.isEmpty,
+            "nativeSourcesRemoved": teardown["sourcesStillInstalled"] as? Int == 0,
+            "noFailures": failures.isEmpty]
+        if externalResize {
+            let truthWidth = truthRows.first { $0["event"] as? String == "externalResize" }?["externalResizeWidth"] as? Double
+            checks["externalWidthAdoptedOnce"] = adoptedWidths.count == 1 && truthWidth.map { abs(adoptedWidths[0] - $0) <= 2 } == true
+            checks["resizePreservesSlotCount"] = timeline.filter { $0["event"] as? String == "externalResize" }
+                .allSatisfy { $0["slotCount"] as? Int == 2 }
+            checks["resizeReflowExercised"] = timeline.contains {
+                $0["event"] as? String == "externalResize" && ($0["writeCount"] as? Int ?? 0) > 0
+            }
+        }
+        if interaction {
+            checks["panelExcluded"] = excludedIDs.count == 1 && excludedIDs.isDisjoint(with: Set(created))
+            checks["nativeFocusObserved"] = nativeFocusCount > 0 && focusTimeline.contains { $0["eligibility"] as? String == "excluded" } &&
+                focusTimeline.contains { $0["eligibility"] as? String == "tiled" }
+            checks["commandSequence"] = commandTimeline.count == 3 &&
+                commandTimeline.compactMap { $0["changed"] as? Bool } == [true, false, true] &&
+                commandTimeline.compactMap { $0["suppressed"] as? Bool } == [false, true, false]
+            checks["noPanelCommandWrites"] = commandTimeline.count == 3 && commandTimeline[1]["writeCount"] as? Int == 0
+            checks["commandEffectsConfirmed"] = commandTimeline.count == 3 && commandTimeline.allSatisfy { $0["confirmed"] as? Bool == true } &&
+                (commandTimeline[0]["writeCount"] as? Int ?? 0) > 0 && (commandTimeline[2]["writeCount"] as? Int ?? 0) > 0
+            checks["logicalSlotsPreserved"] = commandTimeline.count == 3 && commandTimeline.allSatisfy {
+                $0["slots"] as? [String] == commandTimeline[0]["slots"] as? [String]
+            }
+            if commandTimeline.count == 3,
+               let first = commandTimeline[0]["widths"] as? [Double],
+               let blocked = commandTimeline[1]["widths"] as? [Double],
+               let recovered = commandTimeline[2]["widths"] as? [Double], first.count == 2, recovered.count == 2 {
+                checks["noDeferredCommandReplay"] = first == blocked &&
+                    abs(recovered[0] - first[0] - canvas.width * 0.1) <= 2 && recovered[1] == first[1]
+            } else { checks["noDeferredCommandReplay"] = false }
+        }
+        report["checks"] = checks; report["timeline"] = timeline
+        report["failures"] = failures; report["echoNotifications"] = echoCount
+        report["frameNotifications"] = notificationCount; report["adoptedWidths"] = adoptedWidths
+        report["teardown"] = teardown
+        if interaction {
+            report["focusTimeline"] = focusTimeline; report["commandTimeline"] = commandTimeline
+            report["nativeFocusNotifications"] = nativeFocusCount
+        }
+        report["result"] = checks.values.allSatisfy { $0 } ? "passed" : "failed"
+        return report
+    }
+}

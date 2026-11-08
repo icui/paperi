@@ -21,6 +21,9 @@ public enum LifecycleEvent: Sendable {
     case suspend(slotID: String, reason: SuspensionReason)
     case resume(slotID: String, reason: SuspensionReason, classification: Classification)
     case focus(windowID: UInt32?, classification: Classification)
+    /// An observed resize of the current representative; does not change focus.
+    case resizeColumn(windowID: UInt32, width: Double, classification: Classification)
+    case resizeFocusedWidth(by: Double, canvas: Rect)
 }
 
 /// Pure lifecycle state. Intent is returned for a future scheduler; no OS effects run here.
@@ -46,6 +49,22 @@ public struct LifecycleState: Equatable, Sendable {
         var next = self
         var needsLayout = false
         switch event {
+        case let .resizeFocusedWidth(fraction, canvas):
+            guard !next.interactionSuppressed, let focused = next.layout.focused,
+                  let index = next.layout.index(of: focused),
+                  next.layout.columns[index.column].slots[index.row].activeMember == next.osFocusedWindow else { return false }
+            let original = next.layout
+            try next.layout.resizeWidth(by: fraction, in: canvas)
+            needsLayout = next.layout != original
+        case let .resizeColumn(windowID, width, classification):
+            guard width.isFinite, width > 0 else { throw LayoutError.invalidGeometry }
+            guard !next.interactionSuppressed, classification.eligibility == .tiled,
+                  let index = next.layout.columns.firstIndex(where: { column in
+                      column.slots.contains { $0.activeMember == windowID }
+                  }) else { return false }
+            guard next.layout.columns[index].width != width else { return false }
+            next.layout.columns[index].width = width
+            needsLayout = true
         case let .insert(slot, width, classification):
             guard classification.eligibility == .tiled || classification.eligibility == .floating else { return false }
             if let saved = next.suspended.first(where: { $0.column.slots[0].id == slot.id }) {

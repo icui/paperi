@@ -14,6 +14,54 @@ import AppKit
         if CommandLine.arguments.count >= 2 { logURL = URL(fileURLWithPath: CommandLine.arguments[1]) }
         log("launched")
         NSApp.setActivationPolicy(CommandLine.arguments.contains("--accessory") ? .accessory : .regular)
+        if CommandLine.arguments.contains("--lifecycle-placement") {
+            after(1) {
+                let window = self.makeTabWindow(0)
+                window.tabbingMode = .disallowed
+                self.tabWindows.append(window)
+            }
+            after(4) {
+                let window = self.makeTabWindow(1)
+                window.tabbingMode = .disallowed
+                self.tabWindows.append(window)
+            }
+            if CommandLine.arguments.contains("--external-resize") {
+                after(6) {
+                    guard let window = self.tabWindows.first else { return }
+                    window.setContentSize(NSSize(width: window.contentLayoutRect.width + 64,
+                                                 height: window.contentLayoutRect.height))
+                    self.log("externalResize")
+                }
+            }
+            let interaction = CommandLine.arguments.contains("--interaction")
+            if interaction {
+                after(5) { self.tabWindows.first?.makeMain(); self.tabWindows.first?.makeKey() }
+                after(7) {
+                    let panel = NSPanel(contentRect: NSRect(x: 200, y: 200, width: 220, height: 120),
+                                        styleMask: [.titled, .closable, .utilityWindow], backing: .buffered, defer: false)
+                    panel.isReleasedWhenClosed = false
+                    self.popup = panel
+                    panel.makeKeyAndOrderFront(nil)
+                }
+                after(9) {
+                    self.popup?.close(); self.popup = nil
+                    self.tabWindows.first?.makeMain(); self.tabWindows.first?.makeKey()
+                }
+            }
+            after(interaction ? 12 : 9) { self.tabWindows.first?.close() }
+            after(interaction ? 14 : 12) { self.tabWindows.last?.close() }
+            after(interaction ? 16 : 14) { NSApp.terminate(nil) }
+            return
+        }
+        if CommandLine.arguments.contains("--placement") {
+            after(1) {
+                self.window = self.makeTabWindow(0)
+                self.window?.tabbingMode = .disallowed
+                self.log("placementReady")
+            }
+            after(15) { self.window?.close(); NSApp.terminate(nil) }
+            return
+        }
         if CommandLine.arguments.contains("--popups") { runPopups(); return }
         if CommandLine.arguments.contains("--unvisited-tabs") { runUnvisitedTabs(); return }
         if CommandLine.arguments.contains("--multi-tabs") { runMultipleTabGroups(); return }
@@ -187,6 +235,12 @@ import AppKit
             ["id": window.windowNumber, "visible": window.isVisible,
              "members": window.tabbedWindows?.map(\.windowNumber) ?? [],
              "selected": window.tabGroup?.selectedWindow?.windowNumber ?? 0] as [String: Any]
+        }
+        if event == "externalResize", let window = tabWindows.first {
+            row["externalResizeWidth"] = window.frame.width
+        }
+        if CommandLine.arguments.contains("--placement") {
+            row["documentID"] = window?.windowNumber ?? 0
         }
         if let tabs = contentTabs, let selected = tabs.selectedTabViewItem {
             row["contentTab"] = tabs.indexOfTabViewItem(selected)

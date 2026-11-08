@@ -211,6 +211,39 @@ Provisional targets, to revise after baseline measurement:
 
 ## Delivery sequence
 
+### Agreed implementation order — 2026-11-08
+
+Build a limited ordinary-window path first, retaining logical tab-container slots
+from the beginning. This refines the execution order below; it does not remove
+native tabs or any other final acceptance requirement.
+
+1. Connect native discovery/events → lifecycle reducer → layout → confirmed AX
+   effects, first on disposable windows. Creation/closure, focus, commands and
+   external resize, plus transient/popup exclusion and recovery must work before
+   offering an opt-in ordinary-window preview. Its initial scope is one confirmed
+   display/Space. Unknown membership/presentation must withhold effects; missing
+   enumeration is never closure. Production keyboard management stays off until
+   that preview has an explicit opt-in scope and recovery path.
+2. Immediately prove one real native-tab app (Finder or Terminal): create, switch,
+   merge, detach, close-active and close-last. Integrate it into the same event and
+   effect path before expanding configuration, performance work or app coverage.
+   A selected physical representative can change without logical insertion,
+   geometry reset or insertion-triggered centering. Native-tab lifecycle is not
+   deferred until an otherwise finished manager exists.
+3. Expand real-app, display and recovery compatibility, then benchmark and soak.
+   Space transfer is a separate feasibility track: the tested direct backend
+   fails on this host; investigate the reference Mission Control alternative with
+   a bounded disposable-window test rather than blocking ordinary placement.
+
+Logical slot IDs are stable container identities, separate from physical window
+IDs and AX references. Ordinary windows begin as one-member slots; only affirmative
+membership evidence may update a container. The current fixture guarantee that
+tabbing is disabled must not be generalized into a claim that arbitrary live
+windows are known singletons. Uncertain native-tab windows remain unmanaged in
+the limited preview until their adapter is verified.
+
+### Overall milestones and final gates
+
 1. **Behavior capture and baseline.** Record OS/hardware, displays, Space settings, commonly used apps, installed Hammerspoon version, animation settings, and upstream revisions. Create command/geometry traces covering every binding and lifecycle case. Resolve Space numbering, transfer behavior, and create/destroy centering timing. Exit: reproducible parity fixtures and baseline measurements.
 2. **Native feasibility spike.** Build a menu bar app that obtains AX access, discovers/focuses/resizes windows, maps window IDs, and lists Spaces. Demonstrate cross-Space move-and-follow with SIP enabled and no injection, native-tab identity through selection/merge/detach, classification of Control Center and application popups, and command ownership on two displays. Compare an original backend with selectively adapted yabai patterns. Verify cancellation and error paths. Exit: the four platform risks—Spaces, tabs, classification, and display ownership—have demonstrated solutions or an explicit support limitation before expanding the app.
 3. **Pure layout core.** Implement ordered columns/rows, logical tab-container slots, virtual positions, gaps, focus lookup, swaps, resizing, split, slurp/barf, and floating state. Use installed PaperWM traces for intended interactions, with new specification fixtures for corrected behavior; upstream output is not an oracle for known bugs. Exit: deterministic fixtures and invariants pass, including empty/single-window layouts, tab representative changes, transient focus, display ownership, and screen edges.

@@ -117,3 +117,28 @@ remains absent. Treat this backend as unavailable for the current prototype;
 the next transfer alternative is the installed PaperWM Mission Control path,
 which needs a separate explicit, bounded own-window interaction test. Ordinary
 AX placement work can proceed independently; no more blind direct-transfer repeats.
+
+### Placement slice verified
+
+Increment 42 implements `paperi probe-placement`: a newly launched disposable
+child is matched by PID and physical window ID, checked through the existing
+eligibility policy, then receives a pure-core frame via AX size → position → size.
+Both debug and release native runs confirm the requested frame and restoration
+exactly, with all six writes successful. No existing user window is targeted.
+This establishes a small working geometry path while leaving lifecycle integration,
+native tabs, popup recovery and Space transfer open. See [current status](STATUS.md).
+
+Increment 43 connects native create/destroy notifications to that reducer/effect
+path for two new non-tabbing fixture windows. Debug and release both verify
+1→2→1→0 logical slots, confirmed reflow of the survivor after the left window
+closes, matching physical identities and clean native-source teardown. This is
+the creation/closure subset of the [agreed implementation order](../PLAN.md#agreed-implementation-order--2026-11-08),
+with focus/commands/external resize and transient recovery still to implement.
+
+Increments 44–45 add observed horizontal resizing and focused width-command
+dispatch. The own-window interaction fixture verifies document/panel/document
+focus, apply/discard/apply command results, unchanged logical containers and no
+deferred replay in debug/release. Its omitted utility panel is recovered through
+fresh focus/main references before transient classification. These results are
+per-app fixture behavior; they do not close global active-app, real OS popup,
+cross-display, keyboard registration or native-tab acceptance gates.

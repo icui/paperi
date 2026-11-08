@@ -29,6 +29,26 @@ import PaperiPlatform
 var args = Array(CommandLine.arguments.dropFirst())
 if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["--menu"] }
 switch args.first {
+case "probe-interaction":
+    guard args.count == 1 else { print("Usage: paperi probe-interaction"); exit(2) }
+    let report = Diagnostics.probeLifecycle(interaction: true)
+    Diagnostics.printJSON(report)
+    exit(report["result"] as? String == "passed" ? 0 : 1)
+case "probe-resize":
+    guard args.count == 1 else { print("Usage: paperi probe-resize"); exit(2) }
+    let report = Diagnostics.probeLifecycle(externalResize: true)
+    Diagnostics.printJSON(report)
+    exit(report["result"] as? String == "passed" ? 0 : 1)
+case "probe-lifecycle":
+    guard args.count == 1 else { print("Usage: paperi probe-lifecycle"); exit(2) }
+    let report = Diagnostics.probeLifecycle()
+    Diagnostics.printJSON(report)
+    exit(report["result"] as? String == "passed" ? 0 : 1)
+case "probe-placement":
+    guard args.count == 1 else { print("Usage: paperi probe-placement"); exit(2) }
+    let report = Diagnostics.probePlacement()
+    Diagnostics.printJSON(report)
+    exit(report["result"] as? String == "passed" ? 0 : 1)
 case "snapshot":
     Diagnostics.printJSON(Diagnostics.snapshot(includeTitles: args.contains("--include-titles")))
 case "tab-evidence":
@@ -115,6 +135,10 @@ default:
       paperi record [seconds] [--bundle-id identifier ...] [--tab-evidence] [--window-evidence] [--restart-after seconds] [--reconcile-every 1..30] [--poll-only]
                                         Read-only AX event JSONL (default 30, max 300)
       paperi benchmark-core              Measure cached layout calculation only
+      paperi probe-placement             Move/resize only a newly launched disposable fixture, then restore
+      paperi probe-lifecycle             Observe/reduce/tile two new disposable windows through create/close
+      paperi probe-resize                Adopt a fixture-originated resize while tracking expected AX echoes
+      paperi probe-interaction           Exercise focused resize commands, panel suppression and recovery on a new fixture
       paperi --menu                      Run diagnostic menu bar shell
     """)
 }
