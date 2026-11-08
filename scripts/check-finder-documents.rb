@@ -109,6 +109,14 @@ Dir.mktmpdir('paperi-finder-', File.join(root, '.build')) do |temporary|
     rows = records.lines.map { |line| JSON.parse(line) }
     tab_apps = rows.select { |row| row['event'] == 'tabEvidence' }.flat_map { |row| row.fetch('applications') }
     policy_apps = rows.select { |row| row['event'] == 'windowEvidence' }.flat_map { |row| row.fetch('applications') }
+    report[:shallowTabBarSamples] = rows.select { |row| row['event'] == 'tabEvidence' }
+      .flat_map { |row| row.dig('finderTabBarEvidence', 'applications') || [] }.map do |app|
+        { nodeCount: app.fetch('nodes').length, truncated: app['truncated'],
+          rootValidations: app['rootValidations'], truncationReasons: app['truncationReasons'],
+          tabGroupControlCounts: app.fetch('nodes').select { |node| node['AXRole'] == 'AXTabGroup' }
+            .map { |node| node.dig('AXTabs', 'count') },
+          associations: app['selectionAssociations'] }
+      end
     report[:samples] = tab_apps.map do |app|
       { coverage: app['windowCoverage'], rootValidations: app['rootValidations'],
         observedOwnedIDs: app.fetch('nodes').map { |node| node['windowID'] }.compact & expected,

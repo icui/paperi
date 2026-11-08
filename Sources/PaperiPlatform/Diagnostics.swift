@@ -102,6 +102,8 @@ public enum Diagnostics {
         var notifications = NotificationSubscriptions()
         let evidenceIdentities = EvidenceIdentities()
         let selectionAssociations = SelectionAssociations()
+        let finderTabIdentities = EvidenceIdentities()
+        let finderTabAssociations = SelectionAssociations()
         init(observer: AXObserver, owner: EventRecorder, runID: UUID) {
             self.observer = observer
             self.source = RecorderSource(AXObserverGetRunLoopSource(observer))
@@ -205,10 +207,17 @@ public enum Diagnostics {
     }
 
     public func tabEvidence(bundleID: String) -> [String: Any] {
-        Diagnostics.tabEvidence(bundleID: bundleID,
+        var report = Diagnostics.tabEvidence(bundleID: bundleID,
             observedWindows: observers.mapValues { $0.windows.map(\.element) },
             identities: observers.mapValues(\.evidenceIdentities),
             associations: observers.mapValues(\.selectionAssociations))
+        if bundleID == "com.apple.finder" {
+            report["finderTabBarEvidence"] = Diagnostics.tabEvidence(bundleID: bundleID,
+                observedWindows: observers.mapValues { $0.windows.map(\.element) },
+                identities: observers.mapValues(\.finderTabIdentities),
+                associations: observers.mapValues(\.finderTabAssociations), finderTabBarOnly: true)
+        }
+        return report
     }
 
     public func windowEvidence(bundleID: String) -> [String: Any] {
@@ -333,6 +342,7 @@ public enum Diagnostics {
               "uptime": ProcessInfo.processInfo.systemUptime])
         if notification == kAXUIElementDestroyedNotification {
             observers[pid]?.selectionAssociations.invalidate(reason: .windowDestroyed)
+            observers[pid]?.finderTabAssociations.invalidate(reason: .windowDestroyed)
             observers[pid]?.notifications.remove(element)
             observers[pid]?.windows.removeAll { CFEqual($0.element, element) }
         } else if notification == kAXWindowCreatedNotification {
