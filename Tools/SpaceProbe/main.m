@@ -10,7 +10,10 @@ static CFArrayRef (*copySpaces)(int, int, CFArrayRef);
 static CFArrayRef (*copyDisplays)(int);
 static int (*spaceType)(int, uint64_t);
 static int64_t (*performOperation)(void *);
-static int (*setCompatID)(int, uint64_t, int);
+// Private headers disagree about this return type. The reference callers ignore
+// its return; do not interpret a return register as a documented CGError.
+static void (*setCompatID)(int, uint64_t, int);
+static int (*getCompatID)(int, uint64_t);
 static int (*setWorkspace)(int, uint32_t *, int, int);
 static NSMutableDictionary *submission;
 
@@ -45,13 +48,15 @@ static BOOL moveOwnWindow(NSWindow *window, uint64_t sid) {
     if (!setCompatID || !setWorkspace) return NO;
     submission[@"backend"] = @"compatibilityWorkspace";
     uint32_t wid = (uint32_t)window.windowNumber;
-    int setup = setCompatID(connection, sid, 0x79616265);
-    int move = setup == 0 ? setWorkspace(connection, &wid, 1, 0x79616265) : -1;
-    int reset = setCompatID(connection, sid, 0);
-    submission[@"setupResult"] = @(setup);
-    submission[@"moveResult"] = @(move);
-    submission[@"resetResult"] = @(reset);
-    return setup == 0 && move == 0 && reset == 0;
+    int previous = getCompatID ? getCompatID(connection, sid) : 0;
+    submission[@"previousCompatID"] = @(previous);
+    setCompatID(connection, sid, 0x79616265);
+    if (getCompatID) submission[@"assignedCompatID"] = @(getCompatID(connection, sid));
+    submission[@"workspaceAssignmentReturn"] = @(setWorkspace(connection, &wid, 1, 0x79616265));
+    setCompatID(connection, sid, previous);
+    if (getCompatID) submission[@"restoredCompatID"] = @(getCompatID(connection, sid));
+    submission[@"workspaceAssignmentAttempted"] = @YES;
+    return YES; // As in the reference callers, only membership proves a move.
 }
 
 @interface Probe : NSObject <NSApplicationDelegate>
@@ -82,7 +87,7 @@ static BOOL moveOwnWindow(NSWindow *window, uint64_t sid) {
     });
 }
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
-    self.report = [@{@"schemaVersion": @1, @"scope": @"Own disposable window; membership round trip only, no Space activation or focus changes",
+    self.report = [@{@"schemaVersion": @2, @"scope": @"Own disposable window; membership round trip only, no Space activation or focus changes",
                     @"os": NSProcessInfo.processInfo.operatingSystemVersionString} mutableCopy];
     void *sky = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY | RTLD_LOCAL);
     int (*mainConnection)(void) = sky ? dlsym(sky, "SLSMainConnectionID") : NULL;
@@ -91,6 +96,7 @@ static BOOL moveOwnWindow(NSWindow *window, uint64_t sid) {
     spaceType = sky ? dlsym(sky, "SLSSpaceGetType") : NULL;
     performOperation = sky ? dlsym(sky, "SLSPerformAsynchronousBridgedWindowManagementOperation") : NULL;
     setCompatID = sky ? dlsym(sky, "SLSSpaceSetCompatID") : NULL;
+    getCompatID = sky ? dlsym(sky, "SLSSpaceGetCompatID") : NULL;
     setWorkspace = sky ? dlsym(sky, "SLSSetWindowListWorkspace") : NULL;
     connection = mainConnection ? mainConnection() : 0;
     self.report[@"availableSymbols"] = @{@"bridgedOperation": @(performOperation != NULL),
@@ -145,7 +151,8 @@ static BOOL moveOwnWindow(NSWindow *window, uint64_t sid) {
             self.report[@"returnSubmission"] = submission;
             BOOL submitted = moveOwnWindow(self.window, self.source);
             [self poll:self.source remaining:30 completion:^(BOOL restored) {
-                self.report[@"returnConfirmed"] = @(submitted && restored);
+                self.report[@"sourceMembershipConfirmed"] = @(restored);
+                self.report[@"returnConfirmed"] = @(moved && submitted && restored);
                 self.report[@"afterReturn"] = membership(wid) ?: (id)NSNull.null;
                 [self finish:moved && submitted && restored ? @"passed" : @"failed"
                       reason:@"Transfer requires observed destination and restored source membership"];

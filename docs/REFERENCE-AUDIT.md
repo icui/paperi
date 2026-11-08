@@ -30,6 +30,11 @@ Only the small probe adapts source; its license is in [third-party notices](../T
 
 ### Source anchors
 
+yabai also explicitly documents native NSDocument tabs (including Finder and
+Terminal) as a known problem when creating tabs, recommending avoidance or floating
+rules. Its layout stacks are not proof of native document-tab grouping support.
+See the pinned [README caveat](https://github.com/asmvik/yabai/blob/dd845723416f5fe92af49fad5ebab00369e07edd/README.md#L54).
+
 - PaperWM [window refresh and tab rejection](https://github.com/mogenson/PaperWM.spoon/blob/f86f76bae635307d6cb12c8d66693acff57cf82a/windows.lua#L105),
   [frame setter wrapper](https://github.com/mogenson/PaperWM.spoon/blob/f86f76bae635307d6cb12c8d66693acff57cf82a/windows.lua#L742),
   [Space transaction](https://github.com/mogenson/PaperWM.spoon/blob/f86f76bae635307d6cb12c8d66693acff57cf82a/space.lua#L64),
@@ -56,7 +61,12 @@ Space activation, focus writes, Dock injection or SIP changes are involved.
 The dispatch adapts yabai's bridged operation and compatibility-workspace fallback.
 The latter temporarily assigns a compatibility ID to the destination, submits the
 window workspace assignment and resets that ID to zero, following the references.
-API outcomes are recorded; submission alone is never treated as a successful move.
+The compatibility setter's return type differs among private declarations, and the
+reference callers ignore it. Schema 2 therefore does not interpret its return
+register as a documented error code or gate workspace assignment on it. Where
+available, the compatibility getter records the marker before/after assignment,
+and the previous marker is restored. The workspace assignment return is retained
+as raw evidence. Submission alone is never treated as a successful move.
 Each membership wait is bounded to about three seconds plus query time. A timeout
 still attempts return, and the disposable window is closed on completion.
 
@@ -85,3 +95,25 @@ followed by a gated opt-in live ordinary-window path. This experimental progress
 does not authorize enabling management before the existing release gates or silently
 reduce the requested final feature set. Native tabs, actual popup recovery, follow,
 cross-display ownership, baseline timing and daily-use validation remain open.
+
+### Follow-up with prerequisites met
+
+The environment now exposes user Spaces 1 and 378 and the probe starts on Space 1.
+The initial probe incorrectly gated the workspace call on the compatibility
+setter's assumed return value. Its earlier 5812615 result does not establish a
+documented API rejection; that conclusion is superseded.
+
+The corrected source-faithful sequence does attempt workspace assignment.
+Compatibility getter values remain 0 before assignment, after assignment and
+after restoration; workspace assignment returns 1006. Destination membership is
+not observed within the bounded wait: the window remains on Space 1. Source
+membership is observed after the return request, but that is not a successful
+return transfer because the outbound move never succeeded. The disposable window
+closes and the probe exits 1. Capture: `captures/space-probe-membership-check.json`.
+
+This establishes a failed compatibility-path transfer on this host, without
+attributing it to SIP, signing or a specific privilege. The bridged entry point
+remains absent. Treat this backend as unavailable for the current prototype;
+the next transfer alternative is the installed PaperWM Mission Control path,
+which needs a separate explicit, bounded own-window interaction test. Ordinary
+AX placement work can proceed independently; no more blind direct-transfer repeats.

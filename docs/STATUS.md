@@ -2,9 +2,9 @@
 
 ## Current checkpoint: 2026-11-08
 
-- Latest Space probe: environment prerequisites are now met (user Space 1, destination 378), but compatibility-ID setup and reset each return 5812615. Workspace assignment is not attempted, and the probe exits 1. Transfer is not validated; the next investigation is this backend rejection rather than desktop setup.
+- Latest Space probe: prerequisites are met (source user Space 1, destination 378). After correcting an invalid return-value gate, the reference call sequence attempts workspace assignment (raw return 1006), but compatibility readback remains 0 and membership stays on Space 1. This direct backend fails on this host; its underlying cause is not established. Earlier interpretation of 5812615 as an API rejection is superseded.
 - Development direction reset: see [source comparison and decisions](REFERENCE-AUDIT.md). Installed PaperWM explicitly rejects affected Apple native-tab windows; exhaustive tab-container learning is an enhancement, not a prerequisite inherited from that baseline. Final native-tab support remains an open requirement.
-- Added a separate own-window Space-transfer probe adapting pinned yabai dispatch, with license notice. This host lacks the bridged entry point but exposes the compatibility fallback. The probe starts on a fullscreen Space and sees only one normal desktop on that display; it exits unsupported before submission. Next native check needs a normal-desktop source and two existing user Spaces. Production Paperi remains diagnostic-only.
+- Added a separate own-window Space-transfer probe adapting pinned yabai dispatch, with license notice. This host lacks the bridged entry point; the compatibility fallback fails the corrected membership check. Initial fullscreen/desktop prerequisites have since been resolved. Production Paperi remains diagnostic-only.
 
 - Diagnostic-only: no window effects, management hotkeys or native observer-to-reducer integration.
 - All 88 Swift regressions pass in debug and release (28 core, 60 platform). The preceding validation also passes three Ruby diagnostic regressions (14 assertions).
@@ -15,7 +15,7 @@
 - Latest changes validate PID/role before traversing roots and distinguish unresolved event IDs from known duplicates. All ten controlled modes pass after these changes; this is not evidence that intermittent native reference failures are resolved.
 - Latest work adds scoped popup evidence, safe unknown presentation state, isolated missing tab-selection metadata, repeated diagnostic checks, stale-callback rejection, fresh focus/main discovery, explicit sampled-reference coverage and opt-in periodic reconciliation.
 - Association timelines now identify structural/selection evidence failures and native AX query codes. The latest unvisited-member check passes; a restart capture again has no roots immediately after replacement and remains inconclusive.
-- Next priorities: run the own-window Space round trip with its required desktop setup, then implement a fixture-scoped ordinary-window AX placement slice. Bound further tab/restart investigation to concrete failures; daily-app tabs, actual popup recovery, display ownership and baseline measurements remain release gates. Historical increments below retain their original observations and limits.
+- Next priorities: implement a fixture-scoped ordinary-window AX placement slice and investigate the reference Mission Control transfer path as a separate bounded test. Bound further tab/restart investigation to concrete failures; daily-app tabs, actual popup recovery, display ownership and baseline measurements remain release gates. Historical increments below retain their original observations and limits.
 
 ## Increment 1: repository, diagnostic shell, and initial core
 
@@ -343,6 +343,13 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Reran the own-window transfer probe after the desktop setup changed. Its window starts on user Space 1/type 0; the same display exposes user Spaces 1 and 378. The previous environment prerequisite is satisfied.
 - The bridged operation remains unavailable. Compatibility-workspace setup for destination 378 returns 5812615; the cleanup/reset attempt returns the same code. The probe deliberately skips workspace assignment (`moveResult: -1` is its not-attempted sentinel), closes its disposable window and exits 1. No error-code meaning is inferred here. This is a backend rejection, not a confirmed outbound or return transfer.
 - No user window or document is targeted, and no Space activation is requested. Transfer feasibility remains open. Next work should trace initialization/connection requirements and the reference implementation's behavior on this OS before changing backend or interpreting symbol availability as support.
+
+## Increment 41: correct transfer probe contract; confirm native-tab limitation
+
+- Committed increments 38–40 as `19e4a10`. Checked yabai's pinned README: it explicitly lists native NSDocument tabs in Finder/Terminal as problematic when creating tabs, recommending avoiding them or floating those windows. Neither reviewed reference supplies the complete native-tab grouping behavior requested for Paperi.
+- Found a probe error: it treated SLSSpaceSetCompatID's assumed return value as a reliable CGError and skipped workspace assignment. Historical private declarations differ about that return type; pinned yabai and Hammerspoon ignore it. The earlier 5812615 evidence did not establish rejection. Schema 2 follows their call sequence without that gate, records optional compatibility-ID readback and workspace assignment's raw return, and restores the previous compatibility ID.
+- Corrected native run starts on user Space 1 with destination 378. Both outbound and return workspace calls are attempted and return 1006. Compatibility-ID readback remains zero before/after both sequences. Destination membership is never observed within the bounded wait; the window remains on Space 1. Observing source membership after the return request does not establish a return transfer when outbound failed. The fixture closes and exits 1. Ignored capture: `captures/space-probe-membership-check.json`.
+- The new bridged symbol remains unavailable. This is a confirmed failure of the tested compatibility path on this host, not proof of a SIP/signing cause or of all no-injection paths failing. Stop repeating this backend without a new hypothesis. The reference Mission Control path remains the next transfer alternative; fixture-scoped AX placement can proceed independently. Production management remains inactive.
 
 ## Validation on the initial host
 
