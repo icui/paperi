@@ -39,6 +39,7 @@ extension Diagnostics {
             var rows: [[String: Any]] = []
             var truncated = false
             var truncationReasons: Set<String> = []
+            var roleReadRetries: [[String: Any]] = []
             let deadline = ProcessInfo.processInfo.systemUptime + 1
             func withinBudget() -> Bool {
                 guard ProcessInfo.processInfo.systemUptime < deadline else {
@@ -73,6 +74,20 @@ extension Diagnostics {
                 if id != 0 { row["windowID"] = id }
                 for name in [kAXRoleAttribute, kAXSubroleAttribute] {
                     guard withinBudget() else { break }
+                    if name == kAXRoleAttribute {
+                        let role = TabRoleRead.collect(withinBudget: withinBudget) {
+                            var value: CFTypeRef?
+                            let result = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+                            return (result, value as? String)
+                        }
+                        row[name + "Error"] = role.errors.last!.rawValue
+                        if let value = role.role { row[name] = value }
+                        if role.errors.count > 1 {
+                            roleReadRetries.append(["node": index, "errors": role.errors.map(\.rawValue),
+                                                    "recovered": role.role != nil])
+                        }
+                        continue
+                    }
                     var value: CFTypeRef?
                     let result = AXUIElementCopyAttributeValue(element, name as CFString, &value)
                     row[name + "Error"] = result.rawValue
@@ -148,6 +163,7 @@ extension Diagnostics {
                                  "applicationRole": applicationRole,
                                  "roots": roots, "observedRoots": observedRoots,
                                  "rootValidations": rootValidations,
+                                 "roleReadRetries": roleReadRetries,
                                  "nodes": rows, "truncated": truncated,
                                  "truncationReasons": truncationReasons.sorted(), "windowCoverage": coverage.json]
             if let identity {

@@ -364,6 +364,19 @@ checks[:associationEvidenceIssuesReported] = records.select { |row| row['event']
   end
 end
 checks[:periodicReconciliationObserved] = records.any? { |row| row['event'] == 'recorderReconciled' } if reconcile
+checks[:roleReadRetriesReported] = records.select { |row| row['event'] == 'tabEvidence' }.all? do |row|
+  row.fetch('applications').all? do |app_row|
+    retries = app_row['roleReadRetries']
+    next false unless retries.is_a?(Array) && retries.map { |entry| entry['node'] }.uniq.length == retries.length
+    retries.all? do |entry|
+      node = app_row['nodes'].find { |candidate| candidate['node'] == entry['node'] }
+      errors = entry['errors']
+      node && errors.is_a?(Array) && errors.length == 2 && errors.first == -25201 &&
+        errors.last.is_a?(Integer) && node['AXRoleError'] == errors.last &&
+        entry['recovered'] == (errors.last == 0 && node['AXRole'].is_a?(String) && !node['AXRole'].empty?)
+    end
+  end
+end
 checks[:rootValidationReported] = records.select { |row| row['event'] == 'tabEvidence' }.all? do |row|
   row.fetch('applications').all? do |app_row|
     roots = (app_row['roots'] + app_row['observedRoots']).uniq.sort
@@ -437,10 +450,10 @@ end
 association_timeline = records.select { |row| row['event'] == 'tabEvidence' }.map do |row|
   { captureStartedUptime: row['captureStartedUptime'], uptime: row['uptime'],
     applications: row['applications'].map do |app_row|
-      app_row.select { |key, _| %w[pid identityScope windowCoverage rootValidations truncated truncationReasons identityTruncated selectionAssociations].include?(key) }
+      app_row.select { |key, _| %w[pid identityScope windowCoverage rootValidations roleReadRetries truncated truncationReasons identityTruncated selectionAssociations].include?(key) }
     end }
 end
-File.write(output, JSON.pretty_generate(schemaVersion: 18, fixtureMode: configuration[2], reconciliationEnabled: reconcile, observation: observation, checks: checks, failedChecks: failed_checks, identityComparisons: identity_comparisons, windowEventEvidence: event_evidence,
+File.write(output, JSON.pretty_generate(schemaVersion: 19, fixtureMode: configuration[2], reconciliationEnabled: reconcile, observation: observation, checks: checks, failedChecks: failed_checks, identityComparisons: identity_comparisons, windowEventEvidence: event_evidence,
   associationTimeline: association_timeline,
   discoveryPasses: records.select { |row| row['event'] == 'windowDiscovery' }, stages: stages, events: event_counts,
   scope: 'Controlled fixture evidence only. Native-tab grouping is not inferred from equal frames or titles.'))

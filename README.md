@@ -4,6 +4,8 @@ Standalone macOS scrolling window manager in development. See [PLAN.md](PLAN.md)
 
 The current implementation provides a pure Swift layout core (including resize, split, and floating transitions), regression tests, read-only native diagnostics, and an inactive menu bar shell. **It does not yet manage windows.** Native tabs, Space transfers, full keyboard parity, and trackpad capture remain feasibility work.
 
+See the [pinned-source comparison](docs/REFERENCE-AUDIT.md) for the current implementation direction. A separate `PaperiSpaceProbe` executable tests only its own disposable window's Space membership round trip. It needs a normal-desktop source and a second existing user Space on the same display; it neither creates nor activates Spaces. Run `./scripts/swift.sh run PaperiSpaceProbe` in a GUI session. Exit 0 confirms the round trip, 1 reports transfer failure, and 2 reports unsupported prerequisites. The probe is not linked into Paperi's management path. Adapted source notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Development
 
 Requires macOS 14+ and Swift 6+ (Xcode or Command Line Tools). The initial host is macOS 26.7.2 on arm64; older releases are not validated. There are no third-party package dependencies. The Swift wrapper isolates a stale-private-manifest-interface issue found in this host's Command Line Tools and loads its bundled Swift Testing plugin explicitly; it never changes the installed toolchain.
@@ -77,6 +79,8 @@ Schema 16 retains `truncationReasons` (`depthLimit`, `nodeLimit`, `timeBudget`) 
 Schema 17 adds `rootValidations`: each enumerated/observed root must have a matching PID and an AXWindow/AXSheet role before tab diagnostics traverse its relationships. Rejected roots retain role/PID query results without following application/menu or foreign trees. A rejected root withholds association learning even beside otherwise usable roots; it never confirms an empty inventory.
 
 Schema 18 separates `noDuplicateKnownWindowEvents`, `windowEventIdentitiesComplete` and `windowEventCoverageComplete`. Zero, missing or malformed window IDs are unresolved identities, not proof of duplicate delivery. They still fail required identity/coverage checks. `windowEventEvidence` preserves known duplicates and the unresolved-event count. Run the harness metric regressions with `ruby Tests/DiagnosticsTests/window_event_evidence_test.rb`.
+
+Schema 19 retains per-capture `roleReadRetries` in the association timeline. An AXRole query returning `cannotComplete` (-25201) gets at most one immediate fresh read within the existing capture deadline. Each retry records its node, both AX result codes and whether a nonempty role was recovered. Failed retries still withhold learning; other errors and successful reads with missing/malformed roles are not retried. No prior role or association is used as fallback.
 
 `ruby scripts/check-diagnostics.rb --cycles 2 [new-output-directory]` runs all ten controlled diagnostic modes sequentially, including baseline and periodically reconciled restart, and preserves individual reports/logs plus a cumulative summary. One cycle is the default; one to five cycles are accepted. Each cycle takes roughly five minutes. Required failures produce a nonzero exit; native enumeration and restart inventory remain explicit informational checks. The runner refuses an existing output directory. `check-ax-recorder.rb [new-output.json]` can also save its report separately from build output.
 
