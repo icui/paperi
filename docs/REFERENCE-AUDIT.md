@@ -150,3 +150,29 @@ tickets and frame expectations. The fixture explicitly selects application-local
 ownership. Native interaction and resize checks remain passing. Native geometry
 restoration and observer shutdown remain adapter responsibilities; no general
 user-window preview is enabled by this extraction.
+
+Increment 47 adds controlled adapter cleanup: invalidate management, stop native
+observation, then restore and confirm saved surviving-window frames under fresh
+identity/Space/eligibility checks. Debug/release stop-while-open tests restore two
+live fixture windows exactly, reject stale work and avoid repeated-stop writes.
+Normal close-to-empty cleanup also remains passing. This establishes controlled
+recovery only; abrupt termination and user-window preview recovery are still open.
+
+Increment 48 exposes that scoped adapter as `paperi preview-fixture`, with local
+AppKit buttons/key equivalents, frontmost command ownership and Stop/restoration.
+The debug/release input test invokes grow/shrink key-equivalent handlers and the
+actual Stop button, confirming effects and restoration without posting global
+keyboard events. The preview remains restricted to two fresh non-tabbing windows.
+This is enough of the ordinary-window interaction path to resume the early
+real-app native-tab spike before adding unrelated features; general user-app
+admission and native-tab safety are not inferred from the preview.
+
+Increment 49 begins the real-app track with scoped temporary-folder Finder
+documents and one New Tab menu action. Both document IDs are discoverable and
+eligible; New Tab changes the active physical representative. The native tab bar
+is a direct window child with AXTabs containing two AXTabButton radio controls,
+but both controls point to the active representative. General DFS capture spends
+its bounds on Finder content, so association learning remains unavailable. This
+supports a shallow app-specific capture following the Hammerspoon direct-child
+pattern, followed by selection/identity validation; it does not justify assuming
+membership or enabling Finder geometry management yet.

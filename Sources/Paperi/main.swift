@@ -29,6 +29,16 @@ import PaperiPlatform
 var args = Array(CommandLine.arguments.dropFirst())
 if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["--menu"] }
 switch args.first {
+case "preview-fixture", "probe-preview-input":
+    guard args.count == 1 else { print("Usage: paperi preview-fixture | probe-preview-input"); exit(2) }
+    let report = Diagnostics.probeLifecycle(preview: true, automatedPreview: args.first == "probe-preview-input")
+    Diagnostics.printJSON(report)
+    exit(report["result"] as? String == "passed" ? 0 : 1)
+case "probe-stop":
+    guard args.count == 1 else { print("Usage: paperi probe-stop"); exit(2) }
+    let report = Diagnostics.probeLifecycle(stopWhileOpen: true)
+    Diagnostics.printJSON(report)
+    exit(report["result"] as? String == "passed" ? 0 : 1)
 case "probe-interaction":
     guard args.count == 1 else { print("Usage: paperi probe-interaction"); exit(2) }
     let report = Diagnostics.probeLifecycle(interaction: true)
@@ -139,6 +149,9 @@ default:
       paperi probe-lifecycle             Observe/reduce/tile two new disposable windows through create/close
       paperi probe-resize                Adopt a fixture-originated resize while tracking expected AX echoes
       paperi probe-interaction           Exercise focused resize commands, panel suppression and recovery on a new fixture
+      paperi probe-stop                  Stop with two live fixture windows, restore original frames and reject stale work
+      paperi preview-fixture             Interactive disposable preview; local controls, Stop & Restore, 60-second limit
+      paperi probe-preview-input         Test AppKit key-equivalent/button input on the disposable preview
       paperi --menu                      Run diagnostic menu bar shell
     """)
 }

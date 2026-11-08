@@ -1,5 +1,14 @@
 # Paperi
 
+Try the interactive disposable preview with:
+
+```sh
+./scripts/swift.sh build
+./scripts/swift.sh run --skip-build paperi preview-fixture
+```
+
+Click one of its two document windows, then use **Narrower/Wider** or local **Option–Command–H/L**. **Stop & Restore** or **Escape** restores saved frames and closes the preview; it also stops automatically after 60 seconds. Buttons avoid any preexisting global shortcut bindings. Only these newly created windows are managed. Existing applications, native tabs, global hotkeys and Space transfer are outside this preview. Accessibility trust is required.
+
 Standalone macOS scrolling window manager in development. See [PLAN.md](PLAN.md) for the intended behavior and release gates.
 
 The current implementation provides a pure Swift layout core (including resize, split, and floating transitions), regression tests, read-only native diagnostics, and an inactive menu bar shell. **It does not yet manage windows.** Native tabs, Space transfers, full keyboard parity, and trackpad capture remain feasibility work.
@@ -13,6 +22,12 @@ The current implementation provides a pure Swift layout core (including resize, 
 `paperi probe-interaction` runs three scripted width commands against fresh per-app focused-window metadata: on a document, while a utility panel owns key focus, and after document focus returns. Only the first and last may change layout; the middle command must produce zero writes and must never replay. Native focus notifications also update logical focus/suppression. The fixture changes key windows inside its own application; Paperi issues no AX focus/activation requests. Panels are classified before tiled Space ownership is required, and fresh focus/main references supplement AXWindows. This does not install global shortcuts or establish OS-wide/cross-display popup recovery.
 
 The lifecycle probes now use a reusable scoped session for state, logical IDs, Space ownership and frame expectations. Its default command policy requires the actual frontmost PID to match its owner; fixture-only callers explicitly use application-local ownership. It defaults to rejecting unknown native-tab membership. Stopping invalidates the session ticket and clears pending state so queued work cannot be applied to a replacement session. This state boundary does not itself restore native geometry; restoration and observer teardown remain adapter responsibilities. No user-window preview is enabled yet.
+
+`paperi probe-stop` stops while both new fixture windows are still open. The adapter invalidates management, removes observation, restores the first saved frame of each surviving eligible window and confirms it within two points. It revalidates PID, reference, role, Space and presentation before restoration writes. Confirmed closed windows are removed from the recovery journal. Repeated stop is a no-op; restoration failure is reported without automatic retries. The check also attempts an old-ticket command/effect after stop and requires zero management writes. This covers normal controlled stop, not crash recovery or a general user-window preview.
+
+`paperi probe-preview-input` validates the preview's AppKit input path automatically: it activates only its disposable child, invokes its local key-equivalent handlers for grow/shrink, then clicks its actual Stop button through AppKit. It posts no system-wide keyboard events. Accepted requests require that child's PID, run token, known window and a new sequence number. Resize dispatch and each command-induced AX write require the child to remain frontmost. This is not a physical-keyboard test or global-shortcut registration.
+
+`ruby scripts/check-finder-documents.rb [--new-tab] new-output-directory` is a separate real-app discovery spike. It creates two Finder windows pointing to temporary folders, optionally focuses one recorded test ID and invokes Finder's New Tab menu item, captures read-only tab/policy facts and closes recorded test IDs. It never merges windows or changes Finder preferences. `--new-tab` also needs System Events automation access. A passing report means discovery/policy/cleanup passed; `tabSupport` remains `unverified`, and `tabCaptureAvailable` is separate. This is not native-tab management acceptance.
 
 See the [pinned-source comparison](docs/REFERENCE-AUDIT.md) for the current implementation direction. A separate `PaperiSpaceProbe` executable tests only its own disposable window's Space membership round trip. It needs a normal-desktop source and a second existing user Space on the same display; it neither creates nor activates Spaces. Run `./scripts/swift.sh run PaperiSpaceProbe` in a GUI session. Exit 0 confirms the round trip, 1 reports transfer failure, and 2 reports unsupported prerequisites. The probe is not linked into Paperi's management path. Adapted source notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
