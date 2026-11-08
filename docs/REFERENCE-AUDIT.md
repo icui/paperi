@@ -142,3 +142,11 @@ deferred replay in debug/release. Its omitted utility panel is recovered through
 fresh focus/main references before transient classification. These results are
 per-app fixture behavior; they do not close global active-app, real OS popup,
 cross-display, keyboard registration or native-tab acceptance gates.
+
+Increment 46 extracts an app/Space-scoped session shared by the native fixture
+adapters. Admission defaults to withholding unknown tab membership, command
+ownership defaults to the actual frontmost app, and stop invalidates old work
+tickets and frame expectations. The fixture explicitly selects application-local
+ownership. Native interaction and resize checks remain passing. Native geometry
+restoration and observer shutdown remain adapter responsibilities; no general
+user-window preview is enabled by this extraction.

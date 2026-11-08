@@ -38,31 +38,30 @@ extension Diagnostics {
         defer { recorder.stop() }
         let application = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(application, 0.15)
-        var state = LifecycleState()
         var references: [UInt32: AXUIElement] = [:]
-        var slots: [UInt32: String] = [:]
         var created: [UInt32] = [], destroyed: [UInt32] = []
         var timeline: [[String: Any]] = []
         var failures: [String] = []
         var echoCount = 0
         var notificationCount = 0
-        var echoes = FrameEchoes()
         var adoptedWidths: [Double] = []
         var focusTimeline: [[String: Any]] = []
         var commandTimeline: [[String: Any]] = []
         var excludedIDs: Set<UInt32> = []
         var commandIndex = 0
         var nativeFocusCount = 0
-        var scopeSpace: UInt64?
         // CG display bounds use the AX top-left coordinate domain.
         let bounds = CGDisplayBounds(CGMainDisplayID())
         let canvas = Rect(x: bounds.minX + 40, y: bounds.minY + 100,
                           width: min(900, bounds.width - 80), height: min(360, bounds.height - 180))
         guard canvas.isValid else { report["reason"] = "No usable fixture canvas"; return report }
+        let session = ScopedLayoutSession(ownerPID: pid, canvas: canvas, ownership: .applicationLocalFixture)
+        let ticket = session.ticket
+        defer { session.stop() }
         func pause() { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.04)) }
         func identityValid(_ element: AXUIElement, _ wid: UInt32) -> Bool {
             var owner: pid_t = 0
-            return child.isRunning && AXUIElementGetPid(element, &owner) == .success && owner == pid &&
+            return session.accepts(ticket) && child.isRunning && AXUIElementGetPid(element, &owner) == .success && owner == pid &&
                 paperi_window_id(element) == wid && attribute(element, kAXRoleAttribute) as? String == "AXWindow"
         }
         func membership(_ wid: UInt32) -> UInt64? {
@@ -98,16 +97,16 @@ extension Diagnostics {
                 AXUIElementSetMessagingTimeout(ref, 0.15)
                 if wid > 0, identityValid(ref, wid) { id = wid; facts = classification(ref, wid) }
             }
-            try state.reduce(.focus(windowID: id, classification: facts))
+            try session.focus(windowID: id, ownerPID: id == nil ? nil : pid, classification: facts, ticket: ticket)
             focusTimeline.append(["windowID": id ?? 0, "eligibility": facts.eligibility.rawValue,
-                                  "suppressed": state.interactionSuppressed])
+                                  "suppressed": session.state.interactionSuppressed])
         }
         func apply() -> (writes: Int, confirmed: Bool) {
-            guard let placements = try? state.layout.placements(in: canvas) else { return (0, false) }
+            guard session.accepts(ticket), let placements = try? session.state.layout.placements(in: canvas) else { return (0, false) }
             var writes = 0
             for placement in placements {
                 let wid = placement.windowID
-                guard let ref = references[wid], identityValid(ref, wid), membership(wid) == scopeSpace,
+                guard let ref = references[wid], identityValid(ref, wid), membership(wid) == session.spaceID,
                       classification(ref, wid).eligibility == .tiled else { return (writes, false) }
                 // Expected AX echoes do not trigger another layout. Changed-frame
                 // comparison also avoids rewriting an unchanged surviving slot.
@@ -115,7 +114,7 @@ extension Diagnostics {
                 var point = CGPoint(x: placement.frame.x, y: placement.frame.y)
                 var size = CGSize(width: placement.frame.width, height: placement.frame.height)
                 guard let p = AXValueCreate(.cgPoint, &point), let s = AXValueCreate(.cgSize, &size) else { return (writes, false) }
-                echoes.expect(windowID: wid, frame: placement.frame, now: ProcessInfo.processInfo.systemUptime)
+                session.expect(windowID: wid, frame: placement.frame, now: ProcessInfo.processInfo.systemUptime, ticket: ticket)
                 for (name, value) in [(kAXSizeAttribute, s), (kAXPositionAttribute, p), (kAXSizeAttribute, s)] {
                     guard identityValid(ref, wid),
                           AXUIElementSetAttributeValue(ref, name as CFString, value) == .success else { return (writes, false) }
@@ -153,21 +152,21 @@ extension Diagnostics {
                     if event == kAXMovedNotification || event == kAXResizedNotification {
                         notificationCount += 1
                         guard let ref = references[wid], identityValid(ref, wid), let observed = frame(ref) else { continue }
-                        if case .expected = echoes.observe(windowID: wid, frame: observed,
-                                                          now: ProcessInfo.processInfo.systemUptime) {
+                        if case .expected = session.observe(windowID: wid, frame: observed,
+                                                          now: ProcessInfo.processInfo.systemUptime, ticket: ticket) {
                             echoCount += 1; continue
                         }
-                        guard externalResize, event == kAXResizedNotification, membership(wid) == scopeSpace,
-                              let slot = slots[wid], let index = state.layout.index(of: slot),
-                              abs(state.layout.columns[index.column].width - observed.width) > 2 else { continue }
+                        guard externalResize, event == kAXResizedNotification, let space = membership(wid), space == session.spaceID,
+                              let slot = session.slots[wid], let index = session.state.layout.index(of: slot),
+                              abs(session.state.layout.columns[index.column].width - observed.width) > 2 else { continue }
                         let width = min(canvas.width, observed.width)
-                        needsLayout = try state.reduce(.resizeColumn(windowID: wid, width: width,
-                                                                       classification: classification(ref, wid)))
+                        needsLayout = try session.resize(windowID: wid, ownerPID: pid, spaceID: space, width: width,
+                                                         classification: classification(ref, wid), ticket: ticket)
                         guard needsLayout else { continue }
                         adoptedWidths.append(width)
                         label = "externalResize"
                     } else if event == kAXWindowCreatedNotification {
-                        guard slots[wid] == nil else { failures.append("Duplicate create identity"); continue }
+                        guard session.slots[wid] == nil else { failures.append("Duplicate create identity"); continue }
                         let refs = attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? []
                         func reference(_ name: String) -> AXUIElement? {
                             guard let value = attribute(application, name), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
@@ -186,34 +185,32 @@ extension Diagnostics {
                         if interaction && eligibility.eligibility == .excluded { excludedIDs.insert(wid); continue }
                         guard eligibility.eligibility == .tiled else { failures.append("Ineligible fixture"); continue }
                         guard let space = membership(wid) else { failures.append("Unavailable created window Space"); continue }
-                        if scopeSpace == nil { scopeSpace = space }
-                        guard space == scopeSpace else { failures.append("Cross-Space scope rejected"); continue }
-                        let slot = "container-\(UUID())"
-                        needsLayout = try state.reduce(.insert(Slot(id: slot, members: [wid], activeMember: wid),
-                            width: (canvas.width - 8) / 2, classification: eligibility))
-                        slots[wid] = slot; references[wid] = ref; created.append(wid)
-                    } else if event == kAXUIElementDestroyedNotification, let slot = slots.removeValue(forKey: wid) {
-                        needsLayout = try state.reduce(.remove(slotID: slot))
+                        guard session.spaceID == nil || space == session.spaceID else { failures.append("Cross-Space scope rejected"); continue }
+                        needsLayout = try session.insert(windowID: wid, ownerPID: pid, spaceID: space,
+                            classification: eligibility, knownSingleton: true, ticket: ticket)
+                        references[wid] = ref; created.append(wid)
+                    } else if event == kAXUIElementDestroyedNotification, session.slots[wid] != nil {
+                        needsLayout = try session.remove(windowID: wid, ticket: ticket)
                         references.removeValue(forKey: wid); destroyed.append(wid)
-                        echoes.remove(windowID: wid)
                     } else { continue }
                     let effects = needsLayout ? apply() : (writes: 0, confirmed: true)
                     if !effects.confirmed { failures.append("Unconfirmed layout effect") }
                     timeline.append(["event": label, "windowID": wid,
-                        "slotCount": state.layout.columns.reduce(0) { $0 + $1.slots.count },
+                        "slotCount": session.state.layout.columns.reduce(0) { $0 + $1.slots.count },
                         "writeCount": effects.writes, "confirmed": effects.confirmed])
                 } catch { failures.append("Reducer rejected lifecycle event") }
             }
             if interaction && commandIndex < 3 && ProcessInfo.processInfo.systemUptime - started >= [6.0, 8.0, 10.0][commandIndex] {
                 do {
                     try refreshFocus() // Revalidate ownership immediately before dispatch.
-                    let before = state.layout
-                    let intent = try state.reduce(.resizeFocusedWidth(by: 0.1, canvas: canvas))
+                    let before = session.state.layout
+                    let intent = try session.resizeFocused(by: 0.1,
+                        frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier, ticket: ticket)
                     let effects = intent ? apply() : (writes: 0, confirmed: true)
-                    commandTimeline.append(["phase": commandIndex, "suppressed": state.interactionSuppressed,
-                        "changed": state.layout != before, "intent": intent, "writeCount": effects.writes,
+                    commandTimeline.append(["phase": commandIndex, "suppressed": session.state.interactionSuppressed,
+                        "changed": session.state.layout != before, "intent": intent, "writeCount": effects.writes,
                         "confirmed": effects.confirmed,
-                        "widths": state.layout.columns.map(\.width), "slots": state.layout.columns.flatMap { $0.slots.map(\.id) }])
+                        "widths": session.state.layout.columns.map(\.width), "slots": session.state.layout.columns.flatMap { $0.slots.map(\.id) }])
                     if !effects.confirmed { failures.append("Unconfirmed command effect") }
                 } catch { failures.append("Command dispatch failed") }
                 commandIndex += 1
@@ -237,7 +234,7 @@ extension Diagnostics {
             "frameEffectsExercised": timeline.contains { ($0["writeCount"] as? Int ?? 0) > 0 },
             "survivorReflowExercised": lifecycleRows.count == 4 && (lifecycleRows[2]["writeCount"] as? Int ?? 0) > 0,
             "echoNotificationsObserved": echoCount > 0,
-            "finalLayoutEmpty": state.layout.columns.isEmpty && slots.isEmpty,
+            "finalLayoutEmpty": session.state.layout.columns.isEmpty && session.slots.isEmpty,
             "nativeSourcesRemoved": teardown["sourcesStillInstalled"] as? Int == 0,
             "noFailures": failures.isEmpty]
         if externalResize {
@@ -274,6 +271,9 @@ extension Diagnostics {
         report["failures"] = failures; report["echoNotifications"] = echoCount
         report["frameNotifications"] = notificationCount; report["adoptedWidths"] = adoptedWidths
         report["teardown"] = teardown
+        session.stop()
+        checks["stoppedSessionRejectsOldTicket"] = !session.accepts(ticket)
+        report["checks"] = checks
         if interaction {
             report["focusTimeline"] = focusTimeline; report["commandTimeline"] = commandTimeline
             report["nativeFocusNotifications"] = nativeFocusCount
