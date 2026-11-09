@@ -56,6 +56,22 @@ Dir.mktmpdir('paperi-finder-', File.join(root, '.build')) do |temporary|
     end
     report[:createdWindowIDs] = owned
     expected = owned.dup
+    select_script = File.join(temporary, 'select.applescript')
+    File.write(select_script, <<~APPLESCRIPT)
+      on run argv
+        set wid to (item 1 of argv) as integer
+        with timeout of 10 seconds
+          tell application "Finder"
+            if not (exists window id wid) then error "Owned Finder window disappeared"
+            set index of (window id wid) to 1
+            activate
+            delay 0.25
+            if id of front window is not wid then error "Finder test representative not selected"
+            return id of front window
+          end tell
+        end timeout
+      end run
+    APPLESCRIPT
     if new_tab
       tab_script = File.join(temporary, 'new-tab.applescript')
       File.write(tab_script, <<~APPLESCRIPT)
@@ -102,11 +118,71 @@ Dir.mktmpdir('paperi-finder-', File.join(root, '.build')) do |temporary|
       report[:newTabCommandCompleted] = true
       report[:activeTestWindowID] = active
     end
-    records, error, result = Open3.capture3(File.join(bin, 'paperi'), 'record', '5', '--bundle-id', 'com.apple.finder',
-                                          '--tab-evidence', '--window-evidence')
-    File.write(File.join(output, 'capture.jsonl'), records)
-    raise "Recorder failed: #{error.strip}" unless result.success?
-    rows = records.lines.map { |line| JSON.parse(line) }
+    rows = []
+    if new_tab
+      members = [owned.first, active]
+      report[:tabRepresentativeIDs] = members
+      report[:selectionStages] = []
+      input, stream, recorder = Open3.popen2(File.join(bin, 'paperi'), 'record', '20', '--bundle-id', 'com.apple.finder',
+                                             '--tab-evidence', '--window-evidence')
+      input.close
+      queue = Queue.new
+      reader = Thread.new do
+        begin
+          stream.each_line { |line| queue << JSON.parse(line) }
+        rescue StandardError => error
+          queue << error
+        ensure
+          queue << nil
+        end
+      end
+      take = lambda do
+        row = queue.pop
+        raise 'Recorder ended before all Finder stages' unless row
+        raise row if row.is_a?(Exception)
+        rows << row
+        row
+      end
+      begin
+        loop { break if take.call['event'] == 'recorderReady' }
+        [members[0], members[1], members[0]].each_with_index do |target, index|
+          selected, error, status = Open3.capture3('/usr/bin/osascript', select_script, target.to_s)
+          raise "Finder select failed: #{error.strip}" unless status.success?
+          loop do
+            row = queue.pop(true) rescue nil
+            break unless row
+            raise row if row.is_a?(Exception)
+            rows << row
+          end
+          fresh = []
+          until fresh.length == 2
+            row = take.call
+            fresh << row if row['event'] == 'tabEvidence'
+          end
+          app = fresh.last.dig('nativeTabEvidence', 'applications')&.first
+          raise 'Finder not discovered' unless app
+          report[:selectionStages] << {
+            stage: index + 1, target: target, scriptIdentity: selected.strip.to_i,
+            associations: app['selectionAssociations'], memberships: app['membershipCandidates'],
+            singletons: (app['singletonCandidates'] || []) & (members + [owned.last])
+          }
+        end
+        loop { break if take.call['event'] == 'recordingEnded' }
+        raise 'Recorder failed' unless recorder.value.success?
+      ensure
+        Process.kill('TERM', recorder.pid) if recorder&.alive?
+        recorder&.value
+        reader&.join
+        stream&.close
+      end
+      File.write(File.join(output, 'capture.jsonl'), rows.map { |r| JSON.generate(r) }.join("\n") + "\n")
+    else
+      records, error, result = Open3.capture3(File.join(bin, 'paperi'), 'record', '5', '--bundle-id', 'com.apple.finder',
+                                            '--tab-evidence', '--window-evidence')
+      File.write(File.join(output, 'capture.jsonl'), records)
+      raise "Recorder failed: #{error.strip}" unless result.success?
+      rows = records.lines.map { |line| JSON.parse(line) }
+    end
     tab_apps = rows.select { |row| row['event'] == 'tabEvidence' }.flat_map { |row| row.fetch('applications') }
     policy_apps = rows.select { |row| row['event'] == 'windowEvidence' }.flat_map { |row| row.fetch('applications') }
     report[:shallowTabBarSamples] = rows.select { |row| row['event'] == 'tabEvidence' }
@@ -117,9 +193,14 @@ Dir.mktmpdir('paperi-finder-', File.join(root, '.build')) do |temporary|
             .map { |node| node.dig('AXTabs', 'count') },
           associations: app['selectionAssociations'] }
       end
+    report[:nativeTabBarSamples] = rows.select { |row| row['event'] == 'tabEvidence' }
+      .flat_map { |row| row.dig('nativeTabEvidence', 'applications') || [] }.map do |app|
+        { associations: app['selectionAssociations'], memberships: app['membershipCandidates'],
+          ownedSingletons: (app['singletonCandidates'] || []) & cleanup_ids }
+      end
     report[:samples] = tab_apps.map do |app|
       { coverage: app['windowCoverage'], rootValidations: app['rootValidations'],
-        observedOwnedIDs: app.fetch('nodes').map { |node| node['windowID'] }.compact & expected,
+        observedOwnedIDs: app.fetch('nodes').map { |node| node['windowID'] }.compact & cleanup_ids,
         truncationReasons: app['truncationReasons'],
         tabGroupControlCounts: app.fetch('nodes').select { |node| node['AXRole'] == 'AXTabGroup' }
           .map { |node| node.dig('AXTabs', 'count') || node.dig('AXChildren', 'count') },
@@ -127,16 +208,29 @@ Dir.mktmpdir('paperi-finder-', File.join(root, '.build')) do |temporary|
         issues: app.dig('selectionAssociations', 'evidenceIssues') }
     end
     policy_windows = policy_apps.flat_map { |app| app.fetch('windows') }
-    report[:ownedPolicy] = policy_windows.select { |window| expected.include?(window['windowID']) }
+    report[:ownedPolicy] = policy_windows.select { |window| cleanup_ids.include?(window['windowID']) }
       .map { |window| window.select { |key, _| %w[windowID eligibility reason facts].include?(key) } }.uniq
     report[:checks] = {
       twoCreatedIDs: owned.length == 2 && owned.uniq.length == 2,
-      ownedWindowsObserved: !tab_apps.empty? && report[:samples].all? { |sample| sample[:observedOwnedIDs].sort == expected.sort },
+      ownedWindowsObserved: !tab_apps.empty? && (new_tab ?
+        report[:selectionStages].all? { |s| s[:scriptIdentity] == s[:target] } :
+        report[:samples].all? { |sample| sample[:observedOwnedIDs].sort == expected.sort }),
       ownedWindowsEligible: expected.all? { |id| report[:ownedPolicy].any? { |window| window['windowID'] == id && window['eligibility'] == 'tiled' } },
+      shallowAssociationsObserved: !report[:shallowTabBarSamples].empty? &&
+        report[:shallowTabBarSamples].all? { |sample| sample.dig(:associations, 'status') == 'observed' },
+      ownedSingletonsConfirmed: !report[:nativeTabBarSamples].empty? && (new_tab ?
+        report[:selectionStages].all? { |s| s[:singletons] == [owned.last] } :
+        report[:nativeTabBarSamples].all? { |sample| sample[:ownedSingletons].sort == owned.sort }),
       nativeSourcesRemoved: rows.last.dig('teardown', 'sourcesStillInstalled') == 0
     }
+    if new_tab
+      report[:sharedMembershipVerified] = report[:selectionStages].last[:memberships].any? do |candidate|
+        candidate['members'].sort == [owned.first, active].sort && candidate['active'] == owned.first
+      end
+      report[:checks][:sharedMembershipVerified] = report[:sharedMembershipVerified]
+    end
     report[:tabSupport] = 'unverified'
-    report[:tabCaptureAvailable] = !report[:samples].empty? && report[:samples].all? { |sample| sample[:associationStatus] != 'unavailable' }
+    report[:tabCaptureAvailable] = report[:checks][:shallowAssociationsObserved]
   rescue StandardError => error
     report[:error] = error.message
   ensure

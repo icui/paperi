@@ -10,8 +10,9 @@ import AppKit
     var stopButton: PreviewButton?
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-        if modifiers == [.command, .option], let key = event.charactersIgnoringModifiers?.lowercased(), ["h", "l"].contains(key) {
-            request?(key == "l" ? "grow" : "shrink", "keyEquivalent"); return true
+        if modifiers == [.command, .option], let key = event.charactersIgnoringModifiers?.lowercased(),
+           let action = ["h": "shrink", "l": "grow", "i": "slurp", "o": "barf"][key] {
+            request?(action, "keyEquivalent"); return true
         }
         return super.performKeyEquivalent(with: event)
     }
@@ -45,9 +46,9 @@ import AppKit
             self.log("previewCommand", extra: ["command": action, "source": source,
                 "commandWindowID": window.windowNumber, "previewToken": token, "sequence": self.previewSequence])
         }
-        let label = NSTextField(wrappingLabelWithString: "Disposable preview only\nClick a document to focus it.\n⌥⌘H / ⌥⌘L resize • Esc stops\nStop restores both windows before closing.\nAutomatic stop after 60 seconds.")
+        let label = NSTextField(wrappingLabelWithString: "Disposable preview only\nClick a document to focus it.\n⌥⌘H / ⌥⌘L resize • ⌥⌘I / ⌥⌘O stack/unstack • Esc stops\nSupports native tabs (Window → Merge All Windows) and stacked columns.\nStop restores all surviving windows before closing.")
         let buttons = NSStackView(); buttons.orientation = .horizontal; buttons.spacing = 8
-        for (title, action) in [("Narrower", "shrink"), ("Wider", "grow"), ("Stop & Restore", "stop")] {
+        for (title, action) in [("Narrower", "shrink"), ("Wider", "grow"), ("Stack", "slurp"), ("Unstack", "barf"), ("Stop & Restore", "stop")] {
             let button = PreviewButton(title: title, target: nil, action: nil)
             button.target = button; button.action = #selector(PreviewButton.trigger)
             button.invoke = { [weak window] in window?.request?(action, "button") }

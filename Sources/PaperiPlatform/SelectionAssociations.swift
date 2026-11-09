@@ -199,6 +199,13 @@ enum TabSelectionEvidence {
         for index in Set(roots).sorted() {
             if let validation = nodes[index]["rootValidation"] as? [String: Any],
                validation["status"] as? String != "accepted" {
+                // Finder's AXWindows includes a desktop AXScrollArea alongside
+                // real AXWindow documents. Non-window roots have no children
+                // traversed; only unreadable or foreign/ownerless roots reject.
+                if validation["reason"] as? String == WindowReferenceValidation.Rejection.nonWindowRole.rawValue,
+                   let role = nodes[index]["AXRole"] as? String, !role.isEmpty {
+                    continue
+                }
                 return Capture(groups: nil, issues: [.init(reason: .rootReferenceUnavailable, node: index)])
             }
         }

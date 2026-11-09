@@ -29,6 +29,11 @@ import PaperiPlatform
 var args = Array(CommandLine.arguments.dropFirst())
 if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["--menu"] }
 switch args.first {
+case "probe-terminal-session":
+    guard args.count == 2 else { print("Usage: paperi probe-terminal-session testTag"); exit(2) }
+    let report = Diagnostics.probeTerminalSession(tag: args[1])
+    Diagnostics.printJSON(report)
+    exit(report["result"] as? String == "passed" ? 0 : 1)
 case "probe-terminal-placement", "probe-terminal-resize":
     guard args.count == 3, let id = UInt32(args[1]) else { print("Usage: paperi probe-terminal-placement | probe-terminal-resize windowID testTag"); exit(2) }
     let report = Diagnostics.probeTerminalPlacement(windowID: id, tag: args[2], resize: args.first == "probe-terminal-resize")

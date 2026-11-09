@@ -74,4 +74,18 @@ struct NativeTabMembershipTests {
         spaces.observe(scope: "one", group: 1, selected: 102, space: 7)
         #expect(spaces.confirmedSpace(for: group, current: [101: 7]) == nil)
     }
+
+    @Test func singletonInspectionAcceptsTabBarFreeWindowsAndRejectsTabGroupsOrIncompleteChildren() {
+        var app = application()
+        var nodes = app["nodes"] as! [[String: Any]]
+        nodes.append(["AXRole": "AXWindow", "windowID": UInt32(202), "rootValidation": ["status": "accepted"],
+                      "AXChildren": ["error": Int32(0), "count": 1, "nodes": [5]]])
+        nodes.append(["AXRole": "AXSplitGroup"])
+        nodes.append(["AXRole": "AXScrollArea", "rootValidation": ["status": "unavailable", "reason": "nonWindowRole"]])
+        app["nodes"] = nodes; app["roots"] = [0, 4, 6]; app["observedRoots"] = [0, 4, 6]
+        #expect(NativeTabMembership.inspectSingletons(app) == [202])
+        nodes[4]["AXChildren"] = ["error": Int32(0), "count": 2, "nodes": [5]]
+        app["nodes"] = nodes
+        #expect(NativeTabMembership.inspectSingletons(app).isEmpty)
+    }
 }

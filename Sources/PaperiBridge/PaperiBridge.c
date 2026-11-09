@@ -31,3 +31,13 @@ CFArrayRef paperi_copy_window_spaces(uint32_t window) {
     CFRelease(windows); CFRelease(number);
     return result;
 }
+int paperi_space_type(uint64_t space) {
+    int cid = connection();
+    int (*fn)(int, uint64_t) = sky ? dlsym(sky, "SLSSpaceGetType") : NULL;
+    return cid && fn && space ? fn(cid, space) : -1;
+}
+uint64_t paperi_active_space(void) {
+    int cid = connection();
+    uint64_t (*fn)(int) = sky ? dlsym(sky, "SLSGetActiveSpace") : NULL;
+    return cid && fn ? fn(cid) : 0;
+}

@@ -50,6 +50,35 @@ struct NativeTabMembership: Equatable {
             return Self(scope: scope, group: group.group, members: members, active: group.window)
         }
     }
+
+    /// Returns freshly enumerated `AXWindow` IDs whose full direct child list was
+    /// read without error and contains no `AXTabGroup`. Any capture truncation,
+    /// unreadable root/role, or existing tab group for that window withholds the
+    /// singleton claim.
+    static func inspectSingletons(_ application: [String: Any]) -> [UInt32] {
+        guard application["windowsError"] as? Int32 == 0,
+              application["truncated"] as? Bool == false,
+              application["identityTruncated"] as? Bool == false,
+              let nodes = application["nodes"] as? [[String: Any]],
+              let roots = application["roots"] as? [Int],
+              let observed = application["observedRoots"] as? [Int],
+              let groups = TabSelectionEvidence.inspect(nodes: nodes, roots: roots + observed, complete: true).groups else { return [] }
+        let grouped = Set(groups.map(\.window)).union(inspect(application).flatMap(\.members))
+        var singletons: Set<UInt32> = []
+        for root in roots {
+            guard nodes.indices.contains(root),
+                  nodes[root]["AXRole"] as? String == "AXWindow",
+                  (nodes[root]["rootValidation"] as? [String: Any])?["status"] as? String == "accepted",
+                  let id = nodes[root]["windowID"] as? UInt32, id > 0, !grouped.contains(id),
+                  let children = nodes[root]["AXChildren"] as? [String: Any],
+                  children["error"] as? Int32 == 0 || children["error"] as? Int == 0,
+                  let indices = children["nodes"] as? [Int], let count = children["count"] as? Int,
+                  indices.count == count,
+                  indices.allSatisfy({ nodes.indices.contains($0) && nodes[$0]["AXRole"] as? String != "AXTabGroup" }) else { continue }
+            singletons.insert(id)
+        }
+        return singletons.sorted()
+    }
 }
 
 /// Inactive AppKit members may have no window-server Space entry. Record their

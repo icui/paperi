@@ -237,7 +237,7 @@ struct SelectionAssociationsTests {
     }
 
     @Test func rejectedRootWithholdsOtherwiseUsableLearningUntilFreshRecovery() {
-        for reason in ["foreignOwner", "ownerUnavailable", "nonWindowRole", "roleUnavailable", "notRead"] {
+        for reason in ["foreignOwner", "ownerUnavailable", "roleUnavailable", "notRead"] {
             var graph = nodes()
             graph[0]["rootValidation"] = ["status": "accepted", "pidError": 0]
             graph.append(["AXRole": "AXApplication", "rootValidation": ["status": "unavailable", "reason": reason]])
@@ -256,6 +256,17 @@ struct SelectionAssociationsTests {
             #expect(recovered.groups == [selection()])
             #expect(tracker.observe(scope: "one", groups: recovered.groups).bindings == [1: [11: 101]])
         }
+    }
+
+    @Test func knownNonWindowRootIsSkippedWhilePreserveDocumentTabLearning() {
+        var graph = nodes()
+        graph[0]["rootValidation"] = ["status": "accepted", "pidError": 0]
+        graph.append(["AXRole": "AXScrollArea", "rootValidation": ["status": "unavailable", "reason": "nonWindowRole"]])
+        let capture = TabSelectionEvidence.inspect(nodes: graph, roots: [0, 4], complete: true)
+        #expect(capture.groups == [selection()])
+        #expect(capture.issues.isEmpty)
+        graph[4].removeValue(forKey: "AXRole")
+        #expect(TabSelectionEvidence.inspect(nodes: graph, roots: [0, 4], complete: true).groups == nil)
     }
 
     @Test func missingRootValidationStatusCannotAffirmAcceptedOwnership() {

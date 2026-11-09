@@ -227,6 +227,7 @@ public enum Diagnostics {
             result["membershipCandidates"] = NativeTabMembership.inspect(app).map {
                 ["scope": $0.scope, "group": $0.group, "members": $0.members, "active": $0.active] as [String: Any]
             }
+            result["singletonCandidates"] = NativeTabMembership.inspectSingletons(app)
             return result
         }
         report["nativeTabEvidence"] = native

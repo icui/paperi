@@ -82,6 +82,19 @@ import PaperiCore
         return intent
     }
 
+    @discardableResult func insertSlot(_ slot: Slot, width: Double, spaceID: UInt64,
+                                       classification: Classification, ticket: UUID) throws -> Bool {
+        guard accepts(ticket), spaceID > 0, self.spaceID == nil || self.spaceID == spaceID,
+              canvas.isValid, width.isFinite, width > 0, classification.eligibility == .tiled,
+              !slot.members.isEmpty, slot.members.contains(slot.activeMember),
+              Set(slot.members).count == slot.members.count,
+              slot.members.allSatisfy({ $0 > 0 && slots[$0] == nil }) else { return false }
+        let intent = try state.reduce(.insert(slot, width: min(canvas.width, width), classification: classification))
+        for member in slot.members { slots[member] = slot.id }
+        self.spaceID = spaceID
+        return intent
+    }
+
     func focus(windowID: UInt32?, ownerPID: pid_t?, classification: Classification, ticket: UUID) throws {
         guard accepts(ticket) else { return }
         // Foreign/unavailable focus withholds commands while retaining the anchor.
@@ -89,54 +102,70 @@ import PaperiCore
         try state.reduce(.focus(windowID: id, classification: classification))
     }
 
-    /// Atomic topology reconciliation for the current one-slot-per-column native
-    /// session. Detach retains the old active member's slot; merge retains the
-    /// selected member's slot. Additions require explicit caller validation;
-    /// missing closure proof rejects removals.
+    /// Atomic topology reconciliation across single-slot and stacked columns.
+    /// Detach retains the old active member's slot at its original column/row and
+    /// places the detached sibling in an adjacent column; merge retains the
+    /// selected member's slot, column width and stack weight. Additions require
+    /// explicit caller validation; missing closure proof rejects removals.
     @discardableResult func reconcileTabs(_ partitions: [NativeTabPartition], destroyed: Set<UInt32>,
                                          ownerPID: pid_t, spaceID: UInt64,
                                          classification: Classification, ticket: UUID,
                                          admitted: Set<UInt32> = []) throws -> Bool {
         guard accepts(ticket), self.ownerPID == ownerPID, self.spaceID == spaceID,
-              classification.eligibility == .tiled, state.floating.isEmpty, state.suspended.isEmpty,
-              state.layout.columns.allSatisfy({ $0.slots.count == 1 }) else { return false }
+              classification.eligibility == .tiled, state.floating.isEmpty, state.suspended.isEmpty else { return false }
         let all = partitions.flatMap(\.members)
         guard partitions.allSatisfy({ !$0.members.isEmpty && $0.members.contains($0.active) }),
               admitted.allSatisfy({ $0 > 0 && slots[$0] == nil && !destroyed.contains($0) }),
               Set(all).count == all.count, Set(all) == Set(slots.keys).subtracting(destroyed).union(admitted) else { return false }
-        let old = state.layout.columns
-        var retained: Set<String> = []
-        var columns: [(index: Int, column: Column)] = []
-        var nextSlots: [UInt32: String] = [:]
-        for partition in partitions {
-            let sources = old.indices.filter { !Set(old[$0].slots[0].members).isDisjoint(with: partition.members) }
-            guard let first = sources.first else { return false }
-            let anchor = sources.first { old[$0].slots[0].activeMember == partition.active } ?? sources.first {
-                partition.members.contains(old[$0].slots[0].activeMember)
-            } ?? sources.first { source in
-                partitions.filter { !Set(old[source].slots[0].members).isDisjoint(with: $0.members) }.count == 1
-            }
-            let source = anchor ?? first
-            let existing = anchor.map { old[$0].slots[0].id }
-            let id = existing.flatMap { retained.contains($0) ? nil : $0 } ?? "container-\(UUID())"
-            retained.insert(id)
-            let slot = Slot(id: id, members: partition.members, activeMember: partition.active)
-            columns.append((source, Column(slots: [slot], width: old[source].width)))
-            for member in partition.members { nextSlots[member] = id }
+        struct Entry { let column: Int; let row: Int; let slot: Slot; let width: Double; let weight: Double }
+        let old = state.layout.columns.enumerated().flatMap { c, col in
+            col.slots.enumerated().map { r, slot in Entry(column: c, row: r, slot: slot, width: col.width, weight: col.weights[r]) }
         }
-        columns.sort {
-            if $0.index != $1.index { return $0.index < $1.index }
-            let original = old[$0.index].slots[0].id
-            if ($0.column.slots[0].id == original) != ($1.column.slots[0].id == original) {
-                return $0.column.slots[0].id == original
+        var retained: Set<String> = []
+        var nextSlots: [UInt32: String] = [:]
+        var inColumn: [Int: [(row: Int, slot: Slot, weight: Double)]] = [:]
+        var detached: [Int: [(row: Int, slot: Slot, width: Double)]] = [:]
+        for partition in partitions {
+            let sources = old.indices.filter { !Set(old[$0].slot.members).isDisjoint(with: partition.members) }
+            guard let first = sources.first else { return false }
+            let anchor = sources.first { old[$0].slot.activeMember == partition.active } ?? sources.first {
+                partition.members.contains(old[$0].slot.activeMember)
+            } ?? sources.first { source in
+                partitions.filter { !Set(old[source].slot.members).isDisjoint(with: $0.members) }.count == 1
             }
-            return $0.column.slots[0].members.min()! < $1.column.slots[0].members.min()!
+            let source = old[anchor ?? first]
+            if let anchor, !retained.contains(old[anchor].slot.id) {
+                let id = old[anchor].slot.id
+                retained.insert(id)
+                let slot = Slot(id: id, members: partition.members, activeMember: partition.active)
+                inColumn[source.column, default: []].append((source.row, slot, source.weight))
+                for member in partition.members { nextSlots[member] = id }
+            } else {
+                let id = "container-\(UUID())"
+                retained.insert(id)
+                let slot = Slot(id: id, members: partition.members, activeMember: partition.active)
+                detached[source.column, default: []].append((source.row, slot, source.width))
+                for member in partition.members { nextSlots[member] = id }
+            }
+        }
+        var rebuilt: [Column] = []
+        for c in state.layout.columns.indices {
+            if let rows = inColumn[c]?.sorted(by: {
+                $0.row != $1.row ? $0.row < $1.row : $0.slot.members.min()! < $1.slot.members.min()!
+            }), !rows.isEmpty {
+                rebuilt.append(Column(slots: rows.map(\.slot), width: state.layout.columns[c].width, weights: rows.map(\.weight)))
+            }
+            if let extra = detached[c]?.sorted(by: {
+                $0.row != $1.row ? $0.row < $1.row : $0.slot.members.min()! < $1.slot.members.min()!
+            }) {
+                for item in extra { rebuilt.append(Column(slots: [item.slot], width: item.width)) }
+            }
         }
         let focused = state.layout.focused.flatMap { prior -> String? in
             if retained.contains(prior) { return prior }
-            return old.first { $0.slots[0].id == prior }.flatMap { nextSlots[$0.slots[0].activeMember] }
-        } ?? columns.first?.column.slots[0].id
-        let layout = Layout(columns: columns.map(\.column), focused: focused, offset: state.layout.offset)
+            return old.first { $0.slot.id == prior }.flatMap { nextSlots[$0.slot.activeMember] }
+        } ?? rebuilt.first?.slots.first?.id
+        let layout = Layout(columns: rebuilt, focused: focused, offset: state.layout.offset)
         var next = LifecycleState(layout: layout)
         if state.osFocusedWindow != nil || state.interactionSuppressed {
             let focusPolicy = state.interactionSuppressed ? WindowPolicy.classify(WindowFacts(bundleID: "unknown")) : classification
@@ -147,6 +176,36 @@ import PaperiCore
         state = next; slots = nextSlots
         if changed { echoes = FrameEchoes() }
         return changed
+    }
+
+    private static let tiledClassification = WindowPolicy.classify(
+        WindowFacts(bundleID: "session", role: "AXWindow", subrole: "AXStandardWindow", isRoot: true, movable: true, resizable: true, level: 0)
+    )
+
+    @discardableResult func slurpFocused(frontmostPID: pid_t?, ticket: UUID) throws -> Bool {
+        guard accepts(ticket), ownership == .applicationLocalFixture || frontmostPID == ownerPID,
+              !state.interactionSuppressed else { return false }
+        var layout = state.layout; layout.slurp()
+        guard layout != state.layout else { return false }
+        var next = LifecycleState(layout: layout, floating: state.floating)
+        if let focused = state.osFocusedWindow {
+            try next.reduce(.focus(windowID: focused, classification: Self.tiledClassification))
+        }
+        try next.validate(); state = next; echoes = FrameEchoes()
+        return true
+    }
+
+    @discardableResult func barfFocused(frontmostPID: pid_t?, ticket: UUID) throws -> Bool {
+        guard accepts(ticket), ownership == .applicationLocalFixture || frontmostPID == ownerPID,
+              !state.interactionSuppressed else { return false }
+        var layout = state.layout; layout.barf()
+        guard layout != state.layout else { return false }
+        var next = LifecycleState(layout: layout, floating: state.floating)
+        if let focused = state.osFocusedWindow {
+            try next.reduce(.focus(windowID: focused, classification: Self.tiledClassification))
+        }
+        try next.validate(); state = next; echoes = FrameEchoes()
+        return true
     }
 
     @discardableResult func resize(windowID: UInt32, ownerPID: pid_t, spaceID: UInt64,

@@ -308,10 +308,20 @@ extension Diagnostics {
                     do {
                         try refreshFocus()
                         let focused = session.state.osFocusedWindow == command.windowID
+                        let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
                         let intent: Bool
                         if focused {
-                            intent = try session.resizeFocused(by: command.action == .grow ? 0.1 : -0.1,
-                                frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier, ticket: ticket)
+                            switch command.action {
+                            case .grow, .shrink:
+                                intent = try session.resizeFocused(by: command.action == .grow ? 0.1 : -0.1,
+                                    frontmostPID: frontmost, ticket: ticket)
+                            case .slurp:
+                                intent = try session.slurpFocused(frontmostPID: frontmost, ticket: ticket)
+                            case .barf:
+                                intent = try session.barfFocused(frontmostPID: frontmost, ticket: ticket)
+                            case .stop:
+                                intent = false
+                            }
                         } else { intent = false }
                         requireFrontmostForEffects = true
                         let effects = intent ? apply() : (writes: 0, confirmed: true)

@@ -9,7 +9,8 @@ require 'securerandom'
 
 placement = ARGV.delete('--placement') != nil
 resize = ARGV.delete('--resize') != nil
-abort 'Usage: check-terminal-tabs.rb [--placement|--resize] new-output-directory' unless ARGV.length == 1 && !(resize && placement)
+session = ARGV.delete('--session') != nil
+abort 'Usage: check-terminal-tabs.rb [--placement|--resize|--session] new-output-directory' unless ARGV.length == 1 && [placement, resize, session].count(true) <= 1
 placement ||= resize
 root = File.expand_path('..', __dir__)
 output = File.expand_path(ARGV.first)
@@ -23,6 +24,7 @@ token = "Paperi-test-#{SecureRandom.uuid}"
 report = { schemaVersion: 1, scope: 'Owned Terminal two-tab window; no geometry or existing-window writes', tabSupport: 'unverified', ownershipTag: token }
 report[:scope] = 'Owned Terminal native representatives; guarded translation/restoration' if placement
 report[:scope] = 'Owned Terminal native representatives; measured cell-grid resize/restoration' if resize
+report[:scope] = 'Sustained shared-session Terminal native-tab lifecycle; switch, growth, active/last close' if session
 records = []
 owned = nil
 
@@ -110,6 +112,17 @@ Dir.mktmpdir('paperi-terminal-', File.join(root, '.build')) do |temporary|
             close w saving no
             return "closed"
           end if
+          if actionName is "close-selected-tab" then
+            set index of w to 1
+            activate
+            delay 0.15
+            if id of front window is not wid then error "Physical test representative not selected"
+            if custom title of selected tab of front window is not tagName then error "Selected representative is unowned"
+            if busy of selected tab of front window then error "Selected tab is busy; refusing to close"
+            close window id wid saving no
+            delay 0.35
+            return "closed"
+          end if
           if actionName is "select" then
             set index of w to 1
             activate
@@ -119,9 +132,9 @@ Dir.mktmpdir('paperi-terminal-', File.join(root, '.build')) do |temporary|
             return id of front window
           end if
           if actionName is not "new-tab" then error "Unknown test action"
-          if (count tabs of w) is not 1 then error "Expected singleton test window"
           set index of w to 1
           activate
+          delay 0.2
           if id of front window is not wid then error "Test window is not frontmost"
           set previousIDs to id of every window
         end tell
@@ -139,11 +152,15 @@ Dir.mktmpdir('paperi-terminal-', File.join(root, '.build')) do |temporary|
         end tell
         if candidate is missing value then error "New Tab menu command unavailable"
         tell application "Terminal"
+          set index of w to 1
+          activate
+          delay 0.1
           if id of front window is not wid then error "Test window lost command ownership"
         end tell
         tell application "System Events" to click candidate
-        delay 0.5
+        delay 0.7
         tell application "Terminal"
+          activate
           set activeID to id of front window
           if activeID is in previousIDs and activeID is not wid then error "Unexpected preexisting window after New Tab"
           set custom title of selected tab of front window to tagName
@@ -169,7 +186,95 @@ Dir.mktmpdir('paperi-terminal-', File.join(root, '.build')) do |temporary|
     raise 'Invalid selected new representative' unless active.match?(/\A[1-9]\d*\z/)
     targets = [owned, active.to_i]
     report[:testRepresentativeIDs] = targets
-    input, stream, recorder = Open3.popen2(File.join(bin.strip, 'paperi'), 'record', placement ? '40' : '20', '--bundle-id', 'com.apple.Terminal', '--tab-evidence')
+    if session
+      input, stream, recorder = Open3.popen2(File.join(bin.strip, 'paperi'), 'probe-terminal-session', token)
+      input.close
+      queue = Queue.new
+      reader = Thread.new do
+        buffer = +''
+        begin
+          stream.each_line do |line|
+            if line.start_with?('{') && line.include?('"event"')
+              queue << JSON.parse(line)
+            else
+              buffer << line
+            end
+          end
+          queue << JSON.parse(buffer) unless buffer.strip.empty?
+        rescue StandardError => error
+          queue << error
+        ensure
+          queue << nil
+        end
+      end
+      take_event = lambda do |expected, active = nil, count = nil|
+        loop do
+          row = queue.pop
+          raise "Session ended before #{expected}" unless row
+          raise row if row.is_a?(Exception)
+          records << row
+          next unless row['event'] == expected
+          if active
+            entry = row['entry'] || {}
+            parts = entry['partitions']
+            actual_active = entry['active'] || parts&.first&.dig('active')
+            actual_count = (entry['members'] || parts&.first&.dig('members') || []).length
+            next unless actual_active == active && (count.nil? || actual_count == count)
+          end
+          return row
+        end
+      end
+      Timeout.timeout(65) do
+        take_event.call('terminalSessionReady')
+        run.call('select', targets[0])
+        sleep 0.6
+        run.call('select', targets[1])
+        take_event.call('terminalSessionAdmitted', targets[1], 2)
+        run.call('select', targets[0])
+        take_event.call('terminalSessionReconciled', targets[0], 2)
+        run.call('select', targets[1])
+        take_event.call('terminalSessionReconciled', targets[1], 2)
+        run.call('select', targets[0])
+        take_event.call('terminalSessionReconciled', targets[0], 2)
+        third = run.call('new-tab', targets[0]).to_i
+        raise 'Invalid third representative' unless third > 0
+        targets << third
+        report[:testRepresentativeIDs] = targets
+        sleep 0.6
+        run.call('select', targets[0])
+        sleep 0.6
+        run.call('select', targets[1])
+        sleep 0.6
+        run.call('select', third)
+        take_event.call('terminalSessionReconciled', third, 3)
+        run.call('close-selected-tab', third)
+        sleep 0.6
+        run.call('select', targets[0])
+        sleep 0.6
+        run.call('select', targets[1])
+        take_event.call('terminalSessionReconciled', targets[1], 2)
+        run.call('close-selected-tab', targets[1])
+        sleep 0.6
+        run.call('select', targets[0])
+        take_event.call('terminalSessionReconciled', targets[0], 1)
+        run.call('close-selected-tab', targets[0])
+        take_event.call('terminalSessionEmptied')
+        loop do
+          row = queue.pop
+          break unless row
+          raise row if row.is_a?(Exception)
+          records << row
+        end
+        raise 'Session probe exited non-zero' unless recorder.value.success?
+      end
+      session_report = records.reverse.find { |r| r.is_a?(Hash) && r.key?('checks') }
+      raise 'Missing final session report' unless session_report
+      report[:sessionReport] = session_report
+      report[:checks] = session_report['checks'].transform_keys(&:to_sym)
+      report[:sharedMembershipVerified] = report[:checks][:admittedInitialPair] && report[:checks][:newMemberAdmitted]
+      report[:tabSupport] = report[:checks].values.all? { |v| v == true } ? 'verifiedInOwnedSession' : 'unverified'
+    else
+      input, stream, recorder = Open3.popen2(File.join(bin.strip, 'paperi'), 'record', placement ? '40' : '20', '--bundle-id', 'com.apple.Terminal', '--tab-evidence')
     input.close
     queue = Queue.new
     reader = Thread.new do
@@ -244,15 +349,16 @@ Dir.mktmpdir('paperi-terminal-', File.join(root, '.build')) do |temporary|
     report[:sharedMembershipVerified] = report[:stages].last[:memberships].any? do |candidate|
       candidate['members'].sort == targets.sort && candidate['active'] == targets.first
     end
-    if placement
-      report[:checks][:placementsRestored] = report[:stages].drop(3).all? { |s| s[:placement]['result'] == 'passed' }
-      report[:checks][:nativeMembershipRetained] = report[:sharedMembershipVerified]
-      report[:checks][:baselineNativeMembershipLearned] = report[:stages][2][:memberships].any? do |candidate|
-        candidate['members'].sort == targets.sort && candidate['active'] == targets.first
+      if placement
+        report[:checks][:placementsRestored] = report[:stages].drop(3).all? { |s| s[:placement]['result'] == 'passed' }
+        report[:checks][:nativeMembershipRetained] = report[:sharedMembershipVerified]
+        report[:checks][:baselineNativeMembershipLearned] = report[:stages][2][:memberships].any? do |candidate|
+          candidate['members'].sort == targets.sort && candidate['active'] == targets.first
+        end
+        report[:checks][:gridColumnsRestored] = report[:stages].drop(3).all? do |stage|
+          stage[:placement]['calibrationRestored'] && stage[:placement]['gridColumnsConfirmed']
+        end if resize
       end
-      report[:checks][:gridColumnsRestored] = report[:stages].drop(3).all? do |stage|
-        stage[:placement]['calibrationRestored'] && stage[:placement]['gridColumnsConfirmed']
-      end if resize
     end
   rescue StandardError => error
     report[:error] = error.message
