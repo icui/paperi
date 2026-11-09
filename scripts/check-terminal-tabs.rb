@@ -8,7 +8,9 @@ require 'timeout'
 require 'securerandom'
 
 placement = ARGV.delete('--placement') != nil
-abort 'Usage: check-terminal-tabs.rb [--placement] new-output-directory' unless ARGV.length == 1
+resize = ARGV.delete('--resize') != nil
+abort 'Usage: check-terminal-tabs.rb [--placement|--resize] new-output-directory' unless ARGV.length == 1 && !(resize && placement)
+placement ||= resize
 root = File.expand_path('..', __dir__)
 output = File.expand_path(ARGV.first)
 abort "Output exists: #{output}" if File.exist?(output)
@@ -20,6 +22,7 @@ abort 'Cannot locate binary' unless status.success?
 token = "Paperi-test-#{SecureRandom.uuid}"
 report = { schemaVersion: 1, scope: 'Owned Terminal two-tab window; no geometry or existing-window writes', tabSupport: 'unverified', ownershipTag: token }
 report[:scope] = 'Owned Terminal native representatives; guarded translation/restoration' if placement
+report[:scope] = 'Owned Terminal native representatives; measured cell-grid resize/restoration' if resize
 records = []
 owned = nil
 
@@ -199,7 +202,8 @@ Dir.mktmpdir('paperi-terminal-', File.join(root, '.build')) do |temporary|
         identity = run.call('select', target)
         effect = nil
         if placement && index >= 3
-          value, error, status = Open3.capture3(File.join(bin.strip, 'paperi'), 'probe-terminal-placement', target.to_s, token)
+          command = resize ? 'probe-terminal-resize' : 'probe-terminal-placement'
+          value, error, status = Open3.capture3(File.join(bin.strip, 'paperi'), command, target.to_s, token)
           effect = JSON.parse(value)
           raise "Placement failed: #{error.strip} #{value}" unless status.success?
         end
@@ -246,6 +250,9 @@ Dir.mktmpdir('paperi-terminal-', File.join(root, '.build')) do |temporary|
       report[:checks][:baselineNativeMembershipLearned] = report[:stages][2][:memberships].any? do |candidate|
         candidate['members'].sort == targets.sort && candidate['active'] == targets.first
       end
+      report[:checks][:gridColumnsRestored] = report[:stages].drop(3).all? do |stage|
+        stage[:placement]['calibrationRestored'] && stage[:placement]['gridColumnsConfirmed']
+      end if resize
     end
   rescue StandardError => error
     report[:error] = error.message

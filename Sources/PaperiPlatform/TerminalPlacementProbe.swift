@@ -6,7 +6,7 @@ import PaperiCore
 extension Diagnostics {
     /// Explicit opt-in for a freshly tagged Terminal test representative. The
     /// harness creates the UUID tag; existing untagged windows cannot pass.
-    @MainActor public static func probeTerminalPlacement(windowID: UInt32, tag: String) -> [String: Any] {
+    @MainActor public static func probeTerminalPlacement(windowID: UInt32, tag: String, resize: Bool = false) -> [String: Any] {
         var report: [String: Any] = ["result": "failed", "windowID": windowID,
             "scope": "Exact tagged frontmost Terminal representative; translation and restoration only"]
         let prefix = "Paperi-test-"
@@ -44,6 +44,8 @@ extension Diagnostics {
             report["reason"] = "Owned selected reference/frame/Space unavailable"; return report
         }
         let sid = spaces[0].uint64Value
+        guard sid > 0 else { report["reason"] = "Invalid Space identity"; return report }
+        report["spaceID"] = sid
         AXUIElementSetMessagingTimeout(ref, 0.15)
         func valid() -> Bool {
             var owner: pid_t = 0
@@ -70,6 +72,11 @@ extension Diagnostics {
                        [target.x, target.y, target.width, target.height]).allSatisfy { abs($0 - $1) <= 2 }
         }
         func write(_ target: Rect) -> [Int32] {
+            if resize {
+                var size = CGSize(width: target.width, height: target.height)
+                guard target.isValid, let value = AXValueCreate(.cgSize, &size), valid() else { return [] }
+                return [AXUIElementSetAttributeValue(ref, kAXSizeAttribute as CFString, value).rawValue]
+            }
             var point = CGPoint(x: target.x, y: target.y)
             guard target.isValid, let p = AXValueCreate(.cgPoint, &point), valid() else { return [] }
             // Dimensions are deliberately unchanged. Writing size here would
@@ -87,7 +94,49 @@ extension Diagnostics {
         func json(_ rect: Rect) -> [String: Double] {
             ["x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height]
         }
-        let canvas = Rect(x: original.x + 24, y: original.y + 24, width: original.width, height: original.height)
+        var cellWidth = 0.0
+        var originalColumns: Int?
+        func columns(_ target: Int? = nil) -> Int? {
+            guard valid() else { return nil }
+            let assignment = target.map { "set number of columns of selected tab of window id \(windowID) to \($0)" } ?? ""
+            let source = """
+            with timeout of 2 seconds
+            tell application id "com.apple.Terminal"
+              if id of front window is not \(windowID) then return 0
+              if custom title of selected tab of front window is not "\(tag)" then return 0
+              \(assignment)
+              return number of columns of selected tab of window id \(windowID)
+            end tell
+            end timeout
+            """
+            var error: NSDictionary?
+            guard let script = NSAppleScript(source: source) else { return nil }
+            let value = script.executeAndReturnError(&error)
+            return error == nil && value.int32Value > 0 ? Int(value.int32Value) : nil
+        }
+        if resize {
+            report["scope"] = "Exact tagged Terminal representative; measured cell-grid width resize/recovery"
+            guard let count = columns(), count < 500 else { report["reason"] = "Grid metadata unavailable"; return report }
+            originalColumns = count
+            let calibrated = columns(count + 1) == count + 1
+            let sample = frame(ref)
+            let columnsRestored = columns(count) == count
+            let frameRestored = confirm(original)
+            report["originalColumns"] = count
+            report["calibrationRestored"] = columnsRestored && frameRestored
+            guard calibrated, let sample, columnsRestored, frameRestored else {
+                report["reason"] = "Cell calibration or restoration failed"; return report
+            }
+            cellWidth = sample.width - original.width
+            guard cellWidth.isFinite, cellWidth > 0, cellWidth < 100,
+                  abs(sample.height - original.height) <= 2 else {
+                report["reason"] = "Invalid measured cell geometry"; return report
+            }
+            report["cellWidth"] = cellWidth
+            report["requestedColumns"] = count + 4
+        }
+        let canvas = resize ? Rect(x: original.x, y: original.y, width: original.width + cellWidth * 4, height: original.height) :
+            Rect(x: original.x + 24, y: original.y + 24, width: original.width, height: original.height)
         let layout = Layout(columns: [Column(slots: [Slot(id: "terminal-test", members: [windowID], activeMember: windowID)], width: canvas.width)])
         guard let target = try? layout.placements(in: canvas, gap: 0).first?.frame, valid() else {
             report["reason"] = "Policy/ownership rejected placement"; return report
@@ -95,13 +144,24 @@ extension Diagnostics {
         report["original"] = json(original); report["target"] = json(target)
         let writes = write(target)
         let placed = confirm(target)
+        let observedColumns = resize ? columns() : nil
         // Always attempt guarded recovery, even after a partial/failed write.
         let restoration = write(original)
         let restored = confirm(original)
+        let restoredColumns = resize ? columns() : nil
+        let gridConfirmed: Bool
+        if resize, let expected = originalColumns {
+            gridConfirmed = observedColumns == expected + 4 && restoredColumns == expected
+        } else { gridConfirmed = !resize }
+        if resize {
+            if let observedColumns { report["observedColumns"] = observedColumns }
+            if let restoredColumns { report["restoredColumns"] = restoredColumns }
+            report["gridColumnsConfirmed"] = gridConfirmed
+        }
         report["placementWriteErrors"] = writes; report["restoreWriteErrors"] = restoration
         report["placementConfirmed"] = placed; report["restoreConfirmed"] = restored
         report["result"] = writes.count == 1 && writes.allSatisfy { $0 == 0 } && placed &&
-            restoration.count == 1 && restoration.allSatisfy { $0 == 0 } && restored ? "passed" : "failed"
+            restoration.count == 1 && restoration.allSatisfy { $0 == 0 } && restored && gridConfirmed ? "passed" : "failed"
         return report
     }
 }
