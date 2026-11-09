@@ -29,6 +29,11 @@ import PaperiPlatform
 var args = Array(CommandLine.arguments.dropFirst())
 if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["--menu"] }
 switch args.first {
+case "probe-terminal-placement":
+    guard args.count == 3, let id = UInt32(args[1]) else { print("Usage: paperi probe-terminal-placement windowID testTag"); exit(2) }
+    let report = Diagnostics.probeTerminalPlacement(windowID: id, tag: args[2])
+    Diagnostics.printJSON(report)
+    exit(report["result"] as? String == "passed" ? 0 : 1)
 case "probe-native-tab-session", "probe-native-tab-lifecycle", "probe-native-tab-growth":
     guard args.count == 1 else { print("Usage: paperi probe-native-tab-session | probe-native-tab-lifecycle | probe-native-tab-growth"); exit(2) }
     let report = Diagnostics.probeNativeTabSession(reconcileTopology: args.first != "probe-native-tab-session",
@@ -150,6 +155,7 @@ default:
       paperi probe-native-tab-session    Native-tab effects on a disposable child only
       paperi probe-native-tab-lifecycle  Disposable native detach/merge/closure effects
       paperi probe-native-tab-growth     Disposable native tab creation and admission
+      paperi probe-terminal-placement ID TAG  Guarded tagged Terminal translation/recovery
       paperi window-evidence identifier  Bounded read-only window policy/focus metadata for one app
       paperi record [seconds] [--bundle-id identifier ...] [--tab-evidence] [--window-evidence] [--restart-after seconds] [--reconcile-every 1..30] [--poll-only]
                                         Read-only AX event JSONL (default 30, max 300)

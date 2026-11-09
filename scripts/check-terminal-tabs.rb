@@ -7,7 +7,8 @@ require 'tmpdir'
 require 'timeout'
 require 'securerandom'
 
-abort 'Usage: check-terminal-tabs.rb new-output-directory' unless ARGV.length == 1
+placement = ARGV.delete('--placement') != nil
+abort 'Usage: check-terminal-tabs.rb [--placement] new-output-directory' unless ARGV.length == 1
 root = File.expand_path('..', __dir__)
 output = File.expand_path(ARGV.first)
 abort "Output exists: #{output}" if File.exist?(output)
@@ -18,6 +19,7 @@ bin, status = Open3.capture2(wrapper, 'build', '--show-bin-path')
 abort 'Cannot locate binary' unless status.success?
 token = "Paperi-test-#{SecureRandom.uuid}"
 report = { schemaVersion: 1, scope: 'Owned Terminal two-tab window; no geometry or existing-window writes', tabSupport: 'unverified', ownershipTag: token }
+report[:scope] = 'Owned Terminal native representatives; guarded translation/restoration' if placement
 records = []
 owned = nil
 
@@ -164,7 +166,7 @@ Dir.mktmpdir('paperi-terminal-', File.join(root, '.build')) do |temporary|
     raise 'Invalid selected new representative' unless active.match?(/\A[1-9]\d*\z/)
     targets = [owned, active.to_i]
     report[:testRepresentativeIDs] = targets
-    input, stream, recorder = Open3.popen2(File.join(bin.strip, 'paperi'), 'record', '20', '--bundle-id', 'com.apple.Terminal', '--tab-evidence')
+    input, stream, recorder = Open3.popen2(File.join(bin.strip, 'paperi'), 'record', placement ? '40' : '20', '--bundle-id', 'com.apple.Terminal', '--tab-evidence')
     input.close
     queue = Queue.new
     reader = Thread.new do
@@ -184,10 +186,23 @@ Dir.mktmpdir('paperi-terminal-', File.join(root, '.build')) do |temporary|
       row
     end
     report[:stages] = []
-    Timeout.timeout(35) do
+    selection = [targets[0], targets[1], targets[0]] * (placement ? 2 : 1)
+    Timeout.timeout(placement ? 65 : 35) do
       loop { break if take.call['event'] == 'recorderReady' }
-      [targets[0], targets[1], targets[0]].each_with_index do |target, index|
+      selection.each_with_index do |target, index|
+        if placement && index == 3
+          baseline = report[:stages][2][:memberships].any? do |candidate|
+            candidate['members'].sort == targets.sort && candidate['active'] == targets.first
+          end
+          raise 'Exact owned native baseline unavailable; no geometry effects attempted' unless baseline
+        end
         identity = run.call('select', target)
+        effect = nil
+        if placement && index >= 3
+          value, error, status = Open3.capture3(File.join(bin.strip, 'paperi'), 'probe-terminal-placement', target.to_s, token)
+          effect = JSON.parse(value)
+          raise "Placement failed: #{error.strip} #{value}" unless status.success?
+        end
         # Drain reports already completed before the selection, then wait for
         # two samples so the selected evidence cannot predate the action.
         loop do
@@ -210,20 +225,27 @@ Dir.mktmpdir('paperi-terminal-', File.join(root, '.build')) do |temporary|
           coverage: app['windowCoverage'], rootValidations: app['rootValidations'],
           ownedRoots: app.fetch('roots').map { |i| nodes[i]['windowID'] }.select { |wid| targets.include?(wid) },
           controls: nodes.select { |n| targets.include?(n['windowID']) && %w[AXTabGroup AXRadioButton].include?(n['AXRole']) },
-          associations: app['selectionAssociations'], memberships: app['membershipCandidates']
+          associations: app['selectionAssociations'], memberships: app['membershipCandidates'], placement: effect
         }
       end
       loop { break if take.call['event'] == 'recordingEnded' }
       raise 'Recorder failed' unless recorder.value.success?
     end
     report[:checks] = {
-      scriptSelectionConfirmed: report[:stages].map { |s| s[:scriptIdentity] } == [targets[0], targets[1], targets[0]].map(&:to_s),
+      scriptSelectionConfirmed: report[:stages].map { |s| s[:scriptIdentity] } == selection.map(&:to_s),
       ownedRootObserved: report[:stages].all? { |s| s[:ownedRoots].include?(s[:target]) },
       sharedCaptureScope: report[:stages].all? { |s| s[:captureScope] == 'directWindowTabBar' },
       sourcesRemoved: records.last.dig('teardown', 'sourcesStillInstalled') == 0
     }
     report[:sharedMembershipVerified] = report[:stages].last[:memberships].any? do |candidate|
       candidate['members'].sort == targets.sort && candidate['active'] == targets.first
+    end
+    if placement
+      report[:checks][:placementsRestored] = report[:stages].drop(3).all? { |s| s[:placement]['result'] == 'passed' }
+      report[:checks][:nativeMembershipRetained] = report[:sharedMembershipVerified]
+      report[:checks][:baselineNativeMembershipLearned] = report[:stages][2][:memberships].any? do |candidate|
+        candidate['members'].sort == targets.sort && candidate['active'] == targets.first
+      end
     end
   rescue StandardError => error
     report[:error] = error.message
