@@ -118,6 +118,33 @@ the next transfer alternative is the installed PaperWM Mission Control path,
 which needs a separate explicit, bounded own-window interaction test. Ordinary
 AX placement work can proceed independently; no more blind direct-transfer repeats.
 
+### Mission Control transfer round trip verified
+
+Increment 58 adds `--backend mission-control` and `--backend drag-switch` to
+`PaperiSpaceProbe` (schema 3). Both act only on the probe's own disposable window,
+release any held mouse button and restore the cursor on exit.
+
+- `drag-switch` reads `com.apple.symbolichotkeys` (`79`/`81`) without modifying
+  preferences. Both Move-a-space shortcuts are disabled on this host, so it exits
+  unsupported (`2`) before posting input (`captures/space-probe-drag-switch-final.json`).
+- `mission-control` adapts installed PaperWM's Dock `mc` / `mc.display` /
+  `mc.windows` / `mc.spaces.list` AX traversal with two macOS 26.7.2 fixes:
+  hovering directly over the target thumbnail to expand the collapsed Spaces bar
+  (`y = -20` → `y = 87`) and waiting for the expansion animation to settle, then
+  re-reading the destination thumbnail center during the drag before dropping
+  (the bar's thumbnails shift by ~73 points on subsequent Mission Control entries
+  while a window is dragged near the top edge). It identifies the probe window by
+  an exact per-run UUID title and requires the thumbnail count to match the
+  display's `SLSCopyManagedDisplaySpaces` entry count before dragging.
+- Debug and release native runs both pass (`0`): outbound moves the probe window
+  from Space `1` to `378` and switches the active Space to `378`; return moves it
+  back to `1` and switches the active Space back to `1`, with both legs confirmed
+  by `SLSCopySpacesForWindows` (`captures/space-probe-mission-control-debug.json`,
+  `captures/space-probe-mission-control-release.json`). This proves a working
+  no-injection cross-Space transfer and follow mechanism on this host for an owned
+  disposable window; wiring it into live session transactions and native-tab
+  containers remains ahead.
+
 ### Placement slice verified
 
 Increment 42 implements `paperi probe-placement`: a newly launched disposable
