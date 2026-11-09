@@ -10,7 +10,45 @@
 - **Current tab limits:** sustained native-session effects are verified only in the disposable demo. Terminal passes controlled position and measured cell-grid width resize/restoration with retained membership; sustained shared-session management and full real-app lifecycle remain untested. Every member must be visited before complete membership can be learned, including after topology changes; incomplete groups remain pending. Stacked-column reconciliation and Preview remain unverified. Finder's mixed AXWindow/AXScrollArea roots still prevent association acceptance.
 - **Other open risks:** direct compatibility-path Space transfer fails on this host and the new bridged entry point is absent. The last full ten-mode cycle passed 9/10; intermittent AX role/reference and restart rediscovery failures remain unresolved. Passing focused repeats do not close those failures.
 - **Next:** connect sustained shared-session lifecycle management to the owned Terminal group, then Preview and Finder compatibility, including selection-driven relearning and intermittent AX-reference recovery. General app admission, stacked-column reconciliation, physical/global keyboard routing, abrupt-exit recovery, OS/cross-display popup recovery, display ownership, Space transfer and baseline/soak measurements remain release gates.
-- **Route/reference:** [ordinary-window path followed early by one native-tab app](../PLAN.md#agreed-implementation-order--2026-11-08), informed by the [pinned-source audit](REFERENCE-AUDIT.md). Historical increments below preserve their original observations and limitations.
+- **Route/reference:** [ordinary-window path followed early by one native-tab app](../plan.md#agreed-implementation-order--2026-11-08), informed by the [pinned-source audit](REFERENCE-AUDIT.md). Historical increments below preserve their original observations and limitations.
+
+## Handoff — 2026-11-09
+
+Implementation is committed through `8151f14` (increment 57); the working tree was clean before this documentation review. The project has a working disposable ordinary-window preview and externally observed native-tab lifecycle in the AppKit fixture. It is still a diagnostic/prototype application, not ready for general user-window management. Progress follows the agreed route, but real-app lifecycle acceptance and the release gates remain open. No sustained Terminal session work has started after increment 57.
+
+### Resume here
+
+1. Extend the exact-owned Terminal harness into a sustained session using the shared session and native-tab adapter. Keep UUID-tagged, newly created idle test tabs as the only writable scope; retain frontmost, identity, presentation and positive single-Space guards before effects. Do not use test tags or scripted tab lists to infer adapter membership.
+2. First prove switching A→B→A in one session preserves the logical slot and preferred width while fresh selected-representative observations drive confirmed geometry. Incomplete or changed topology must suspend writes until all members are visited and membership is relearned.
+3. Extend that session through detach/remerge, new-member admission, active closure and last closure. Require creation evidence for admission, destruction evidence for closure, consistent slot/width reconciliation, confirmed geometry and guarded stop/restoration/cleanup. Record failures as well as passes; a standalone placement/resize probe does not satisfy this milestone.
+4. Validate focused debug/release regressions and the new owned-window native sequence, then commit the coherent result. After Terminal lifecycle acceptance, test Preview and resolve Finder association compatibility before widening admission. Keep global keyboard management disabled until its own scope/recovery gates pass.
+
+### Code and validation entry points
+
+| Purpose | Entry point |
+| --- | --- |
+| Shared session, command ownership, reconciliation and stop guards | [ScopedLayoutSession.swift](../Sources/PaperiPlatform/ScopedLayoutSession.swift) and [tests](../Tests/PaperiPlatformTests/ScopedLayoutSessionTests.swift) |
+| External membership learning and topology reconciliation | [NativeTabMembership.swift](../Sources/PaperiPlatform/NativeTabMembership.swift), [NativeTabTopology.swift](../Sources/PaperiPlatform/NativeTabTopology.swift) |
+| Working sustained fixture to reuse as the integration reference | [NativeTabProbe.swift](../Sources/PaperiPlatform/NativeTabProbe.swift), [check-native-tabs.rb](../scripts/check-native-tabs.rb); growth mode covers new-member admission |
+| Terminal ownership/effects and current disposable harness | [TerminalPlacementProbe.swift](../Sources/PaperiPlatform/TerminalPlacementProbe.swift), [check-terminal-tabs.rb](../scripts/check-terminal-tabs.rb) |
+| Commands, prerequisites and broader validation modes | [README](../README.md), [feasibility protocol](FEASIBILITY.md), [implementation plan](../plan.md) |
+
+Latest saved evidence was rechecked during this handoff; no new native effects or Swift tests were run for this documentation-only review:
+
+- `.build/test-increment57-debug-final.log` and `.build/test-increment57-release-final.log`: each contains passing 84-platform and 32-core test runs (116 per configuration).
+- `captures/terminal-resize-increment57-final/summary.json`: all eight checks true, `sharedMembershipVerified: true`, cleanup `closed`, and deliberately `tabSupport: unverified`. The validated sequence is 100→104→100 columns and 720→748→720 points on each A→B→A effect. Native effects were run in debug, not release.
+- Captures and build logs are ignored local evidence, not committed deliverables; a fresh checkout must regenerate them. Use a new output directory for each harness run. Existing commands: `./scripts/swift.sh test`, `./scripts/swift.sh test -c release`, and `ruby scripts/check-terminal-tabs.rb --resize captures/<new-run-name>`. Native harnesses require a GUI session, Accessibility and Terminal/System Events automation access. Restricted-shell `xcode-select` failures have previously been sandbox artifacts; do not infer that the host toolchain needs reinstalling.
+
+### Unresolved items to preserve
+
+- Every native member must be visited before complete membership can be learned, including after topology changes. Do not replace this limitation with inferred membership.
+- Intermittent AX reference/role failures and restart rediscovery remain open; the last full ten-mode cycle was 9/10 and has not been repeated. Focused passes do not supersede those failures.
+- Finder's mixed AXWindow/AXScrollArea roots still block association acceptance; Preview and stacked-column native reconciliation remain unverified.
+- Space transfer fails on macOS 26.7.2 on this host; the newer bridged entry point is absent. This is an independent release blocker, not solved by tab progress.
+- Abrupt-exit recovery, broader popup/display/Space ownership, global keyboard routing, real baseline/performance measurements and daily-use soak remain release work. Controlled stop/restoration is not crash recovery.
+- The earlier untracked possible Terminal test ID 27359 was absent on the increment-56 recheck. There is no pending cleanup approval or action for it.
+
+Commit validated milestones autonomously per the [commit policy](../plan.md#commit-checkpoints). Keep raw captures/scratch out of commits and preserve unrelated changes. Historical increments below describe evidence at their original dates; this handoff and the current checkpoint are the resume instructions.
 
 ## Increment 1: repository, diagnostic shell, and initial core
 
