@@ -29,6 +29,11 @@ import PaperiPlatform
 var args = Array(CommandLine.arguments.dropFirst())
 if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["--menu"] }
 switch args.first {
+case "probe-space-session":
+    guard args.count == 1 else { print("Usage: paperi probe-space-session"); exit(2) }
+    let report = Diagnostics.probeSpaceSession()
+    Diagnostics.printJSON(report)
+    exit(report["result"] as? String == "passed" ? 0 : (report["result"] as? String == "unsupported" ? 2 : 1))
 case "probe-terminal-session":
     guard args.count == 2 else { print("Usage: paperi probe-terminal-session testTag"); exit(2) }
     let report = Diagnostics.probeTerminalSession(tag: args[1])
@@ -171,6 +176,7 @@ default:
       paperi probe-resize                Adopt a fixture-originated resize while tracking expected AX echoes
       paperi probe-interaction           Exercise focused resize commands, panel suppression and recovery on a new fixture
       paperi probe-stop                  Stop with two live fixture windows, restore original frames and reject stale work
+      paperi probe-space-session         Move a disposable container across Spaces via Mission Control + DisplaySpaceCoordinator
       paperi preview-fixture             Interactive disposable preview; local controls, Stop & Restore, 60-second limit
       paperi probe-preview-input         Test AppKit key-equivalent/button input on the disposable preview
       paperi --menu                      Run diagnostic menu bar shell

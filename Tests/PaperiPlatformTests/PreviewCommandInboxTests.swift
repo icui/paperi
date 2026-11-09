@@ -16,6 +16,8 @@ struct PreviewCommandInboxTests {
         #expect(inbox.consume(slurp, knownWindows: [1])?.action == .slurp)
         var barf = row(4); barf["command"] = "barf"; barf["source"] = "button"
         #expect(inbox.consume(barf, knownWindows: [1])?.action == .barf)
+        var nextSpace = row(5); nextSpace["command"] = "nextSpace"; nextSpace["source"] = "button"
+        #expect(inbox.consume(nextSpace, knownWindows: [1])?.action == .nextSpace)
     }
     @Test func foreignStaleUnknownAndMalformedInputsDoNotAdvanceInbox() {
         var inbox = PreviewCommandInbox(pid: 42, token: "current")

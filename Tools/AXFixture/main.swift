@@ -11,7 +11,7 @@ import AppKit
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
         if modifiers == [.command, .option], let key = event.charactersIgnoringModifiers?.lowercased(),
-           let action = ["h": "shrink", "l": "grow", "i": "slurp", "o": "barf"][key] {
+           let action = ["h": "shrink", "l": "grow", "i": "slurp", "o": "barf", "n": "nextSpace"][key] {
             request?(action, "keyEquivalent"); return true
         }
         return super.performKeyEquivalent(with: event)
@@ -36,26 +36,28 @@ import AppKit
     private func makePreviewWindow(_ index: Int) -> PreviewWindow {
         let window = PreviewWindow(contentRect: NSRect(x: 120 + index * 40, y: 120, width: 420, height: 260),
                                    styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-        window.title = "Paperi Preview — Disposable \(index + 1)"
-        window.tabbingMode = .disallowed; window.isReleasedWhenClosed = false
         let tokenIndex = CommandLine.arguments.firstIndex(of: "--preview-token")
         let token = tokenIndex.flatMap { $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil } ?? ""
+        window.title = "Paperi Preview — Disposable \(index + 1) [\(token)]"
+        window.tabbingMode = .disallowed; window.tabbingIdentifier = "PaperiPreviewTabs"; window.isReleasedWhenClosed = false
         window.request = { [weak self, weak window] action, source in
             guard let self, let window else { return }
             self.previewSequence += 1
             self.log("previewCommand", extra: ["command": action, "source": source,
                 "commandWindowID": window.windowNumber, "previewToken": token, "sequence": self.previewSequence])
         }
-        let label = NSTextField(wrappingLabelWithString: "Disposable preview only\nClick a document to focus it.\n⌥⌘H / ⌥⌘L resize • ⌥⌘I / ⌥⌘O stack/unstack • Esc stops\nSupports native tabs (Window → Merge All Windows) and stacked columns.\nStop restores all surviving windows before closing.")
-        let buttons = NSStackView(); buttons.orientation = .horizontal; buttons.spacing = 8
-        for (title, action) in [("Narrower", "shrink"), ("Wider", "grow"), ("Stack", "slurp"), ("Unstack", "barf"), ("Stop & Restore", "stop")] {
-            let button = PreviewButton(title: title, target: nil, action: nil)
+        let label = NSTextField(wrappingLabelWithString: "Disposable preview only\nClick a document to focus it.\n⌥⌘H / ⌥⌘L resize • ⌥⌘I / ⌥⌘O stack/unstack • ⌥⌘N next Space • Esc stops\nSupports native tabs (Window → Merge All Windows), stacked columns and cross-Space transfer.\nStop restores all surviving windows before closing.")
+        let row1 = NSStackView(); row1.orientation = .horizontal; row1.spacing = 8
+        let row2 = NSStackView(); row2.orientation = .horizontal; row2.spacing = 8
+        for (idx, item) in [("Narrower", "shrink"), ("Wider", "grow"), ("Stack", "slurp"),
+                            ("Unstack", "barf"), ("Next Space", "nextSpace"), ("Stop & Restore", "stop")].enumerated() {
+            let button = PreviewButton(title: item.0, target: nil, action: nil)
             button.target = button; button.action = #selector(PreviewButton.trigger)
-            button.invoke = { [weak window] in window?.request?(action, "button") }
-            buttons.addArrangedSubview(button)
-            if action == "stop" { window.stopButton = button }
+            button.invoke = { [weak window] in window?.request?(item.1, "button") }
+            (idx < 3 ? row1 : row2).addArrangedSubview(button)
+            if item.1 == "stop" { window.stopButton = button }
         }
-        let stack = NSStackView(views: [label, buttons]); stack.orientation = .vertical
+        let stack = NSStackView(views: [label, row1, row2]); stack.orientation = .vertical
         stack.alignment = .leading; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
         window.contentView?.addSubview(stack)
         if let content = window.contentView {
@@ -71,6 +73,22 @@ import AppKit
         if CommandLine.arguments.count >= 2 { logURL = URL(fileURLWithPath: CommandLine.arguments[1]) }
         log("launched")
         NSApp.setActivationPolicy(CommandLine.arguments.contains("--accessory") ? .accessory : .regular)
+        if CommandLine.arguments.contains("--space-tab-session") {
+            let tokenIndex = CommandLine.arguments.firstIndex(of: "--preview-token")
+            let token = tokenIndex.flatMap { $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil } ?? ""
+            after(1) {
+                self.tabWindows = (0..<2).map { idx in
+                    let w = self.makeTabWindow(idx)
+                    w.title = "Paperi Space Tab [\(token)]"
+                    return w
+                }
+            }
+            after(3) { self.tabWindows[0].addTabbedWindow(self.tabWindows[1], ordered: .above) }
+            after(5) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1] }
+            after(7) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0] }
+            after(65) { NSApp.terminate(nil) }
+            return
+        }
         if CommandLine.arguments.contains("--lifecycle-placement") {
             let preview = CommandLine.arguments.contains("--preview")
             after(1) {

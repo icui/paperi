@@ -319,6 +319,17 @@ extension Diagnostics {
                                 intent = try session.slurpFocused(frontmostPID: frontmost, ticket: ticket)
                             case .barf:
                                 intent = try session.barfFocused(frontmostPID: frontmost, ticket: ticket)
+                            case .nextSpace:
+                                if frontmost == pid, let currentSpace = session.spaceID,
+                                   let ref = references[command.windowID],
+                                   let title = attribute(ref, kAXTitleAttribute) as? String, title.contains(previewToken),
+                                   let disp = DisplaySpaceCoordinator.liveTopologies().first(where: { $0.userSpaces.contains(currentSpace) }),
+                                   disp.userSpaces.count >= 2,
+                                   let idx = disp.userSpaces.firstIndex(of: currentSpace) {
+                                    let dest = disp.userSpaces[(idx + 1) % disp.userSpaces.count]
+                                    let res = SpaceTransfer.moveWindowViaMissionControl(windowID: command.windowID, expectedTitle: title, toSpace: dest)
+                                    intent = res["transferred"] as? Bool == true
+                                } else { intent = false }
                             case .stop:
                                 intent = false
                             }
