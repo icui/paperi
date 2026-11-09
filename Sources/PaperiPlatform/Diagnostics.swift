@@ -104,6 +104,8 @@ public enum Diagnostics {
         let selectionAssociations = SelectionAssociations()
         let finderTabIdentities = EvidenceIdentities()
         let finderTabAssociations = SelectionAssociations()
+        let nativeTabIdentities = EvidenceIdentities()
+        let nativeTabAssociations = SelectionAssociations()
         init(observer: AXObserver, owner: EventRecorder, runID: UUID) {
             self.observer = observer
             self.source = RecorderSource(AXObserverGetRunLoopSource(observer))
@@ -217,12 +219,32 @@ public enum Diagnostics {
                 identities: observers.mapValues(\.finderTabIdentities),
                 associations: observers.mapValues(\.finderTabAssociations), finderTabBarOnly: true)
         }
+        var native = Diagnostics.tabEvidence(bundleID: bundleID, observedWindows: [:],
+            identities: observers.mapValues(\.nativeTabIdentities),
+            associations: observers.mapValues(\.nativeTabAssociations), windowTabBarOnly: true)
+        native["applications"] = (native["applications"] as? [[String: Any]] ?? []).map { app in
+            var result = app
+            result["membershipCandidates"] = NativeTabMembership.inspect(app).map {
+                ["scope": $0.scope, "group": $0.group, "members": $0.members, "active": $0.active] as [String: Any]
+            }
+            return result
+        }
+        report["nativeTabEvidence"] = native
         return report
     }
 
     public func windowEvidence(bundleID: String) -> [String: Any] {
         Diagnostics.windowEvidence(bundleID: bundleID,
             observedWindows: observers.mapValues { $0.windows.map(\.element) })
+    }
+
+    /// PID-scoped evidence for a child already owned by an integration probe.
+    func tabEvidence(processID: pid_t) -> [String: Any] {
+        // Fresh enumerated representatives supply tab bars. Cached inactive
+        // references are validated separately, not traversed as content trees.
+        Diagnostics.tabEvidence(bundleID: "disposable-child", observedWindows: [:],
+            identities: observers.mapValues(\.evidenceIdentities), associations: observers.mapValues(\.selectionAssociations),
+            processID: processID, windowTabBarOnly: true)
     }
 
     private func attach(_ pid: pid_t) {
@@ -343,6 +365,7 @@ public enum Diagnostics {
         if notification == kAXUIElementDestroyedNotification {
             observers[pid]?.selectionAssociations.invalidate(reason: .windowDestroyed)
             observers[pid]?.finderTabAssociations.invalidate(reason: .windowDestroyed)
+            observers[pid]?.nativeTabAssociations.invalidate(reason: .windowDestroyed)
             observers[pid]?.notifications.remove(element)
             observers[pid]?.windows.removeAll { CFEqual($0.element, element) }
         } else if notification == kAXWindowCreatedNotification {

@@ -140,6 +140,7 @@ import AppKit
         if CommandLine.arguments.contains("--popups") { runPopups(); return }
         if CommandLine.arguments.contains("--unvisited-tabs") { runUnvisitedTabs(); return }
         if CommandLine.arguments.contains("--multi-tabs") { runMultipleTabGroups(); return }
+        if CommandLine.arguments.contains("--tab-session") { runTabSession(); return }
         if CommandLine.arguments.contains("--tabs") { runTabs(); return }
         after(1) {
             let window = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 420, height: 260),
@@ -190,6 +191,59 @@ import AppKit
         }
         after(11) { self.window?.close(); self.window = nil }
         after(13) { self.log("terminating"); NSApp.terminate(nil) }
+    }
+
+    private func runTabSession() {
+        after(1) { self.tabWindows = (0..<2).map { self.makeTabWindow($0) } }
+        after(3) { self.tabWindows[0].addTabbedWindow(self.tabWindows[1], ordered: .above) }
+        // Visit both controls before testing managed representative changes.
+        after(5) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1] }
+        after(7) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0] }
+        after(9) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1] }
+        after(11) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0] }
+        after(13) {
+            self.tabWindows[0].tabGroup?.removeWindow(self.tabWindows[1])
+            self.tabWindows[1].orderFrontRegardless()
+        }
+        after(15) { self.tabWindows[0].addTabbedWindow(self.tabWindows[1], ordered: .above) }
+        if CommandLine.arguments.contains("--tab-reconcile") {
+            after(17) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1] }
+            after(19) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0] }
+            after(21) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1] }
+            if CommandLine.arguments.contains("--tab-growth") {
+                after(23) {
+                    let added = self.makeTabWindow(2)
+                    self.tabWindows.append(added)
+                    self.tabWindows[0].addTabbedWindow(added, ordered: .above)
+                    self.tabWindows[0].tabGroup?.selectedWindow = added
+                }
+                after(25) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0] }
+                after(27) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1] }
+                after(29) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[2] }
+                after(31) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0] }
+                after(33) {
+                    self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[2]
+                    self.tabWindows[2].close()
+                }
+                after(35) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0] }
+                after(37) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1] }
+                after(39) { self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0] }
+                after(41) {
+                    self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1]
+                    self.tabWindows[1].close()
+                }
+                after(47) { for window in self.tabWindows { window.close() } }
+                after(49) { self.log("terminating"); NSApp.terminate(nil) }
+            } else {
+                after(23) { self.tabWindows[0].tabGroup?.selectedWindow?.close() }
+                after(25) { for window in self.tabWindows { window.close() } }
+                after(27) { self.log("terminating"); NSApp.terminate(nil) }
+            }
+        } else {
+            after(17) { self.tabWindows[0].tabGroup?.selectedWindow?.close() }
+            after(19) { for window in self.tabWindows { window.close() } }
+            after(21) { self.log("terminating"); NSApp.terminate(nil) }
+        }
     }
 
     private func runTabs() {

@@ -29,6 +29,12 @@ import PaperiPlatform
 var args = Array(CommandLine.arguments.dropFirst())
 if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["--menu"] }
 switch args.first {
+case "probe-native-tab-session", "probe-native-tab-lifecycle", "probe-native-tab-growth":
+    guard args.count == 1 else { print("Usage: paperi probe-native-tab-session | probe-native-tab-lifecycle | probe-native-tab-growth"); exit(2) }
+    let report = Diagnostics.probeNativeTabSession(reconcileTopology: args.first != "probe-native-tab-session",
+        admitNewMembers: args.first == "probe-native-tab-growth")
+    Diagnostics.printJSON(report)
+    exit(report["result"] as? String == "passed" ? 0 : 1)
 case "preview-fixture", "probe-preview-input":
     guard args.count == 1 else { print("Usage: paperi preview-fixture | probe-preview-input"); exit(2) }
     let report = Diagnostics.probeLifecycle(preview: true, automatedPreview: args.first == "probe-preview-input")
@@ -141,6 +147,9 @@ default:
     Paperi feasibility build (window management is inactive)
       paperi snapshot [--include-titles]  Read-only JSON snapshot
       paperi tab-evidence identifier     Bounded read-only AX tab structure for one app
+      paperi probe-native-tab-session    Native-tab effects on a disposable child only
+      paperi probe-native-tab-lifecycle  Disposable native detach/merge/closure effects
+      paperi probe-native-tab-growth     Disposable native tab creation and admission
       paperi window-evidence identifier  Bounded read-only window policy/focus metadata for one app
       paperi record [seconds] [--bundle-id identifier ...] [--tab-evidence] [--window-evidence] [--restart-after seconds] [--reconcile-every 1..30] [--poll-only]
                                         Read-only AX event JSONL (default 30, max 300)

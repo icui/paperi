@@ -25,10 +25,13 @@ extension Diagnostics {
     @MainActor static func tabEvidence(bundleID: String, observedWindows: [pid_t: [AXUIElement]],
                                       identities: [pid_t: EvidenceIdentities] = [:],
                                       associations: [pid_t: SelectionAssociations] = [:],
-                                      finderTabBarOnly: Bool = false) -> [String: Any] {
+                                      finderTabBarOnly: Bool = false, processID: pid_t? = nil,
+                                      windowTabBarOnly: Bool = false) -> [String: Any] {
         precondition(!finderTabBarOnly || bundleID == "com.apple.finder")
         var applications: [[String: Any]] = []
-        for app in NSWorkspace.shared.runningApplications where app.bundleIdentifier == bundleID {
+        let targets = processID.map { NSRunningApplication(processIdentifier: $0).map { [$0] } ?? [] }
+            ?? NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == bundleID }
+        for app in targets {
             let application = AXUIElementCreateApplication(app.processIdentifier)
             AXUIElementSetMessagingTimeout(application, 0.15)
             var value: CFTypeRef?
@@ -130,9 +133,9 @@ extension Diagnostics {
                 }
                 if let names = attributes as? [String] { row["attributeNames"] = names.sorted() }
                 for name in ["AXTabs", "AXChildren", "AXSelectedChildren", "AXWindow", "AXTopLevelUIElement"] {
-                    if finderTabBarOnly {
-                        // Finder's native tab bar is a direct window child. Do
-                        // not descend into folder contents or content tab groups.
+                    if finderTabBarOnly || windowTabBarOnly {
+                        // The native-tab adapter scopes direct window children.
+                        // Do not descend into document content or content tabs.
                         let role = row[kAXRoleAttribute] as? String
                         let isRoot = row["enumeratedWindowIndex"] != nil || row["observedWindowIndex"] != nil
                         let needed = (isRoot && name == "AXChildren") ||
@@ -143,7 +146,7 @@ extension Diagnostics {
                     guard withinBudget() else { break }
                     var value: CFTypeRef?
                     let result = AXUIElementCopyAttributeValue(element, name as CFString, &value)
-                    if finderTabBarOnly && name == "AXChildren" &&
+                    if (finderTabBarOnly || windowTabBarOnly) && name == "AXChildren" &&
                         (result != .success || !(value is [AXUIElement])) {
                         truncated = true
                         truncationReasons.insert("directChildrenUnavailable")
@@ -197,7 +200,7 @@ extension Diagnostics {
             applications.append(report)
         }
         return ["schemaVersion": 1, "bundleID": bundleID,
-                "captureScope": finderTabBarOnly ? "finderDirectWindowTabBar" : "boundedApplicationGraph",
+                "captureScope": finderTabBarOnly ? "finderDirectWindowTabBar" : (windowTabBarOnly ? "directWindowTabBar" : "boundedApplicationGraph"),
                 "os": ProcessInfo.processInfo.operatingSystemVersionString,
                 "accessibilityTrusted": AXIsProcessTrusted(), "applications": applications,
                 "note": "Read-only bounded AX structure; local node IDs are not persistent tab identities. Missing AXTabs is not evidence of no native tabs."]

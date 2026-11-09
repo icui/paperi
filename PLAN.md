@@ -211,6 +211,17 @@ Provisional targets, to revise after baseline measurement:
 
 ## Delivery sequence
 
+### Commit checkpoints
+
+Commit autonomously when a coherent implementation milestone, validated fix or
+useful investigation result is ready to preserve. Do not wait for a separate
+user request or accumulate multiple completed increments unnecessarily. Before
+committing, review the diff, run checks appropriate to the change and update the
+status with the actual validation results and remaining limitations. Keep commits
+focused, exclude scratch files and raw captures, and preserve unrelated user
+changes. Commit messages must describe the concrete result without implying that
+unverified behavior works. Pushing and publishing remain separate actions.
+
 ### Agreed implementation order — 2026-11-08
 
 Build a limited ordinary-window path first, retaining logical tab-container slots
@@ -224,9 +235,11 @@ native tabs or any other final acceptance requirement.
    display/Space. Unknown membership/presentation must withhold effects; missing
    enumeration is never closure. Production keyboard management stays off until
    that preview has an explicit opt-in scope and recovery path.
-2. Immediately prove one real native-tab app (Finder or Terminal): create, switch,
-   merge, detach, close-active and close-last. Integrate it into the same event and
-   effect path before expanding configuration, performance work or app coverage.
+2. First prove standard AppKit native tabs in the disposable demo: create, switch,
+   merge, detach, close-active and close-last. Use its native state only as a test
+   oracle; the external adapter must discover membership independently. Connect
+   confirmed membership to the shared session and effect path, then validate that
+   path in Finder, Terminal and Preview before expanding unrelated features.
    A selected physical representative can change without logical insertion,
    geometry reset or insertion-triggered centering. Native-tab lifecycle is not
    deferred until an otherwise finished manager exists.
