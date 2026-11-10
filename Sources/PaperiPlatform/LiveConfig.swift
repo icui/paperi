@@ -56,7 +56,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public var hotkeys: [String: String?]
     /// Mask over the column a dragged window would swap with, `#RRGGBB[AA]`.
     public var swapHighlight: String?
-    /// Bar at the edge of the focused window when focus cannot move, `#RRGGBB[AA]`.
+    /// Legacy color setting, retained for config compatibility; no longer displayed.
     public var edgeHint: String?
     public static let defaultEdgeHint = "#0A84FF"
     public var edgeHintColor: HexColor { edgeHint.flatMap(HexColor.init) ?? HexColor(Self.defaultEdgeHint)! }
@@ -141,7 +141,6 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "gap": 8,
       "outerGap": 8,
       "swapHighlight": "#0A84FF4D",
-      "edgeHint": "#0A84FF",
       "gesture": {
         "enabled": true,
         "fingers": 3,

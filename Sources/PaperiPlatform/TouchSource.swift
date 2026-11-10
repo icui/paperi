@@ -55,7 +55,7 @@ public final class EventTapTouchSource: TouchSource {
                 guard type.rawValue == 29 else { return Unmanaged.passUnretained(event) }
                 if let nsEvent = NSEvent(cgEvent: event) {
                     let touches = nsEvent.allTouches()
-                    let timestamp = ProcessInfo.processInfo.systemUptime
+                    let timestamp = nsEvent.timestamp
                     EventTapTouchSource.activeInstance?.processTouches(touches, at: timestamp)
                 }
                 return Unmanaged.passUnretained(event)
@@ -93,14 +93,22 @@ public final class EventTapTouchSource: TouchSource {
         }
     }
 
+    static func termination(phases: [NSTouch.Phase], fingers: Int, at time: Double) -> TouchEvent? {
+        // Gesture events without contacts can be interleaved with touch frames.
+        // They do not mean the tracked fingers lifted.
+        if phases.isEmpty { return nil }
+        if phases.contains(.cancelled) { return .cancel }
+        if phases.count != fingers || phases.contains(.ended) { return .end(time: time) }
+        return nil
+    }
+
     func processTouches(_ touches: Set<NSTouch>, at timestamp: Double) {
         if tracking {
-            let ended = touches.contains { $0.phase == .ended || $0.phase == .cancelled }
-            if touches.count != fingers || ended {
+            if let termination = Self.termination(phases: touches.map(\.phase), fingers: fingers, at: timestamp) {
                 tracking = false
                 activeTouches.removeAll()
-                if verbose { FileHandle.standardError.write(Data("[paperi] touch gesture ended (touches=\(touches.count), ended=\(ended))\n".utf8)) }
-                onEvent?(.end(time: timestamp))
+                if verbose { FileHandle.standardError.write(Data("[paperi] touch gesture ended (touches=\(touches.count), termination=\(termination))\n".utf8)) }
+                onEvent?(termination)
                 return
             }
 
@@ -129,7 +137,7 @@ public final class EventTapTouchSource: TouchSource {
             if !allMatch {
                 tracking = false
                 activeTouches.removeAll()
-                onEvent?(.end(time: timestamp))
+                onEvent?(.cancel)
                 return
             }
 

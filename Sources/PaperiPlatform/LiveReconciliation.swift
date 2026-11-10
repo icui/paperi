@@ -3,6 +3,22 @@ import PaperiCore
 
 /// Pure helpers for the live manager. No OS effects run here.
 enum LiveReconciliation {
+    /// A small excursion away from the requested edge, returning exactly to
+    /// the layout frame. Position only: window dimensions and focus stay fixed.
+    static func edgeBounce(_ frame: Rect, toward direction: Direction, progress: Double) -> Rect {
+        guard progress.isFinite, progress > 0, progress < 1 else { return frame }
+        let pulse = sin(.pi * progress)
+        let distance = 24 * pulse * pulse
+        var result = frame
+        switch direction {
+        case .left: result.x += distance
+        case .right: result.x -= distance
+        case .up: result.y += distance
+        case .down: result.y -= distance
+        }
+        return result
+    }
+
     /// Complete physical targets: ordinary placements plus off-screen adjustments.
     static func focusTargets(_ placements: [Placement], canvas: Rect, screenInset: Double) -> [UInt32: Rect] {
         let frames = placements.map { (window: $0.windowID, frame: $0.frame) }

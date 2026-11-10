@@ -58,7 +58,6 @@ import PaperiCore
     private var dragging: UInt32? { drag?.windowID }
     private var dragTimer: Timer?
     private let highlight = SwapHighlight()
-    private let edgeHint = EdgeHint()
     private var mouseUpWatch = false
     /// Last off-slot frame acted on per window, so an app that clamps its
     /// position is rewritten once rather than on every refresh.
@@ -767,6 +766,7 @@ import PaperiCore
     private var motionTicks = 0
     private var motionSpace: UInt64?
     private var motionTimer: Timer?
+    private var motionBounce: Direction?
     private var motionGeneration: UInt64 = 0
     private var motionFrames: [UInt32: Rect] = [:]
     private var commandStarted = 0.0
@@ -780,6 +780,7 @@ import PaperiCore
         cancelSwipe()
         motionGeneration &+= 1
         motionTimer?.invalidate(); motionTimer = nil
+        motionBounce = nil
     }
 
     /// Reveal an existing representative before the expensive all-app survey.
@@ -840,8 +841,11 @@ import PaperiCore
     }
 
     /// One target calculation, position-only ticks, no discovery in the scheduler.
-    private func animateFocus(space: UInt64, byID: [UInt32: Survey]) {
-        let duration = options.config.focusScrollDuration ?? 0.22
+    private func animateFocus(space: UInt64, byID: [UInt32: Survey], bounce: Direction? = nil) {
+        // Key repeat must not stack excursions or keep restarting the return.
+        if let bounce, motionTimer != nil, motionBounce == bounce, motionSpace == space { return }
+        let configuredDuration = options.config.focusScrollDuration ?? 0.22
+        let duration = bounce == nil || configuredDuration == 0 ? configuredDuration : max(0.28, configuredDuration)
         guard NSEvent.pressedMouseButtons == 0 else { cancelMotion(); refreshOnMouseUp(); return }
         guard duration > 0, let session = coordinator.sessions[space],
               let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else {
@@ -865,7 +869,7 @@ import PaperiCore
             guard abs(frame.width - target.width) <= 2, abs(frame.height - target.height) <= 2 else {
                 cancelMotion(); apply(space: space, byID: byID); return
             }
-            if !matches(frame, target) { starts[wid] = frame }
+            if bounce != nil || !matches(frame, target) { starts[wid] = frame }
         }
         cancelMotion()
         guard !starts.isEmpty else { return }
@@ -892,6 +896,9 @@ import PaperiCore
                     var frame = origin
                     frame.x = origin.x + (target.x - origin.x) * eased
                     frame.y = origin.y + (target.y - origin.y) * eased
+                    if let bounce {
+                        frame = LiveReconciliation.edgeBounce(frame, toward: bounce, progress: progress)
+                    }
                     if let last = self.motionFrames[wid], last == frame { continue }
                     var point = CGPoint(x: frame.x, y: frame.y)
                     guard let value = AXValueCreate(.cgPoint, &point) else { continue }
@@ -928,6 +935,7 @@ import PaperiCore
             }
         }
         motionSpace = space
+        motionBounce = bounce
         motionTimer = timer
         RunLoop.main.add(timer, forMode: .common)
     }
@@ -966,8 +974,10 @@ import PaperiCore
         var starts: [UInt32: Rect] = [:]
         var progress = 0.0
         var ready = false
+        var tracking = true
         var failed = false
         var released: Bool?
+        var releaseDirection: Direction?
     }
     private var swipe: Swipe?
     private var swipeTask: Task<Void, Never>?
@@ -1045,6 +1055,9 @@ import PaperiCore
         }
         switch event {
         case .begin(let time):
+            // Capture while determining the axis, but keep the overlay hidden
+            // until horizontal movement locks. This overlaps input with capture.
+            _ = beginSwipe(pendingLock: true)
             let cfg = SlotSwipe.Configuration(
                 travel: options.config.gesture.travel,
                 commitThreshold: options.config.gesture.commitThreshold,
@@ -1060,7 +1073,7 @@ import PaperiCore
             if let action = swipeReducer.move(dx: dx, dy: dy, at: time) {
                 switch action {
                 case .started:
-                    let res = beginSwipe()
+                    let res: [String: Any] = swipe != nil ? ["ok": true] : beginSwipe()
                     if res["ok"] as? Bool != true {
                         swipeReducer.cancel()
                         slotSwipe = nil
@@ -1086,8 +1099,8 @@ import PaperiCore
             let decision = swipeReducer.end(at: time)
             slotSwipe = nil
             switch decision {
-            case .commit:
-                endSwipe(commit: true)
+            case .commit(let direction):
+                endSwipe(commit: true, direction: direction)
             case .snapBack:
                 endSwipe(commit: false)
             }
@@ -1101,7 +1114,7 @@ import PaperiCore
 
     /// Captures the strip of the focused window's Space and shows it frozen
     /// in place. Updates and a release may arrive before the capture finishes.
-    @discardableResult func beginSwipe(isSimulation: Bool = false) -> [String: Any] {
+    @discardableResult func beginSwipe(isSimulation: Bool = false, pendingLock: Bool = false) -> [String: Any] {
         cancelMotion(); motionFrames.removeAll()
         func fail(_ reason: String) -> [String: Any] {
             swipeMetrics = ["state": "refused", "reason": reason]
@@ -1140,7 +1153,7 @@ import PaperiCore
         let generation = motionGeneration
         let overlay = SnapshotTransition()
         swipe = Swipe(space: space, generation: generation, overlay: overlay, surveys: surveys,
-                      ends: ends, neighbours: neighbours)
+                      ends: ends, neighbours: neighbours, tracking: !pendingLock)
         motionSpace = space
         swipeBegan = ProcessInfo.processInfo.systemUptime
         swipeMetrics = ["state": "capturing", "windows": surveys.count]
@@ -1174,15 +1187,15 @@ import PaperiCore
                 self.swipeMetrics = ["state": "tracking", "windows": surveys.count, "captureMS": overlay.captureMS,
                                      "textureBytes": overlay.textureBytes]
                 overlay.place(self.swipeFrames(state))
-                overlay.show()
-                if let commit = state.released { state.released = nil; self.swipe = state; self.endSwipe(commit: commit) }
+                if state.tracking { overlay.show() }
+                if let commit = state.released { state.released = nil; self.swipe = state; self.endSwipe(commit: commit, direction: state.releaseDirection) }
             } catch {
                 overlay.hide()
                 guard let self, var state = self.swipe, state.generation == generation else { return }
                 state.failed = true
                 self.swipe = state
                 self.swipeMetrics = ["state": "fallback", "reason": String(describing: error)]
-                if let commit = state.released { state.released = nil; self.swipe = state; self.endSwipe(commit: commit) }
+                if let commit = state.released { state.released = nil; self.swipe = state; self.endSwipe(commit: commit, direction: state.releaseDirection) }
             }
         }
         return ["ok": true, "neighbours": neighbours.count]
@@ -1191,9 +1204,14 @@ import PaperiCore
     /// Latest finger progress; images move immediately (no queue, no AX).
     func updateSwipe(_ progress: Double) {
         guard var state = swipe, state.released == nil, progress.isFinite else { return }
+        let wasTracking = state.tracking
+        state.tracking = true
         state.progress = min(1.3, max(-1.3, progress))
         swipe = state
-        if state.ready { state.overlay.place(swipeFrames(state)) }
+        if state.ready {
+            state.overlay.place(swipeFrames(state))
+            if !wasTracking { state.overlay.show() }
+        }
     }
 
     private func swipeFrames(_ state: Swipe) -> [UInt32: Rect] {
@@ -1213,13 +1231,14 @@ import PaperiCore
         }
     }
 
-    /// Release. A commit gives the result of `focus left/right` towards the
-    /// side the progress points to; anything else slides back with no writes.
-    func endSwipe(commit requested: Bool) {
+    /// Release towards the reducer’s chosen neighbour, or the progress side
+    /// for simulations. A rejected commit slides back with no writes.
+    func endSwipe(commit requested: Bool, direction requestedDirection: Direction? = nil) {
         guard var state = swipe, state.released == nil else { return }
-        let direction: Direction = state.progress < 0 ? .left : .right
+        let direction: Direction = requestedDirection ?? (state.progress < 0 ? .left : .right)
         let target = state.neighbours[direction]
-        let commit = requested && state.progress != 0 && target != nil
+        let commit = requested && (requestedDirection != nil || state.progress != 0) && target != nil
+        state.releaseDirection = direction
         let settle = max(0.12, options.config.focusScrollDuration ?? 0.22)
         if !state.ready && !state.failed { state.released = commit; swipe = state; return }
         if state.failed {
@@ -1227,7 +1246,6 @@ import PaperiCore
             swipeTask = nil
             scheduleRefresh()
             if commit { _ = handle(["focus", direction == .left ? "left" : "right"]) }
-            else if target == nil && state.progress != 0 { hintAtFocusedWindow(direction) }
             return
         }
         state.released = commit
@@ -1235,7 +1253,6 @@ import PaperiCore
         let generation = state.generation, space = state.space, overlay = state.overlay
         guard commit, let wid = target, let session = coordinator.sessions[space],
               let ends = state.ends[direction] else {
-            if target == nil && state.progress != 0 { hintAtFocusedWindow(direction) }
             let duration = settle * abs(state.progress)
             overlay.slide(to: state.starts, duration: duration)
             swipeTask = Task { [weak self] in
@@ -1254,7 +1271,8 @@ import PaperiCore
         applied.removeValue(forKey: space)
         apply(space: space, byID: state.surveys)
         _ = raise(wid)
-        let duration = settle * (1 - abs(state.progress))
+        let destinationProgress = direction == .left ? -1.0 : 1.0
+        let duration = settle * abs(destinationProgress - state.progress)
         overlay.slide(to: ends, duration: duration)
         let released = ProcessInfo.processInfo.systemUptime
         swipeTask = Task { [weak self] in
@@ -1507,14 +1525,13 @@ import PaperiCore
             firstWriteMS = nil; finalWriteMS = nil; confirmedMS = nil
             guard let dir = direction(rest.first) else { return fail("usage: focus left|right|up|down") }
             // Focus never leaves the strip or switches Spaces: at its end (or
-            // with no managed window focused) the focused window shows a hint.
+            // with no managed window focused) focus stays put. A managed strip bounces.
             guard let ctx = focusedContext() else {
-                hintAtFocusedWindow(dir)
                 return ["ok": true, "changed": false, "edge": true, "managed": false]
             }
             guard let target = ctx.session.state.layout.neighbor(dir),
                   let loc = ctx.session.state.layout.index(of: target) else {
-                hintAtFocusedWindow(dir)
+                animateFocus(space: ctx.space, byID: latestSurvey, bounce: dir)
                 return ["ok": true, "changed": false, "edge": true]
             }
             let wid = ctx.session.state.layout.columns[loc.column].slots[loc.row].activeMember
@@ -1547,17 +1564,6 @@ import PaperiCore
         default:
             return fail("unknown command \(verb)")
         }
-    }
-
-    /// Shows the end-of-row hint on the OS-focused window, if it has a frame.
-    private func hintAtFocusedWindow(_ side: Direction) {
-        guard let front = NSWorkspace.shared.frontmostApplication else { return }
-        let application = AXUIElementCreateApplication(front.processIdentifier)
-        AXUIElementSetMessagingTimeout(application, 0.2)
-        guard let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
-              CFGetTypeID(value) == AXUIElementGetTypeID(),
-              let frame = Diagnostics.frame(value as! AXUIElement), frame.isValid else { return }
-        edgeHint.show(along: frame, side: side, color: options.config.edgeHintColor)
     }
 
     private func surveyByID() -> [UInt32: Survey] {

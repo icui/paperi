@@ -40,13 +40,23 @@ import PaperiCore
         root.frame = CGRect(origin: .zero, size: screen.frame.size)
         root.masksToBounds = true
         root.actions = Self.noActions
-        root.contents = try await capture(SCContentFilter(display: display, excludingWindows: windows), scale: scale)
+        // Submit all screenshots together. Serial capture adds one display-frame
+        // wait per window, leaving short swipes invisible until finger release.
+        let background = Task { try await self.capture(SCContentFilter(display: display, excludingWindows: windows), scale: scale) }
+        let windowCaptures = windows.reversed().map { item in
+            (item, Task { try await self.capture(SCContentFilter(desktopIndependentWindow: item), scale: scale) })
+        }
+        defer {
+            background.cancel()
+            for (_, task) in windowCaptures { task.cancel() }
+        }
+        root.contents = try await background.value
         root.contentsScale = scale
         try Task.checkCancellation()
         // ScreenCaptureKit's list is front to back; compose back to front.
-        for item in windows.reversed() {
+        for (item, task) in windowCaptures {
             let frame = Rect(x: item.frame.minX, y: item.frame.minY, width: item.frame.width, height: item.frame.height)
-            let image = try await capture(SCContentFilter(desktopIndependentWindow: item), scale: scale)
+            let image = try await task.value
             try Task.checkCancellation()
             let layer = CALayer()
             layer.actions = Self.noActions
@@ -83,8 +93,10 @@ import PaperiCore
         config.ignoreShadowsSingleWindow = true
         let bytes = config.width * config.height * 4
         guard textureBytes + bytes <= 256 * 1024 * 1024 else { throw Failure.memoryBudget }
+        // Reserve before suspension so concurrent captures share the same budget.
+        textureBytes += bytes
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-        textureBytes += image.bytesPerRow * image.height
+        textureBytes += image.bytesPerRow * image.height - bytes
         return image
     }
 

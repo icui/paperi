@@ -90,10 +90,13 @@ public struct SlotSwipe: Equatable, Sendable {
                     let vel = rawProg / dt
                     state = .active(rawProgress: rawProg, clampedProgress: clamped, velocity: vel, lastTime: time)
                     return .started
-                } else {
-                    // Vertical dominates -> abandon gesture
+                } else if absY > 1.2 * absX {
                     state = .cancelled
                     return .cancelled
+                } else {
+                    // Keep accumulating ambiguous diagonal motion until an axis wins.
+                    state = .detecting(accDx: newX, accDy: newY, startTime: start)
+                    return nil
                 }
             } else {
                 state = .detecting(accDx: newX, accDy: newY, startTime: start)
@@ -115,9 +118,12 @@ public struct SlotSwipe: Equatable, Sendable {
 
     public mutating func end(at time: Double) -> Decision {
         switch state {
-        case .active(let rawProg, let clampedProg, let vel, _):
+        case .active(let rawProg, let clampedProg, let vel, let lastTime):
             let decision: Decision
-            let absVel = abs(vel)
+            // Stationary touches produce no move events. Fade stale velocity out
+            // over 100 ms so a hold before release cannot act as a flick.
+            let releaseVelocity = vel * max(0, 1 - max(0, time - lastTime) / 0.1)
+            let absVel = abs(releaseVelocity)
             let absClamped = abs(clampedProg)
 
             // A flick commits if velocity exceeds flickVelocity in the direction of progress.

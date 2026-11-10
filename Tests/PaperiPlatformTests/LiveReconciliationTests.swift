@@ -4,6 +4,33 @@ import PaperiCore
 @testable import PaperiPlatform
 
 @MainActor struct LiveReconciliationTests {
+    @Test func edgeBounceReturnsToLayoutWithoutResizing() {
+        let frame = Rect(x: 100, y: 40, width: 700, height: 800)
+        for direction in [Direction.left, .right, .up, .down] {
+            #expect(LiveReconciliation.edgeBounce(frame, toward: direction, progress: 0) == frame)
+            #expect(LiveReconciliation.edgeBounce(frame, toward: direction, progress: 1) == frame)
+            let peak = LiveReconciliation.edgeBounce(frame, toward: direction, progress: 0.5)
+            #expect(peak.width == frame.width && peak.height == frame.height)
+            switch direction {
+            case .left: #expect(peak.x == 124 && peak.y == 40)
+            case .right: #expect(peak.x == 76 && peak.y == 40)
+            case .up: #expect(peak.x == 100 && peak.y == 64)
+            case .down: #expect(peak.x == 100 && peak.y == 16)
+            }
+        }
+    }
+
+    @Test func bouncingStripPreservesWindowSpacingAndIsBounded() {
+        let left = Rect(x: 8, y: 40, width: 600, height: 800)
+        let right = Rect(x: 616, y: 40, width: 800, height: 800)
+        for progress in [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0] {
+            let a = LiveReconciliation.edgeBounce(left, toward: .right, progress: progress)
+            let b = LiveReconciliation.edgeBounce(right, toward: .right, progress: progress)
+            #expect(abs((b.x - a.x) - (right.x - left.x)) < 0.001)
+            #expect(a.x <= left.x && a.x >= left.x - 24)
+        }
+    }
+
     @Test func swipeInterpolationClampsAndPreservesSizes() {
         let start = Rect(x: -200, y: 40, width: 500, height: 700)
         let end = Rect(x: 300, y: 60, width: 800, height: 900)

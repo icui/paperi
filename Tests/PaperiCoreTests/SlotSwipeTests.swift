@@ -113,4 +113,36 @@ struct SlotSwipeTests {
         let decision = swipe.end(at: 0.01)
         #expect(decision == .commit(.right))
     }
+    @Test func holdBeforeReleaseExpiresFlickVelocity() {
+        var swipe = SlotSwipe()
+        swipe.begin(at: 0)
+        _ = swipe.move(dx: -0.04, dy: 0, at: 0.01)
+        #expect(swipe.end(at: 1) == .snapBack)
+    }
+
+    @Test func holdBeforeReleasePreservesDistanceCommit() {
+        var swipe = SlotSwipe()
+        swipe.begin(at: 0)
+        _ = swipe.move(dx: -0.15, dy: 0, at: 0.01)
+        #expect(swipe.end(at: 1) == .commit(.right))
+    }
+
+    @Test func reversalFlickCanCommitOppositeToProgress() {
+        for sign in [-1.0, 1.0] {
+            var swipe = SlotSwipe()
+            swipe.begin(at: 0)
+            _ = swipe.move(dx: -sign * 0.05, dy: 0, at: 0.1)
+            _ = swipe.move(dx: sign * 0.025, dy: 0, at: 0.11)
+            #expect(swipe.end(at: 0.11) == .commit(sign > 0 ? .left : .right))
+        }
+    }
+
+    @Test func ambiguousDiagonalCanResolveHorizontally() {
+        var swipe = SlotSwipe()
+        swipe.begin(at: 0)
+        #expect(swipe.move(dx: -0.016, dy: 0.015, at: 0.01) == nil)
+        #expect(swipe.move(dx: -0.02, dy: 0.001, at: 0.02) == .started)
+        #expect(swipe.move(dx: -0.01, dy: 0, at: 0.03) != nil)
+    }
+
 }
