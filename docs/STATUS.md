@@ -19,7 +19,7 @@ Includes increment 62. Paperi is a diagnostic/prototype application: general use
 | Native-tab lifecycle: switch, detach, re-merge, new member, active/last close | Verified, debug/release (`allowLazyUnvisited: true/false`) | Terminal verified in sustained shared session (`--session`, 12/12 checks) | `allowLazyUnvisited: true` reconciles newly clicked background tabs in place and infers known merged windows without clicking inactive tabs |
 | Stacked-column native reconciliation & slurp/barf | Verified live (`paperi probe-preview-input`) and in unit tests (`ScopedLayoutSession.reconcileTabs`, `NativeTabTopologyTests`) | Not attempted | Preserves column index, row order, width and stack weights across tab switch/detach/merge/growth/close |
 | Popups/transients | App utility panel and sheet | OS, Control Center, cross-display untested | — |
-| Cross-Space container transfer | Verified end-to-end in debug/release (`paperi probe-space-session`, 12/12 checks; `PaperiSpaceProbe --backend mission-control`) | Not attempted | Direct SkyLight compatibility path fails; Mission Control app-grouping (`expose-group-apps = 1`) clusters multiple untabbed windows of one app on crowded Spaces |
+| Cross-Space container transfer | Verified end-to-end in debug/release (`paperi probe-space-session`, 14/14 checks; `PaperiSpaceProbe --backend mission-control`) | Not attempted | Direct SkyLight compatibility path fails; Mission Control app-grouping (`expose-group-apps = 1`) clusters multiple untabbed windows of one app on crowded Spaces |
 | Multi-display & multi-Space coordinator | Verified live across user Spaces (`paperi probe-space-session`) and in unit tests (`DisplaySpaceCoordinatorTests`, including negative-origin secondary monitor and 1-based Space numbering) | Single-display Spaces enumerated live | Physical multi-monitor live hardware not connected on this host ("Displays have separate Spaces" disabled) |
 | Global keyboard routing | Disabled | — | Deprioritized per user direction |
 | Baseline, performance, soak | Not started | — | Release gates |
@@ -29,7 +29,7 @@ Includes increment 62. Paperi is a diagnostic/prototype application: general use
 - Increment 62:
   - Wired lazy native-tab reconciliation (`allowLazyUnvisited: true`), stacked-column `slurp`/`barf`, and post-transfer Space reassignment (`ScopedLayoutSession.reassignSpace`) into `paperi preview-fixture` (`LifecycleProbe.swift`, `Tools/AXFixture/main.swift`).
   - Added `TabSelectionEvidence.lazySelectedControl(for:in:)` (`SelectionAssociations.swift`) so when macOS AppKit returns `AXError.failure (-25200)` for an unvisited background tab's `AXValue` while the active tab button reports `AXValue == true`, active-first admission and lazy topology reconciliation still resolve the active tab without clicking the background tab.
-  - Live `paperi probe-preview-input` (`captures/preview-input-increment62-pass.json`) passes all 12/12 checks (lazy tab merge before visiting the background tab, tab switch A→B→A, tab detach back to 2 columns, width `grow`/`shrink`, stacked-column `slurp`/`barf` with 6 confirmed AX writes each, and full frame restoration on stop). All 122 Swift regressions pass in debug and release.
+  - Live `paperi probe-preview-input` (`captures/preview-input-increment62-pass.json`) passes all 12/12 checks (lazy tab merge before visiting the background tab, tab switch A→B→A, tab detach back to 2 columns, width `grow`/`shrink`, stacked-column `slurp`/`barf` with 6 confirmed AX writes each, and full frame restoration on stop), and `paperi probe-space-session` (`captures/space-session-increment62-pass.json`) passes all 14/14 checks (including `activeFirstTabAdmitted` and `lazySecondTabReconciled` before outbound/return Mission Control Space transfers). All 122 Swift regressions pass in debug and release.
 - Increment 61:
   - Added active-first tab admission (`NativeTabMembership.inspect(_:requireComplete: false)` and `ScopedLayoutSession.admitTabs(_:allowActiveOnly: true)` / `DisplaySpaceCoordinator.admitTabs(_:allowActiveOnly: true)`) and lazy unvisited tab reconciliation (`NativeTabTopology.inspect(_:allowLazyUnvisited: true)` and `DisplaySpaceCoordinator.reconcileTabs`), allowing tabbed windows with unvisited background tabs to be tiled immediately, switching representative in place when a background tab is clicked, and inferring already-managed windows merged into an unvisited tab. All 122 Swift regressions (32 core, 90 platform) pass in debug and release.
 - Increment 60:
@@ -44,40 +44,55 @@ Includes increment 62. Paperi is a diagnostic/prototype application: general use
 
 ### Next
 
-Validate Preview.app native-tab compatibility, exercise stacked-column native-tab reconciliation in a live AppKit fixture probe, and investigate expanding Mission Control application clusters when `expose-group-apps = 1` is enabled for multi-window untabbed apps. Physical/global keyboard routing stays deprioritized; abrupt-exit recovery, OS/cross-display popup recovery, physical multi-monitor validation and baseline/soak measurements remain release gates.
+1. **Real-App Lazy Tab & Preview.app Validation:** Exercise active-first admission (`requireComplete: false`, `allowActiveOnly: true`) and lazy unvisited tab reconciliation (`allowLazyUnvisited: true`) in the sustained Terminal session probe (`paperi probe-terminal-session`) and validate `Preview.app` native-tab and singleton discovery via `nativeTabEvidence` (`membershipCandidates`, `activeTabCandidates`, `singletonCandidates`).
+2. **Mission Control App-Cluster Expansion (`expose-group-apps = 1`):** When `com.apple.dock` `expose-group-apps = 1` is active on a crowded Space, evaluate expanding a multi-window untabbed app's Mission Control cluster before dragging so a single untabbed window can transfer Spaces without pulling same-app siblings.
+3. **Multi-App Scoped Runtime Coordinator:** Generalize `DisplaySpaceCoordinator` from a single `ownerPID` to an allowlisted multi-app session registry while keeping global keyboard shortcuts deprioritized. Abrupt-exit recovery, OS/cross-display popup recovery, physical multi-monitor validation, and baseline/soak measurements remain release gates.
 
 ## Handoff — 2026-11-09
 
-Implementation through increment 60 validates:
-- End-to-end cross-Space 2-tab container transfer, per-Space `ScopedLayoutSession` placement confirmation, and frame restoration (`paperi probe-space-session`, 12/12 checks in debug and release).
-- Sustained shared-session native-tab lifecycle on owned Terminal windows (`paperi probe-terminal-session`, 12/12 checks).
-- Finder native-tab membership learning alongside tab-bar-free singleton detection (`check-finder-documents.rb --new-tab`, 7/7 checks).
-- Stacked-column native-tab reconciliation (`ScopedLayoutSession.reconcileTabs`, `slurpFocused`, `barfFocused`) and multi-display/multi-Space container coordination (`DisplaySpaceCoordinator`).
+Implementation through increment 62 validates:
+- **Active-first native-tab admission & lazy unvisited reconciliation** (`NativeTabMembership.inspect(_:requireComplete: false)`, `TabSelectionEvidence.lazySelectedControl(for:in:)`, `ScopedLayoutSession.admitTabs(_:allowActiveOnly: true)`, `NativeTabTopology.inspect(_:allowLazyUnvisited: true)`, `DisplaySpaceCoordinator.reconcileTabs`): windows with unvisited background tabs (including AppKit's `-25200` `AXValue` on unvisited `AXTabButton`s) are tiled immediately via their active tab, switch representatives in place when a background tab is clicked, and infer already-managed windows merged into an unvisited tab.
+- **Interactive preview with live lazy tab merge/detach and stacked columns** (`paperi preview-fixture` / `paperi probe-preview-input`, 12/12 checks): lazy merge of two preview windows into 1 tab slot before the background tab is visited, tab switch A→B→A, detach back to 2 columns, width `grow`/`shrink` (`⌥⌘L`/`⌥⌘H`), stacked-column `slurp`/`barf` (`⌥⌘I`/`⌥⌘O`), post-transfer Space reassignment (`Next Space`, `⌥⌘N`), and full frame restoration on stop.
+- **End-to-end cross-Space 2-tab container transfer** (`paperi probe-space-session`, 14/14 checks including `activeFirstTabAdmitted` and `lazySecondTabReconciled`; `PaperiSpaceProbe --backend mission-control`): outbound (`Space 1` → `378`) and return (`Space 378` → `1`) Mission Control transfer + `DisplaySpaceCoordinator.transferContainer`, per-Space AX placement confirmation, and frame restoration on stop.
+- **Real-app native-tab & singleton compatibility:**
+  - Sustained shared-session Terminal native-tab lifecycle (`ruby scripts/check-terminal-tabs.rb --session`, 12/12 checks: initial pair admission, representative switch, 3rd-tab growth, active/last tab closure, frame restoration).
+  - Finder native-tab membership learning alongside tab-bar-free singleton detection (`ruby scripts/check-finder-documents.rb --new-tab`, 7/7 checks, skipping non-window `AXScrollArea` desktop roots).
+- **122 Swift regressions** (32 core, 90 platform) passing in both debug and release builds.
 
 ### Resume here
 
-1. Exercise stacked-column native-tab reconciliation in a live AppKit fixture probe (combining `slurp`/`barf` with native tab switch/detach/merge/close).
-2. Validate Preview.app native-tab compatibility using the shared `nativeTabEvidence` and `singletonCandidates` path.
-3. For untabbed multi-window apps on crowded Spaces when `com.apple.dock` `expose-group-apps = 1` is active, evaluate expanding the app cluster in Mission Control before dragging so individual untabbed windows move without pulling same-app siblings.
+1. Wire `requireComplete: false` / `allowLazyUnvisited: true` into `Diagnostics.probeTerminalSession(tag:)` (`Sources/PaperiPlatform/TerminalPlacementProbe.swift`) or an opt-in `--lazy-session` flag in `scripts/check-terminal-tabs.rb` so Terminal `⌘T` tab growth reconciles immediately without re-clicking prior tabs.
+2. Add a disposable `Preview.app` harness (or extend diagnostics) to verify `Preview.app` native tabs and singletons through `nativeTabEvidence` (`membershipCandidates`, `activeTabCandidates`, `singletonCandidates`).
+3. For untabbed multi-window apps on crowded Spaces when `com.apple.dock` `expose-group-apps = 1` is active, evaluate expanding the app cluster in Mission Control (`SpaceTransfer.moveWindowViaMissionControl`) before dragging.
 
 ### Code and validation entry points
 
 | Purpose | Entry point |
 | --- | --- |
-| Shared session, stacked-column reconciliation, slurp/barf and stop guards | [ScopedLayoutSession.swift](../Sources/PaperiPlatform/ScopedLayoutSession.swift), [ScopedLayoutSessionTests.swift](../Tests/PaperiPlatformTests/ScopedLayoutSessionTests.swift), [NativeTabTopologyTests.swift](../Tests/PaperiPlatformTests/NativeTabTopologyTests.swift) |
+| Shared session, stacked-column reconciliation, slurp/barf, Space reassignment and stop guards | [ScopedLayoutSession.swift](../Sources/PaperiPlatform/ScopedLayoutSession.swift), [ScopedLayoutSessionTests.swift](../Tests/PaperiPlatformTests/ScopedLayoutSessionTests.swift), [NativeTabTopologyTests.swift](../Tests/PaperiPlatformTests/NativeTabTopologyTests.swift) |
 | Multi-display and multi-Space session coordinator & live Space transfer | [DisplaySpaceCoordinator.swift](../Sources/PaperiPlatform/DisplaySpaceCoordinator.swift), [SpaceTransfer.swift](../Sources/PaperiPlatform/SpaceTransfer.swift), [DisplaySpaceCoordinatorTests.swift](../Tests/PaperiPlatformTests/DisplaySpaceCoordinatorTests.swift) |
-| External membership learning, singleton inspection and topology reconciliation | [NativeTabMembership.swift](../Sources/PaperiPlatform/NativeTabMembership.swift), [NativeTabTopology.swift](../Sources/PaperiPlatform/NativeTabTopology.swift), [SelectionAssociations.swift](../Sources/PaperiPlatform/SelectionAssociations.swift) |
-| Working sustained AppKit fixture | [NativeTabProbe.swift](../Sources/PaperiPlatform/NativeTabProbe.swift), [check-native-tabs.rb](../scripts/check-native-tabs.rb) |
+| External membership learning (`requireComplete: true/false`), lazy control resolution (`-25200`), singleton inspection and topology reconciliation (`allowLazyUnvisited: true/false`) | [NativeTabMembership.swift](../Sources/PaperiPlatform/NativeTabMembership.swift), [NativeTabTopology.swift](../Sources/PaperiPlatform/NativeTabTopology.swift), [SelectionAssociations.swift](../Sources/PaperiPlatform/SelectionAssociations.swift), [NativeTabMembershipTests.swift](../Tests/PaperiPlatformTests/NativeTabMembershipTests.swift) |
+| Interactive preview & automated preview verification (`paperi preview-fixture`, `paperi probe-preview-input`) | [LifecycleProbe.swift](../Sources/PaperiPlatform/LifecycleProbe.swift), [PreviewCommandInbox.swift](../Sources/PaperiPlatform/PreviewCommandInbox.swift), [Tools/AXFixture/main.swift](../Tools/AXFixture/main.swift) |
+| Working sustained AppKit native-tab fixture | [NativeTabProbe.swift](../Sources/PaperiPlatform/NativeTabProbe.swift), [check-native-tabs.rb](../scripts/check-native-tabs.rb) |
 | Terminal sustained session, placement and resize probes | [TerminalPlacementProbe.swift](../Sources/PaperiPlatform/TerminalPlacementProbe.swift), [check-terminal-tabs.rb](../scripts/check-terminal-tabs.rb) |
 | Finder native-tab and singleton discovery harness | [check-finder-documents.rb](../scripts/check-finder-documents.rb) |
 | Cross-Space transfer probe (`skylight`, `mission-control`, `drag-switch`) | [Tools/SpaceProbe/main.m](../Tools/SpaceProbe/main.m) |
 | Commands, prerequisites and broader validation modes | [README](../README.md), [feasibility protocol](FEASIBILITY.md), [implementation plan](../plan.md) |
 
-### Unresolved items to preserve
+### Key technical notes and remaining limitations for handoff
 
-- Every native member must be visited before complete membership can be learned, including after topology changes. Do not replace this limitation with inferred membership.
-- Intermittent AX reference/role failures and restart rediscovery remain open; the last full ten-mode cycle was 9/10 and has not been repeated. Focused passes do not supersede those failures.
-- Direct SkyLight Space transfer fails on macOS 26.7.2 on this host and the newer bridged entry point is absent; the Mission Control drag/follow path works in the disposable probe, while live session/tab-container transfer transactions across Spaces remain to be wired into the runtime coordinator.
-- Abrupt-exit recovery, broader popup/physical multi-display ownership, global keyboard routing, real baseline/performance measurements and daily-use soak remain release work. Controlled stop/restoration is not crash recovery.
+- **Active-First vs. Strict Native-Tab Modes:**
+  - Strict mode (`NativeTabMembership.inspect(_:requireComplete: true)`, `NativeTabTopology.inspect(_:allowLazyUnvisited: false)`) remains the default for callers that require every tab button to be clicked before admission/reconciliation.
+  - Active-first / lazy mode (`requireComplete: false`, `allowActiveOnly: true`, `allowLazyUnvisited: true`) tiles tabbed windows immediately via their active tab, resolves the active tab button via `TabSelectionEvidence.lazySelectedControl` even when macOS 26.7.2 AppKit returns `AXError.failure (-25200)` on unvisited sibling `AXTabButton`s, swaps the active representative in place when a background tab is clicked, and infers already-managed windows when merged into a single incomplete tab group.
+  - **Remaining edge case:** If multiple already-managed windows are simultaneously hidden and merged into **multiple** incomplete tab groups at the same instant without being clicked, `NativeTabTopology.inspect` withholds inference until a tab is clicked or detached to disambiguate which hidden window joined which group.
+- **Mission Control Cross-Space Transfers (`SpaceTransfer.swift`):**
+  - Direct SkyLight Space transfer (`SLSMoveWindowsToManagedSpace`) fails on macOS 26.7.2 on this host and `SLSSpaceAddWindowsAndRemoveFromSpaces` is absent.
+  - `SpaceTransfer.moveWindowViaMissionControl` transfers windows and native tab groups reliably across user Spaces via the Dock Mission Control AX tree (`mc` / `mc.display` / `mc.windows` / `mc.spaces.list`), re-reading thumbnail centers mid-drag and waiting `0.6s` after `SLSGetActiveSpace` confirmation before destination-Space AX writes.
+  - **Remaining limitation:** When `com.apple.dock` `expose-group-apps = 1` ("Group windows by application") is active on a crowded Space, Mission Control groups multiple *untabbed* windows of the same application into a cluster; native tab containers move as a single unit without issue.
+- **Multi-Display & Separate Spaces:**
+  - `DisplaySpaceCoordinator` models per-display canvases (including negative-origin secondary monitors), 1-based user-Space numbering across displays, and atomic cross-Space/cross-display container transfers (`transferContainer`). Physical multi-monitor hardware with "Displays have separate Spaces" enabled has not yet been tested live on this single-display host.
+- **Broader Release Gates:**
+  - Intermittent AX reference/role failures and restart rediscovery remain open (last full 10-mode integrated cycle passed 9/10).
+  - Global keyboard routing remains disabled/deprioritized per user direction. Abrupt-exit crash recovery, OS/Control Center popup recovery, baseline/performance benchmarks, and daily-use soak remain release gates.
 
 Commit validated milestones autonomously per the [commit policy](../plan.md#commit-checkpoints). Keep raw captures/scratch out of commits and preserve unrelated changes. Historical increments in [HISTORY.md](HISTORY.md) describe evidence at their original dates; this handoff and the current checkpoint are the resume instructions.

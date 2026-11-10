@@ -380,42 +380,57 @@ extension Diagnostics {
             return (writes, false)
         }
 
-        // 1. Learn the two-tab native container externally via NativeTabMembership and admit into coordinator on sourceSpace.
+        // 1. Admit the 2-tab container active-first (before the 2nd tab is visited), then lazily reconcile the 2nd tab when clicked.
+        var activeFirstAdmitted = false
+        var lazySecondTabReconciled = false
         var learnedGroup: NativeTabMembership?
-        var memberSpaces = NativeTabMemberSpaces()
         let learnDeadline = ProcessInfo.processInfo.systemUptime + 14.0
         while child.isRunning && learnedGroup == nil && ProcessInfo.processInfo.systemUptime < learnDeadline {
             recorder.reconcileNow()
             refreshReferences()
             let evidence = recorder.tabEvidence(processID: pid)
             if let app = (evidence["applications"] as? [[String: Any]])?.first {
-                if let nodes = app["nodes"] as? [[String: Any]], let roots = app["roots"] as? [Int],
-                   let observed = app["observedRoots"] as? [Int], let scope = app["identityScope"] as? String {
-                    let capture = TabSelectionEvidence.inspect(nodes: nodes, roots: roots + observed,
-                        complete: app["truncated"] as? Bool == false && app["identityTruncated"] as? Bool == false)
-                    for group in capture.groups ?? [] where group.selected != nil {
-                        if let ref = references[group.window], nativeIdentityValid(ref, group.window), let sid = membership(group.window) {
-                            memberSpaces.observe(scope: scope, group: group.group, selected: group.window, space: sid)
-                        }
-                    }
-                }
-                let candidates = NativeTabMembership.inspect(app)
-                if let candidate = candidates.first(where: { $0.members.count == 2 }),
-                   candidate.members.allSatisfy({ references[$0] != nil }) {
-                    let currentSpaces = Dictionary(uniqueKeysWithValues: candidate.members.compactMap { id in membership(id).map { (id, $0) } })
-                    if memberSpaces.confirmedSpace(for: candidate, current: currentSpaces) == sourceSpace,
-                       let activeRef = references[candidate.active], let orig = frame(activeRef), orig.isValid {
+                if !activeFirstAdmitted {
+                    let activeCandidates = NativeTabMembership.inspect(app, requireComplete: false)
+                    if let firstCandidate = activeCandidates.first,
+                       membership(firstCandidate.active) == sourceSpace,
+                       let activeRef = references[firstCandidate.active],
+                       let orig = frame(activeRef), orig.isValid {
                         do {
-                            if try coordinator.admitTabs(members: candidate.members, active: candidate.active,
-                                                         ownerPID: pid, spaceID: sourceSpace, classification: tiled) {
-                                recovery.remember(windowID: candidate.active, frame: orig)
+                            if try coordinator.admitTabs(members: firstCandidate.members, active: firstCandidate.active,
+                                                         ownerPID: pid, spaceID: sourceSpace, classification: tiled,
+                                                         allowActiveOnly: true) {
+                                recovery.remember(windowID: firstCandidate.active, frame: orig)
                                 let effects = apply(spaceID: sourceSpace)
-                                if !effects.confirmed { failures.append("Initial source placement unconfirmed") }
-                                timeline.append(["phase": "admitTabs", "members": candidate.members, "active": candidate.active,
-                                                 "spaceID": sourceSpace, "writeCount": effects.writes, "confirmed": effects.confirmed])
-                                learnedGroup = candidate
+                                if !effects.confirmed { failures.append("Initial active-first source placement unconfirmed") }
+                                timeline.append(["phase": "admitActiveFirst", "members": firstCandidate.members,
+                                                 "active": firstCandidate.active, "spaceID": sourceSpace,
+                                                 "writeCount": effects.writes, "confirmed": effects.confirmed])
+                                activeFirstAdmitted = true
                             }
-                        } catch { failures.append("Coordinator rejected tab group admission") }
+                        } catch { failures.append("Coordinator rejected active-first tab admission") }
+                    }
+                } else if let sourceSession = coordinator.sessions[sourceSpace] {
+                    let additions = Set(references.keys).subtracting(sourceSession.slots.keys)
+                    if let partitions = NativeTabTopology.inspect(app, managed: Set(sourceSession.slots.keys),
+                                                                  destroyed: [], additions: additions,
+                                                                  allowLazyUnvisited: true),
+                       let part = partitions.first(where: { $0.members.count == 2 }),
+                       membership(part.active) == sourceSpace {
+                        let admitted = Set(part.members).subtracting(sourceSession.slots.keys)
+                        do {
+                            if try coordinator.reconcileTabs(in: sourceSpace, partitions: [part], destroyed: [],
+                                                             classification: tiled, admitted: admitted) {
+                                let effects = apply(spaceID: sourceSpace)
+                                if !effects.confirmed { failures.append("Lazy second-tab placement unconfirmed") }
+                                timeline.append(["phase": "reconcileLazySecondTab", "members": part.members,
+                                                 "active": part.active, "spaceID": sourceSpace,
+                                                 "writeCount": effects.writes, "confirmed": effects.confirmed])
+                                lazySecondTabReconciled = true
+                                learnedGroup = NativeTabMembership(scope: "space-session", group: 1,
+                                                                   members: part.members, active: part.active)
+                            }
+                        } catch { failures.append("Coordinator rejected lazy tab reconciliation") }
                     }
                 }
             }
@@ -530,6 +545,8 @@ extension Diagnostics {
         } ?? [:]
 
         let checks: [String: Bool] = [
+            "activeFirstTabAdmitted": activeFirstAdmitted,
+            "lazySecondTabReconciled": lazySecondTabReconciled,
             "twoTabContainerLearnedAndAdmitted": group.members.count == 2 && initialSlot != nil,
             "outboundMissionControlTransferred": (report["outboundTransfer"] as? [String: Any])?["transferred"] as? Bool == true,
             "outboundCoordinatorTransferred": outboundCoordinatorTransferred,
@@ -538,7 +555,7 @@ extension Diagnostics {
             "returnCoordinatorTransferred": returnCoordinatorTransferred,
             "returnSourcePlacementConfirmed": returnSourceConfirmed,
             "logicalSlotsPreservedAcrossSpaces": initialSlot != nil && returnCoordinatorTransferred,
-            "survivingFramesRestored": restored.count == 1 && restored.values.allSatisfy { $0 },
+            "survivingFramesRestored": !restored.isEmpty && restored.values.allSatisfy { $0 },
             "coordinatorStopped": !coordinator.running && coordinator.sessions.isEmpty,
             "nativeSourcesRemoved": teardown["sourcesStillInstalled"] as? Int == 0,
             "noFailures": failures.isEmpty

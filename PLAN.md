@@ -225,8 +225,12 @@ unverified behavior works. Pushing and publishing remain separate actions.
 ### Agreed implementation order — 2026-11-08
 
 Build a limited ordinary-window path first, retaining logical tab-container slots
-from the beginning. This refines the execution order below; it does not remove
-native tabs or any other final acceptance requirement.
+from the beginning. Per user direction on 2026-11-09, prioritize a working version
+with proper native macOS tabs (including active-first admission without clicking
+inactive tabs and lazy unvisited reconciliation), cross-Space transfers, and
+multi-display/multi-Space support rather than global keyboard shortcuts. See
+[docs/STATUS.md](docs/STATUS.md) for the current capability matrix and handoff
+instructions through increment 62.
 
 1. Connect native discovery/events → lifecycle reducer → layout → confirmed AX
    effects, first on disposable windows. Creation/closure, focus, commands and
