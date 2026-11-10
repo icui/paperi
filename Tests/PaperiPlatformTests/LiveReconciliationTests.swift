@@ -48,49 +48,11 @@ import PaperiCore
         #expect(coordinator.sessions[9] != nil)
     }
 
-    @Test func hiddenColumnsAvoidNeighbouringDisplays() {
-        let main = CGRect(x: 0, y: 0, width: 1440, height: 900)
-        let left = CGRect(x: -1920, y: 0, width: 1920, height: 1080)
-        let hidden = Rect(x: canvas.x + 1 - 600, y: 33, width: 600, height: 851)
-        // No neighbour: keep the PaperWM sliver.
-        #expect(LiveReconciliation.park(hidden, display: main, otherDisplays: []) == hidden)
-        // A display on the left would capture the window: slide it right until
-        // just over half stays on its own display, under the visible columns.
-        let parked = LiveReconciliation.park(hidden, display: main, otherDisplays: [left])
-        #expect(parked == Rect(x: -300 + 16, y: 33, width: 600, height: 851))
-        // Visible columns are never moved.
-        let visible = Rect(x: 100, y: 33, width: 600, height: 851)
-        #expect(LiveReconciliation.park(visible, display: main, otherDisplays: [left]) == visible)
-    }
-
-    @Test func peeksMostlyOnANeighbourStayMostlyOnTheirOwnDisplay() {
-        // The live layout: built-in display with an external one on its left.
-        let builtIn = CGRect(x: 0, y: 0, width: 1440, height: 932)
-        let external = CGRect(x: -1280, y: 0, width: 1280, height: 720)
-        // External strip: focused column fills it, the next column lies past
-        // its right edge, i.e. over the built-in display.
-        let hiddenRight = Rect(x: -9, y: 39, width: 1248, height: 673)
-        let slid = LiveReconciliation.park(hiddenRight, display: external, otherDisplays: [builtIn])
-        #expect(slid == Rect(x: -624 - 16, y: 39, width: 1248, height: 673))
-        // Built-in strip: a 160 pt peek whose rest lies over the external display.
-        let peekLeft = Rect(x: -1248, y: 38, width: 1408, height: 886)
-        #expect(LiveReconciliation.park(peekLeft, display: builtIn, otherDisplays: [external]).x == -704 + 16)
-        // Mostly on its own display already: unchanged.
-        let mostlyOwn = Rect(x: -200, y: 38, width: 1000, height: 886)
-        #expect(LiveReconciliation.park(mostlyOwn, display: builtIn, otherDisplays: [external]) == mostlyOwn)
-        // No neighbour on that side: unchanged.
-        let right = CGRect(x: 1440, y: 0, width: 1280, height: 720)
-        #expect(LiveReconciliation.park(peekLeft, display: builtIn, otherDisplays: [right]) == peekLeft)
-    }
-
-    @Test func capturedSliversHideBehindTheFocusedWindow() {
-        let builtIn = CGRect(x: 0, y: 0, width: 1440, height: 932)
-        let external = CGRect(x: -1280, y: 0, width: 1280, height: 800)
-        let focused = Rect(x: -1272, y: 39, width: 1248, height: 753)
-        let hiddenRight = Rect(x: -9, y: 39, width: 1324, height: 753)
-        #expect(LiveReconciliation.park(hiddenRight, display: external, otherDisplays: [builtIn], cover: focused) == focused)
-        // A sliver with no neighbour on its side keeps its place.
-        let hiddenLeft = Rect(x: -1272 + 1 - 1324, y: 39, width: 1324, height: 753)
-        #expect(LiveReconciliation.park(hiddenLeft, display: external, otherDisplays: [builtIn], cover: focused) == hiddenLeft)
+    @Test func fitKeepsAWindowInsideTheCanvas() {
+        let canvas = Rect(x: 115, y: -761, width: 1264, height: 753)
+        #expect(LiveReconciliation.fit(Rect(x: -2512, y: 39, width: 1408, height: 886), into: canvas)
+                == Rect(x: 115, y: -761, width: 1264, height: 753))
+        let inside = Rect(x: 200, y: -700, width: 600, height: 500)
+        #expect(LiveReconciliation.fit(inside, into: canvas) == inside)
     }
 }

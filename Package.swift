@@ -11,8 +11,6 @@ let package = Package(
         .target(name: "PaperiPlatform", dependencies: ["PaperiCore", "PaperiBridge"]),
         .executableTarget(name: "Paperi", dependencies: ["PaperiCore", "PaperiPlatform"]),
         .executableTarget(name: "PaperiAXFixture", path: "Tools/AXFixture"),
-        .executableTarget(name: "PaperiSpaceProbe", path: "Tools/SpaceProbe",
-                          linkerSettings: [.linkedFramework("AppKit")]),
         .testTarget(name: "PaperiCoreTests", dependencies: ["PaperiCore"]),
         .testTarget(name: "PaperiPlatformTests", dependencies: ["PaperiPlatform"])
     ],

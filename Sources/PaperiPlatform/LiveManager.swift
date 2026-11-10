@@ -63,9 +63,6 @@ import PaperiCore
     /// Last off-slot frame acted on per window, so an app that clamps its
     /// position is rewritten once rather than on every refresh.
     private var displaced: [UInt32: Rect] = [:]
-    /// Windows currently hidden behind the focused window because their sliver
-    /// would land on a neighbouring display; their real size is not adopted.
-    private var hiddenBehind: Set<UInt32> = []
     private var refreshScheduled = false
     /// Apps whose AX requests timed out are skipped briefly so one hung app
     /// cannot stall management of every other app.
@@ -451,6 +448,9 @@ import PaperiCore
     /// topology → admissions → focus → observed resizes → effects.
     public func refresh() {
         guard running, !busy else { return }
+        // Side-by-side displays are unsupported (the app pauses moments later);
+        // no pass may run in between and push a window onto the other display.
+        guard DisplayArrangement.sideBySide(DisplayArrangement.current()).isEmpty else { return }
         busy = true; defer { busy = false }
         let started = ProcessInfo.processInfo.systemUptime
         // While the left button is held (moving, resizing, or just a click in
@@ -510,10 +510,19 @@ import PaperiCore
         for (wid, row) in byID {
             guard let current = coordinator.spaceForWindow[wid], let space = row.spaceID, space != current,
                   isActiveRepresentative(wid), coordinator.sessions[space] != nil else { continue }
+            let fromDisplay = coordinator.display(forSpace: current)?.displayUUID
             if (try? coordinator.transferContainer(containing: wid, to: space, classification: Self.tiled)) != nil {
                 forceApply = true
                 followed.append(wid)
                 log("container of \(wid) followed to Space \(space)")
+                // Restoring the pre-Paperi frame would pull the window back to
+                // its old display: remember where it landed instead.
+                if let display = coordinator.display(forSpace: space), display.displayUUID != fromDisplay,
+                   let frame = row.frame, let members = coordinator.session(containing: wid)?.members(of: wid) {
+                    let landed = LiveReconciliation.fit(frame, into: display.canvas)
+                    for member in members { if let entry = journal[member] { journal[member] = (entry.pid, landed) } }
+                    persistJournal()
+                }
             }
         }
         // Only a single moved container is focused; several at once (e.g. a
@@ -630,8 +639,7 @@ import PaperiCore
             guard let session = coordinator.sessions[space],
                   let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { continue }
             for placement in placements {
-                guard !hiddenBehind.contains(placement.windowID),
-                      let exp = expected[placement.windowID], now - exp.at > 0.6,
+                guard let exp = expected[placement.windowID], now - exp.at > 0.6,
                       let frame = byID[placement.windowID]?.frame, frame.isValid,
                       abs(frame.width - exp.frame.width) > 2, let pid = pidForWindow[placement.windowID] else { continue }
                 if mouseDown { continue }
@@ -737,7 +745,7 @@ import PaperiCore
         }
         for wid in gone {
             references.removeValue(forKey: wid); pidForWindow.removeValue(forKey: wid)
-            expected.removeValue(forKey: wid); preferredWidth.removeValue(forKey: wid); hiddenBehind.remove(wid)
+            expected.removeValue(forKey: wid); preferredWidth.removeValue(forKey: wid)
             if journal.removeValue(forKey: wid) != nil { persistJournal() }
         }
         log("removed destroyed members \(gone.sorted())")
@@ -752,16 +760,6 @@ import PaperiCore
 
     // MARK: effects
 
-    private func displayBounds() -> [String: CGRect] {
-        var result: [String: CGRect] = [:]
-        for screen in NSScreen.screens {
-            let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
-            let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? "Main"
-            result[uuid] = CGDisplayBounds(id)
-        }
-        return result
-    }
-
     private var applied: [UInt64: [Placement]] = [:]
 
     private func apply(space: UInt64, byID: [UInt32: Survey]) {
@@ -770,13 +768,8 @@ import PaperiCore
         let forced = forceApply || ProcessInfo.processInfo.systemUptime < forceUntil
         // Unchanged layout: skip writes (step 7b clears this for moved windows).
         if !forced, applied[space] == placements { return }
-        let bounds = displayBounds()
-        let display = coordinator.display(forSpace: space)
-        let own = display.flatMap { bounds[$0.displayUUID] } ?? CGDisplayBounds(CGMainDisplayID())
-        let others = bounds.filter { $0.key != display?.displayUUID }.map(\.value)
         var allConfirmed = true
         var unresponsive: Set<pid_t> = []
-        let cover = placements.first { $0.slotID == session.state.layout.focused }?.frame
         for placement in placements {
             let wid = placement.windowID
             guard let element = references[wid] else { allConfirmed = false; continue }
@@ -794,9 +787,9 @@ import PaperiCore
                 allConfirmed = false
                 guard let pid = pidForWindow[wid], !unresponsive.contains(pid), Self.windowSpace(wid) == space else { continue }
             }
-            let target = LiveReconciliation.park(placement.frame, display: own, otherDisplays: others,
-                                                 cover: placement.slotID == session.state.layout.focused ? nil : cover)
-            if target != placement.frame && target == cover { hiddenBehind.insert(wid) } else { hiddenBehind.remove(wid) }
+            // Displays are stacked (see DisplayArrangement), so a column past a
+            // side edge never overlaps another display: the frame is used as is.
+            let target = placement.frame
             if let frame = row?.frame, matches(frame, target) {
                 expected[wid] = (target, ProcessInfo.processInfo.systemUptime); displaced.removeValue(forKey: wid); continue
             }

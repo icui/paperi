@@ -108,6 +108,12 @@ import PaperiCore
         return min(canvas.width, max(min(canvas.width, 100), preferred))
     }
 
+    /// Every member of the container holding `windowID` (native tabs included).
+    func members(of windowID: UInt32) -> [UInt32]? {
+        guard let slotID = slots[windowID] else { return nil }
+        return slots.filter { $0.value == slotID }.map(\.key).sorted()
+    }
+
     @discardableResult func insertSlot(_ slot: Slot, width: Double, spaceID: UInt64,
                                        classification: Classification, ticket: UUID) throws -> Bool {
         guard accepts(ticket), spaceID > 0, self.spaceID == nil || self.spaceID == spaceID,

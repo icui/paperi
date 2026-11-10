@@ -51,6 +51,10 @@ See the pinned [README caveat](https://github.com/asmvik/yabai/blob/dd845723416f
 
 ## Implemented vertical slice: own-window Space round trip
 
+> Removed 2026-11-10: Paperi no longer moves windows between Spaces (users do it
+> in Mission Control and live mode follows), so `PaperiSpaceProbe` was deleted.
+> The sections below are kept as the record of what was measured.
+
 `PaperiSpaceProbe` is a separate executable, not linked into the production app.
 It creates one disposable window, reads its exact membership, selects another
 existing user Space on the same display, submits a move, polls for destination

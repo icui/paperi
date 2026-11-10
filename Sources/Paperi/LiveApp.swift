@@ -21,9 +21,8 @@ import PaperiPlatform
     /// not paused for that reason. Cleared (and management resumed) once the
     /// displays are stacked again.
     private var arrangementPause: String?
-    /// Arrangement for which the user resumed anyway; not paused again until
-    /// the arrangement changes.
-    private var arrangementOverride: String?
+    /// Whether management was running when the arrangement paused it.
+    private var resumeWhenStacked = true
     private var arrangementCheck: DispatchWorkItem?
     private var warning: NSPopover?
 
@@ -136,13 +135,9 @@ import PaperiPlatform
 
     // MARK: display arrangement
 
-    private static func screens() -> [DisplayArrangement.Display] {
-        NSScreen.screens.map { DisplayArrangement.Display(name: $0.localizedName, frame: $0.frame) }
-    }
-
     /// A gentle explanation when two displays sit side by side, else nil.
     private static func arrangementProblem() -> String? {
-        guard let (left, right) = DisplayArrangement.sideBySide(screens()).first else { return nil }
+        guard let (left, right) = DisplayArrangement.sideBySide(DisplayArrangement.current()).first else { return nil }
         return "“\(left.name)” is to the left of “\(right.name)”. Windows that Paperi scrolls past "
             + "that edge would jump to the other display. Place your displays above or below "
             + "each other in Displays settings and Paperi resumes on its own."
@@ -157,22 +152,20 @@ import PaperiPlatform
     }
 
     private func checkArrangement() {
-        let screens = Self.screens()
         guard let problem = Self.arrangementProblem() else {
-            arrangementOverride = nil
             if arrangementPause != nil {
                 arrangementPause = nil
                 warning?.close()
-                manager.resume()
-                log("displays are stacked again: resumed")
+                if resumeWhenStacked { manager.resume(); log("displays are stacked again: resumed") }
             }
             updateTitle()
             return
         }
-        // Already paused (by the user or for this reason), or resumed anyway.
-        guard arrangementPause == nil, !manager.paused,
-              arrangementOverride != DisplayArrangement.signature(screens) else { return }
-        manager.pause()
+        // Already paused for this reason. A user pause is kept, but resuming
+        // is refused while the displays stay side by side.
+        guard arrangementPause == nil else { return }
+        resumeWhenStacked = !manager.paused
+        if !manager.paused { manager.pause() }
         arrangementPause = problem
         log("displays side by side: paused")
         updateTitle()
@@ -223,11 +216,9 @@ import PaperiPlatform
 
     @discardableResult private func dispatch(_ command: [String], source: String) -> [String: Any] {
         var reply: [String: Any]
-        if command.first == "resume", arrangementPause != nil {
-            // Resumed by hand: respect it for this arrangement.
-            arrangementPause = nil
-            arrangementOverride = DisplayArrangement.signature(Self.screens())
-            warning?.close()
+        if command.first == "resume", let problem = arrangementPause {
+            showWarning(problem)
+            return ["ok": false, "paused": true, "error": "displays are side by side; arrange them above or below each other"]
         }
         switch command.first {
         case "reload": reply = reload()
@@ -308,7 +299,7 @@ import PaperiPlatform
             add(menu, "Open Displays Settings…", #selector(openDisplaySettings))
         }
         menu.addItem(.separator())
-        add(menu, manager.paused ? (arrangementPause != nil ? "Resume Anyway" : "Resume") : "Pause", #selector(togglePause))
+        if arrangementPause == nil { add(menu, manager.paused ? "Resume" : "Pause", #selector(togglePause)) }
         add(menu, "Retile", #selector(retile))
         add(menu, "Reload Config", #selector(reloadConfig))
         add(menu, "Open Config…", #selector(openConfig))

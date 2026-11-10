@@ -1,4 +1,4 @@
-import CoreGraphics
+import AppKit
 
 /// Paperi scrolls windows sideways off a display's left and right edges. A
 /// window past an edge that touches another display would lie mostly on that
@@ -25,9 +25,8 @@ public enum DisplayArrangement {
         return pairs
     }
 
-    /// Stable description of the arrangement, to notice when it changes.
-    public static func signature(_ displays: [Display]) -> String {
-        displays.map { "\($0.name)@\(Int($0.frame.minX)),\(Int($0.frame.minY)),\(Int($0.frame.width))x\(Int($0.frame.height))" }
-            .sorted().joined(separator: ";")
+    /// Connected displays, in AppKit coordinates.
+    @MainActor public static func current() -> [Display] {
+        NSScreen.screens.map { Display(name: $0.localizedName, frame: $0.frame) }
     }
 }
