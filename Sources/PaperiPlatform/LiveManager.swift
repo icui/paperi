@@ -994,6 +994,10 @@ import PaperiCore
     private static let swipeEdgeResistance = 40.0
 
     private var motionActive: Bool { motionTimer != nil || swipe != nil }
+    /// A focus scroll or a released swipe's landing/snap-back is on screen.
+    /// Gesture input is ignored until it finishes; live finger tracking is not
+    /// an animation.
+    private var gestureBlockedByAnimation: Bool { motionTimer != nil || swipe?.released != nil }
 
     private func cancelSwipe() {
         swipeGuard?.invalidate(); swipeGuard = nil
@@ -1057,9 +1061,10 @@ import PaperiCore
         }
         switch event {
         case .begin(let time):
-            // Do not tear down a visible landing for a new contact sequence.
-            // Its capture could otherwise contain the previous overlay too.
-            guard swipe?.released == nil else { return }
+            // Ignore the whole contact sequence if it starts during an
+            // animation: interrupting a landing could capture the previous
+            // overlay, and a focus scroll must not be cancelled by a touch.
+            guard !gestureBlockedByAnimation else { return }
             // Capture while determining the axis, but keep the overlay hidden
             // until horizontal movement locks. This overlaps input with capture.
             _ = beginSwipe(pendingLock: true)
@@ -1111,6 +1116,9 @@ import PaperiCore
             }
 
         case .cancel:
+            // Only a sequence we are tracking may cancel; an ignored one must
+            // not tear down a running landing.
+            guard slotSwipe != nil else { return }
             cancelSwipe()
             slotSwipe?.cancel()
             slotSwipe = nil
@@ -1120,11 +1128,12 @@ import PaperiCore
     /// Captures the strip of the focused window's Space and shows it frozen
     /// in place. Updates and a release may arrive before the capture finishes.
     @discardableResult func beginSwipe(isSimulation: Bool = false, pendingLock: Bool = false) -> [String: Any] {
-        cancelMotion(); motionFrames.removeAll()
         func fail(_ reason: String) -> [String: Any] {
             swipeMetrics = ["state": "refused", "reason": reason]
             return ["ok": false, "error": reason]
         }
+        guard !gestureBlockedByAnimation else { return ["ok": false, "error": "animation in progress"] }
+        cancelMotion(); motionFrames.removeAll()
         guard running, AXIsProcessTrusted(), NSEvent.pressedMouseButtons == 0, drag == nil else { return fail("mouse interaction") }
         guard DisplayArrangement.currentProblem() == nil else { return fail("display arrangement") }
         if !isSimulation {
@@ -1141,10 +1150,22 @@ import PaperiCore
         }
         var ends: [Direction: [UInt32: Rect]] = [:], neighbours: [Direction: UInt32] = [:]
         for direction in [Direction.left, .right] {
+            // A swipe moves the strip: target the nearest column in that
+            // direction that needs scrolling to reveal. If every column that
+            // way is already fully visible, fall back to the adjacent one.
             var layout = session.state.layout
-            guard let id = layout.neighbor(direction), let loc = layout.index(of: id) else { continue }
-            layout.focused = id
+            var candidate = layout
+            var firstStep: Layout?
+            var scrolled = false
+            while let id = candidate.neighbor(direction) {
+                candidate.focused = id
+                if firstStep == nil { firstStep = candidate }
+                if (try? candidate.reveal(in: session.canvas, gap: options.gap)) == true { scrolled = true; break }
+            }
+            guard let chosen = scrolled ? candidate : firstStep else { continue }
+            layout = chosen
             _ = try? layout.reveal(in: session.canvas, gap: options.gap)
+            guard let id = layout.focused, let loc = layout.index(of: id) else { continue }
             guard let placements = try? layout.placements(in: session.canvas, gap: options.gap) else { continue }
             let targets = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
             // Images keep their size; a size change cannot be shown by sliding.
