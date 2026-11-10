@@ -43,12 +43,12 @@ Quit Hammerspoon (or stop PaperWM) first: a combination already registered by an
   "float": [{"app": "com.apple.finder", "titleContains": "Copy"}],
   "tile": [{"app": "com.apple.systempreferences"}],
   "singleton": ["com.google.Chrome"],
-  "include": null, "gap": 8, "outerGap": 8,
+  "include": null, "gap": 8, "outerGap": 8, "swapHighlight": "#0A84FF4D",
   "hotkeys": { "ctrl-alt-l": "width + 0.2", "alt-cmd-1": null }
 }
 ```
 
-`exclude` skips apps, `float` keeps matching windows out of the strip, `tile` overrides the no-fullscreen-button rule, `singleton` (or `--singleton-app`) treats an app's in-content tab bar as a plain window, `include` (or `--app`) limits management to listed apps, and `hotkeys` maps key specs (`ctrl`/`alt`/`shift`/`cmd` plus a letter, digit, arrow, `f1`–`f20`, `space`, `return`, `tab`, `escape`, punctuation names) to `paperi msg` commands, merged over the defaults; `null` removes a default. Invalid entries are reported at startup and in `status` rather than ignored. Reload with the menu or `paperi msg reload`. System UI agents are always excluded. Ctrl-C or `paperi msg stop` restores admission frames; after a crash, `paperi restore` uses the persisted journal. The responsible terminal/editor (or `dist/Paperi.app`) needs Accessibility access. See [docs/STATUS.md](docs/STATUS.md) for verified scope and limits.
+`exclude` skips apps, `float` keeps matching windows out of the strip, `tile` overrides the no-fullscreen-button rule, `singleton` (or `--singleton-app`) treats an app's in-content tab bar as a plain window, `include` (or `--app`) limits management to listed apps, and `hotkeys` maps key specs (`ctrl`/`alt`/`shift`/`cmd` plus a letter, digit, arrow, `f1`–`f20`, `space`, `return`, `tab`, `escape`, punctuation names) to `paperi msg` commands, merged over the defaults; `null` removes a default. `swapHighlight` (`#RRGGBB` or `#RRGGBBAA`) colours the mask over the neighbouring column a dragged window will swap with when released. Invalid entries are reported at startup and in `status` rather than ignored. Reload with the menu or `paperi msg reload`. System UI agents are always excluded. Ctrl-C or `paperi msg stop` restores admission frames; after a crash, `paperi restore` uses the persisted journal. The responsible terminal/editor (or `dist/Paperi.app`) needs Accessibility access. See [docs/STATUS.md](docs/STATUS.md) for verified scope and limits.
 
 ## Disposable preview
 

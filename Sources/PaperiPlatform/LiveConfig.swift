@@ -1,4 +1,5 @@
 import Foundation
+import PaperiCore
 
 /// Live-mode configuration, read from
 /// `~/Library/Application Support/Paperi/config.json` when present.
@@ -32,6 +33,10 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     /// Key spec → command (as accepted by `paperi msg`), merged over the
     /// built-in PaperWM bindings; `null` removes a default binding.
     public var hotkeys: [String: String?]
+    /// Mask over the column a dragged window would swap with, `#RRGGBB[AA]`.
+    public var swapHighlight: String?
+    public static let defaultSwapHighlight = "#0A84FF4D"
+    public var swapHighlightColor: HexColor { swapHighlight.flatMap(HexColor.init) ?? HexColor(Self.defaultSwapHighlight)! }
 
     public init(include: [String]? = nil, exclude: [String] = [], singleton: [String] = [],
                 float: [FloatRule] = [], tile: [FloatRule] = [], gap: Double? = nil, outerGap: Double? = nil) {
@@ -40,7 +45,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         self.hotkeys = [:]
     }
 
-    enum CodingKeys: String, CodingKey { case include, exclude, singleton, float, tile, gap, outerGap, hotkeys }
+    enum CodingKeys: String, CodingKey { case include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         include = try c.decodeIfPresent([String].self, forKey: .include)
@@ -51,6 +56,11 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         gap = try c.decodeIfPresent(Double.self, forKey: .gap)
         outerGap = try c.decodeIfPresent(Double.self, forKey: .outerGap)
         hotkeys = try c.decodeIfPresent([String: String?].self, forKey: .hotkeys) ?? [:]
+        swapHighlight = try c.decodeIfPresent(String.self, forKey: .swapHighlight)
+        if let swapHighlight, HexColor(swapHighlight) == nil {
+            throw DecodingError.dataCorruptedError(forKey: .swapHighlight, in: c,
+                debugDescription: "expected #RRGGBB or #RRGGBBAA, got \(swapHighlight)")
+        }
     }
 
     /// System UI and agents whose windows must never be tiled, plus Paperi.
@@ -71,6 +81,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "singleton": [],
       "gap": 8,
       "outerGap": 8,
+      "swapHighlight": "#0A84FF4D",
       "hotkeys": {
         "alt-cmd-j": "focus left",
         "alt-cmd-k": "focus right"

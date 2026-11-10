@@ -148,6 +148,42 @@ public struct Layout: Codable, Equatable, Sendable {
         else if left > highest { offset = highest - preceding }
         return offset != previous
     }
+    /// Drop targets while dragging the column at `column`: the on-canvas part of
+    /// each horizontal neighbour (full canvas height), widened to at least
+    /// `reach` at a canvas edge so a neighbour showing only a sliver can still
+    /// be hovered. `step` is -1 for the left neighbour and +1 for the right.
+    public func swapTargets(column: Int, in canvas: Rect, gap: Double = 8, margin: Double = 1,
+                            edgeMargin: Double? = nil, reach: Double = 24) throws -> [SwapTarget] {
+        guard columns.indices.contains(column), canvas.isValid else { throw LayoutError.invalidGeometry }
+        let maximum = Self.maxColumnWidth(in: canvas, edgeMargin: edgeMargin ?? gap)
+        let right = canvas.x + canvas.width
+        var x = canvas.x + offset
+        var spans: [(Double, Double)] = []
+        for other in columns {
+            let width = min(other.width, maximum)
+            let physicalX = max(canvas.x + margin - width, min(x, right - margin))
+            spans.append((max(physicalX, canvas.x), min(physicalX + width, right)))
+            x += width + gap
+        }
+        var result: [SwapTarget] = []
+        for step in [-1, 1] where columns.indices.contains(column + step) {
+            var (lo, hi) = spans[column + step]
+            if lo <= canvas.x { hi = max(hi, canvas.x + reach) }
+            if hi >= right { lo = min(lo, right - reach) }
+            guard hi > lo else { continue }
+            result.append(SwapTarget(step: step, column: column + step,
+                                     region: Rect(x: lo, y: canvas.y, width: hi - lo, height: canvas.height)))
+        }
+        return result
+    }
+    /// Moves the column containing `id` to `index` (clamped); returns whether the order changed.
+    @discardableResult public mutating func moveColumn(containing id: String, to index: Int) -> Bool {
+        guard let from = self.index(of: id)?.column else { return false }
+        let to = max(0, min(index, columns.count - 1))
+        guard to != from else { return false }
+        columns.insert(columns.remove(at: from), at: to)
+        return true
+    }
     public func placements(in canvas: Rect, gap: Double = 8, margin: Double = 1,
                            edgeMargin: Double? = nil) throws -> [Placement] {
         try validate()
@@ -172,6 +208,16 @@ public struct Layout: Codable, Equatable, Sendable {
             x += width + gap
         }
         return result
+    }
+}
+
+public struct SwapTarget: Equatable, Sendable {
+    public var step: Int
+    public var column: Int
+    /// Screen area (top-left origin) that arms the swap and is highlighted.
+    public var region: Rect
+    public func contains(x: Double, y: Double) -> Bool {
+        x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height
     }
 }
 

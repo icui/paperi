@@ -54,6 +54,42 @@ struct CoreTests {
         #expect(throws: (any Error).self) { try layout.resizeWidth(by: .nan, in: Rect(x: 0, y: 0, width: 1000, height: 800)) }
         checkEqual(layout, before)
     }
+    // Columns 300 wide, gap 8, offset 0 on a canvas at x 0: centres 150, 458, 766.
+    func dragStrip() -> Layout {
+        Layout(columns: (1...3).map { Column(slots: [slot(UInt32($0))], width: 300) }, focused: "2")
+    }
+    @Test func testSwapTargetsCoverVisibleNeighboursAndReachableSlivers() throws {
+        let canvas = Rect(x: 0, y: 0, width: 1000, height: 800)
+        let targets = try dragStrip().swapTargets(column: 1, in: canvas)   // columns at 0, 308, 616
+        checkEqual(targets.map(\.step), [-1, 1])
+        checkEqual(targets[0].region, Rect(x: 0, y: 0, width: 300, height: 800))
+        checkEqual(targets[1].region, Rect(x: 616, y: 0, width: 300, height: 800))
+        checkTrue(targets[0].contains(x: 299, y: 400) && !targets[0].contains(x: 300, y: 400))
+        checkEqual(try dragStrip().swapTargets(column: 0, in: canvas).map(\.step), [1])
+        // Column 1 shows 5 px at the left edge, column 3 a 1 px sliver at the right:
+        // both widen to the 24 px edge zone.
+        let scrolled = Layout(columns: [Column(slots: [slot(1)], width: 300), Column(slots: [slot(2)], width: 984),
+                                        Column(slots: [slot(3)], width: 300)], focused: "2", offset: -295)
+        let edges = try scrolled.swapTargets(column: 1, in: canvas)
+        checkEqual(edges[0].region, Rect(x: 0, y: 0, width: 24, height: 800))
+        checkEqual(edges[1].region, Rect(x: 976, y: 0, width: 24, height: 800))
+    }
+    @Test func testHexColorParsesRGBAndRGBA() {
+        checkEqual(HexColor("#0A84FF4D"), HexColor("0a84ff4d"))
+        checkEqual(HexColor("#FF0000")?.alpha, 1)
+        checkEqual(HexColor("#00000080")?.alpha ?? 0, 128.0 / 255, accuracy: 0.0001)
+        checkTrue(HexColor("blue") == nil && HexColor("#12345") == nil)
+    }
+    @Test func testMoveColumnReordersAndKeepsFocus() throws {
+        var layout = dragStrip()
+        checkTrue(layout.moveColumn(containing: "2", to: 0))
+        checkEqual(layout.columns.map { $0.slots[0].id }, ["2", "1", "3"])
+        checkEqual(layout.focused, "2")
+        checkTrue(!layout.moveColumn(containing: "2", to: 0))
+        checkTrue(layout.moveColumn(containing: "2", to: 99))
+        checkEqual(layout.columns.map { $0.slots[0].id }, ["1", "3", "2"])
+        try layout.validate()
+    }
     func slot(_ id: UInt32) -> Slot { Slot(id: "\(id)", members: [id], activeMember: id) }
     @Test func testControlCenterNeverFloatsOrTiles() {
         let facts = WindowFacts(bundleID: "com.apple.controlcenter", role: "AXWindow", subrole: "AXStandardWindow", isRoot: true, movable: true, resizable: true)

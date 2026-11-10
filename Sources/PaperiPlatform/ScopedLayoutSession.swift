@@ -251,6 +251,21 @@ import PaperiCore
         return true
     }
 
+    /// Moves the column holding `windowID` to `index` after a user drag; focus
+    /// and widths are unchanged.
+    @discardableResult func moveColumn(windowID: UInt32, to index: Int, ticket: UUID) -> Bool {
+        guard accepts(ticket), let id = slots[windowID] else { return false }
+        var layout = state.layout
+        guard layout.moveColumn(containing: id, to: index) else { return false }
+        var next = LifecycleState(layout: layout, floating: state.floating)
+        if let focused = state.osFocusedWindow {
+            _ = try? next.reduce(.focus(windowID: focused, classification: Self.tiledClassification))
+        }
+        guard (try? next.validate()) != nil else { return false }
+        state = next; echoes = FrameEchoes()
+        return true
+    }
+
     @discardableResult func resize(windowID: UInt32, ownerPID: pid_t, spaceID: UInt64,
                                    width: Double, classification: Classification, ticket: UUID) throws -> Bool {
         guard accepts(ticket), owns(ownerPID), self.spaceID == spaceID,

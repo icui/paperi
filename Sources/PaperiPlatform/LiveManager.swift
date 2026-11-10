@@ -49,6 +49,18 @@ import PaperiCore
     private var userFloating: Set<UInt32> = []
     private var destroyedNotified: Set<UInt32> = []
     private var expected: [UInt32: (frame: Rect, at: Double)] = [:]
+    /// Managed window the user is dragging (moved while the left button is
+    /// down). It is not written until mouse up, so it follows the pointer.
+    /// While the pointer is over a neighbouring column that column is
+    /// highlighted (`hovered`), and releasing there swaps the two.
+    private struct Drag { let windowID: UInt32; let space: UInt64; let targets: [SwapTarget]; var hovered: SwapTarget? }
+    private var drag: Drag?
+    private var dragging: UInt32? { drag?.windowID }
+    private var dragTimer: Timer?
+    private let highlight = SwapHighlight()
+    /// Last off-slot frame acted on per window, so an app that clamps its
+    /// position is rewritten once rather than on every refresh.
+    private var displaced: [UInt32: Rect] = [:]
     private var refreshScheduled = false
     /// Apps whose AX requests timed out are skipped briefly so one hung app
     /// cannot stall management of every other app.
@@ -91,6 +103,7 @@ import PaperiCore
         if !resuming { try restoreStaleJournal() }
         running = true; paused = false
         references.removeAll(); pidForWindow.removeAll(); expected.removeAll(); applied.removeAll()
+        endDrag(); displaced.removeAll()
         destroyedNotified.removeAll(); slowUntil.removeAll(); forceApply = true
         coordinator = DisplaySpaceCoordinator(ownerPIDs: [], displays: topologies())
         recorder = EventRecorder(workspaceCenter: NSWorkspace.shared.notificationCenter,
@@ -156,7 +169,7 @@ import PaperiCore
         }
         guard running else { return ["stopped": false] }
         running = false
-        timer?.invalidate(); timer = nil
+        timer?.invalidate(); timer = nil; endDrag()
         for token in workspaceTokens {
             NSWorkspace.shared.notificationCenter.removeObserver(token)
             NotificationCenter.default.removeObserver(token)
@@ -230,6 +243,44 @@ import PaperiCore
                 MainActor.assumeIsolated { self?.refresh() }
             }
         }
+    }
+
+    /// Follows the pointer during a drag: highlights the neighbour under it and,
+    /// on mouse up, finishes the drag and places the window.
+    private func trackDrag() {
+        guard running, var current = drag else { endDrag(); return }
+        if NSEvent.pressedMouseButtons & 1 == 0 { finishDrag(); refresh(); return }
+        let pointer = NSEvent.mouseLocation
+        let primaryHeight = Double(NSScreen.screens.first?.frame.height ?? 0)
+        let hit = current.targets.first { $0.contains(x: pointer.x, y: primaryHeight - pointer.y) }
+        guard hit != current.hovered else { return }
+        current.hovered = hit; drag = current
+        if let hit, let session = coordinator.sessions[current.space],
+           session.state.layout.columns.indices.contains(hit.column) {
+            let top = session.state.layout.columns[hit.column].slots.first?.activeMember
+            highlight.show(hit.region, color: options.config.swapHighlightColor, above: top)
+        } else {
+            highlight.hide()
+        }
+    }
+
+    /// Swaps with the hovered neighbour, if any, and forces a placement pass.
+    private func finishDrag() {
+        guard let current = drag else { endDrag(); return }
+        endDrag()
+        forceApply = true
+        guard let target = current.hovered, let session = coordinator.sessions[current.space],
+              let slot = session.slots[current.windowID],
+              let column = session.state.layout.index(of: slot)?.column else { return }
+        if session.moveColumn(windowID: current.windowID, to: column + target.step, ticket: session.ticket) {
+            log("swapped column of \(current.windowID) with column \(column + target.step) after drag")
+        }
+    }
+
+    private func endDrag() {
+        drag = nil
+        dragTimer?.invalidate(); dragTimer = nil
+        highlight.hide()
     }
 
     func scheduleRefresh() {
@@ -473,7 +524,8 @@ import PaperiCore
                                classification: classification, ticket: session.ticket)
             // Removals, insertions and focus changes can leave the focused
             // column partly off-canvas; reveal is minimal and idempotent.
-            reveal(session)
+            // Not mid-drag: scrolling would shift the columns under the pointer.
+            if dragging == nil { reveal(session) }
         }
 
         // 7. Adopt user width changes on active representatives.
@@ -492,6 +544,35 @@ import PaperiCore
                 if (try? session.resize(windowID: placement.windowID, ownerPID: pid, spaceID: space,
                                         width: width, classification: Self.tiled, ticket: session.ticket)) == true {
                     log("adopted width \(Int(width)) for \(placement.windowID)")
+                }
+            }
+        }
+
+        // 7b. User moves. A window moved without a drag is put back. A drag is
+        // tracked until mouse up (trackDrag): it swaps with a neighbouring
+        // column only if released over it, then snaps into its slot.
+        let mouseDown = NSEvent.pressedMouseButtons & 1 != 0
+        if !mouseDown, drag != nil { finishDrag() }
+        if !forceApply, now >= forceUntil {
+            for space in activeSpaces {
+                guard let session = coordinator.sessions[space],
+                      let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { continue }
+                for placement in placements {
+                    let wid = placement.windowID
+                    guard let exp = expected[wid], now - exp.at > 0.6,
+                          let frame = byID[wid]?.frame, frame.isValid, abs(frame.width - exp.frame.width) <= 2,
+                          abs(frame.x - exp.frame.x) > 2 || abs(frame.y - exp.frame.y) > 2,
+                          dragging == wid || displaced[wid] != frame else { continue }
+                    displaced[wid] = frame
+                    applied.removeValue(forKey: space)
+                    guard mouseDown, drag == nil,
+                          let column = session.state.layout.index(of: placement.slotID)?.column,
+                          let targets = try? session.state.layout.swapTargets(column: column, in: session.canvas,
+                                                                             gap: options.gap) else { continue }
+                    drag = Drag(windowID: wid, space: space, targets: targets, hovered: nil)
+                    dragTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+                        MainActor.assumeIsolated { self?.trackDrag() }
+                    }
                 }
             }
         }
@@ -581,6 +662,7 @@ import PaperiCore
         guard let session = coordinator.sessions[space],
               let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { return }
         let forced = forceApply || ProcessInfo.processInfo.systemUptime < forceUntil
+        // Unchanged layout: skip writes (step 7b clears this for moved windows).
         if !forced, applied[space] == placements { return }
         let bounds = displayBounds()
         let display = coordinator.display(forSpace: space)
@@ -592,8 +674,12 @@ import PaperiCore
             guard let element = references[wid], let row = byID[wid], row.spaceID == space else { allConfirmed = false; continue }
             // Do not fight a window that is temporarily not movable (open sheet).
             guard row.classification.eligibility == .tiled else { allConfirmed = false; continue }
+            // The dragged window follows the pointer; it is placed on mouse up.
+            if wid == dragging { allConfirmed = false; continue }
             let target = LiveReconciliation.park(placement.frame, canvas: session.canvas, display: own, otherDisplays: others)
-            if let frame = row.frame, matches(frame, target) { expected[wid] = (target, ProcessInfo.processInfo.systemUptime); continue }
+            if let frame = row.frame, matches(frame, target) {
+                expected[wid] = (target, ProcessInfo.processInfo.systemUptime); displaced.removeValue(forKey: wid); continue
+            }
             session.expect(windowID: wid, frame: target, now: ProcessInfo.processInfo.systemUptime, ticket: session.ticket)
             expected[wid] = (target, ProcessInfo.processInfo.systemUptime)
             if !write(target, to: element) { allConfirmed = false }
