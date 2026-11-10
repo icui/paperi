@@ -119,7 +119,7 @@ Overall: **medium-high, approximately four milestones rather than a time estimat
 
 ### Gesture performance gate
 
-Measure capture delay, input-to-displayed-image latency, displayed cadence, memory, release-to-real-window confirmation and landing error separately. Target responsive 60 Hz tracking initially with about five visible windows, then evaluate 120 Hz and larger workloads within capture limits. Layer updates alone do not prove displayed smoothness. Validate text sharpness, frozen content, offscreen captures, stacking, popup recovery, reversal, snap-back and repeat gestures. Verify keyboard commands still use the existing AX animator with snapshot settings both on and off. Ship enabled-by-default only after reliable capture and handoff, with no keyboard or recovery regressions.
+Measure capture delay, input-to-displayed-image latency, displayed cadence, memory, release-to-real-window confirmation and landing error separately. Target responsive 60 Hz tracking initially with about five visible windows, then evaluate 120 Hz and larger workloads within capture limits. Layer updates alone do not prove displayed smoothness. Validate text sharpness, frozen content, offscreen captures, stacking, popup recovery, reversal, snap-back and repeat gestures. Verify keyboard commands still use the existing AX animator independently of swipes. Ship enabled-by-default only after reliable capture and handoff, with no keyboard or recovery regressions.
 
 ## Required improvements over the current setup
 

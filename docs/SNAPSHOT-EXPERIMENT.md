@@ -1,11 +1,9 @@
 # Snapshot swipe prototype
 
 The snapshot experiment is now reserved for swipes. Keyboard focus commands
-always use the existing position-write animation, including when
-`experimentalSnapshotScroll` is true.
+always use the existing position-write animation.
 
-Enable `"experimentalSnapshotScroll": true` in config.json and reload Paperi.
-Screen Recording permission is required. To exercise the renderer before touch
+No feature flag is required. Screen Recording permission is required. To exercise the renderer before touch
 capture is connected:
 
 ```sh

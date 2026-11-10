@@ -991,7 +991,6 @@ import PaperiCore
             swipeMetrics = ["state": "refused", "reason": reason]
             return ["ok": false, "error": reason]
         }
-        guard options.config.experimentalSnapshotScroll == true else { return fail("enable experimentalSnapshotScroll for the swipe prototype") }
         guard running, AXIsProcessTrusted(), NSEvent.pressedMouseButtons == 0, drag == nil else { return fail("mouse interaction") }
         guard DisplayArrangement.currentProblem() == nil else { return fail("display arrangement") }
         guard let ctx = focusedContext() else { return fail("no managed window focused") }
