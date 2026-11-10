@@ -21,6 +21,7 @@ import PaperiPlatform
     /// not paused for that reason. Cleared (and management resumed) once the
     /// displays are stacked again.
     private var arrangementPause: String?
+    private var arrangementRecheck: Timer?
     /// Whether management was running when the arrangement paused it.
     private var resumeWhenStacked = true
     private var arrangementCheck: DispatchWorkItem?
@@ -115,7 +116,8 @@ import PaperiPlatform
             MainActor.assumeIsolated { self?.scheduleArrangementCheck() }
         }
         updateTitle()
-        if let unsupported { showWarning(unsupported) }
+        if let unsupported { showWarning(unsupported); log(unsupported) }
+        updateArrangementRecheck()
         checkGestureSettings()
         Diagnostics.printJSON(["event": "paperiRunning",
                                "apps": manager.options.config.include?.sorted() ?? ["all regular apps"],
@@ -137,9 +139,27 @@ import PaperiPlatform
 
     // MARK: display arrangement
 
-    /// A gentle explanation when two displays sit side by side, else nil.
+    /// Why management cannot run (private Space interfaces unusable, or
+    /// unsupported display settings), else nil.
     private static func arrangementProblem() -> String? {
         DisplayArrangement.currentProblem()
+    }
+
+    private static func pauseLabel(_ reason: String) -> String {
+        SkyLightHealth.isProblem(reason) ? "macOS compatibility" : "display settings"
+    }
+
+    /// While paused for a reason, re-check every few seconds: a private
+    /// interface can be briefly unavailable (e.g. at login) without any
+    /// display notification announcing that it recovered.
+    private func updateArrangementRecheck() {
+        if arrangementPause == nil {
+            arrangementRecheck?.invalidate(); arrangementRecheck = nil
+        } else if arrangementRecheck == nil {
+            arrangementRecheck = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.checkArrangement() }
+            }
+        }
     }
 
     /// Displays settle over several notifications while being rearranged.
@@ -155,8 +175,9 @@ import PaperiPlatform
             if arrangementPause != nil {
                 arrangementPause = nil
                 warning?.close()
-                if resumeWhenStacked { manager.resume(); log("displays are stacked again: resumed") }
+                if resumeWhenStacked { manager.resume(); log("pause reason cleared: resumed") }
             }
+            updateArrangementRecheck()
             updateTitle()
             return
         }
@@ -167,6 +188,7 @@ import PaperiPlatform
         if !manager.paused { manager.pause() }
         arrangementPause = problem
         log(problem)
+        updateArrangementRecheck()
         updateTitle()
         showWarning(problem)
     }
@@ -176,7 +198,8 @@ import PaperiPlatform
         guard let button = item?.button else { return }
         warning?.close()
         let width: CGFloat = 300
-        let title = NSTextField(wrappingLabelWithString: "Paperi paused: display settings")
+        let compatibility = SkyLightHealth.isProblem(text)
+        let title = NSTextField(wrappingLabelWithString: "Paperi paused: \(Self.pauseLabel(text))")
         title.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         let body = NSTextField(wrappingLabelWithString: text)
         for label in [title, body] {
@@ -187,7 +210,8 @@ import PaperiPlatform
         open.bezelStyle = .rounded; open.keyEquivalent = "\r"
         let dismiss = NSButton(title: "Dismiss", target: self, action: #selector(dismissWarning))
         dismiss.bezelStyle = .rounded
-        let buttons = NSStackView(views: [dismiss, open])
+        // Nothing in System Settings fixes an incompatible macOS interface.
+        let buttons = NSStackView(views: compatibility ? [dismiss] : [dismiss, open])
         let stack = NSStackView(views: [title, body, buttons])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
         stack.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
@@ -322,14 +346,14 @@ import PaperiPlatform
     private func updateTitle() {
         guard AXIsProcessTrusted() else { return }
         item?.button?.title = manager.paused ? "▥ ⏸" : "▥"
-        item?.button?.toolTip = arrangementPause == nil ? "Paperi" : "Paperi paused: display settings"
+        item?.button?.toolTip = arrangementPause.map { "Paperi paused: \(Self.pauseLabel($0))" } ?? "Paperi"
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let state: String
         if !AXIsProcessTrusted() { state = "Waiting for Accessibility access" }
-        else if arrangementPause != nil { state = "Paused (display settings)" }
+        else if let reason = arrangementPause { state = "Paused (\(Self.pauseLabel(reason)))" }
         else if manager.paused { state = "Paused" }
         else { state = "Managing \(manager.managedWindowCount) window\(manager.managedWindowCount == 1 ? "" : "s")" }
         menu.addItem(withTitle: "Paperi — \(state)", action: nil, keyEquivalent: "")
@@ -345,7 +369,10 @@ import PaperiPlatform
         }
         let config = menu.addItem(withTitle: "Show Config", action: nil, keyEquivalent: "")
         config.submenu = configMenu()
-        if let reason = arrangementPause {
+        if let reason = arrangementPause, SkyLightHealth.isProblem(reason) {
+            let why = menu.addItem(withTitle: "Space information unavailable (hover for details)", action: nil, keyEquivalent: "")
+            why.toolTip = reason
+        } else if let reason = arrangementPause {
             let why = menu.addItem(withTitle: "Update display settings to resume", action: nil, keyEquivalent: "")
             why.toolTip = reason
             add(menu, "Open Display Settings…", #selector(openDisplaySettings))

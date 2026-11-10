@@ -35,8 +35,11 @@ public enum DisplayArrangement {
             + "each other in Displays settings and Paperi resumes on its own."
     }
 
+    /// Why live mode cannot run right now, or nil. Unusable private Space
+    /// interfaces (`SkyLightHealth`) take precedence over display settings.
     @MainActor public static func currentProblem() -> String? {
-        problem(displays: current(), separateSpaces: NSScreen.screensHaveSeparateSpaces)
+        SkyLightHealth.currentProblem()
+            ?? problem(displays: current(), separateSpaces: NSScreen.screensHaveSeparateSpaces)
     }
 
     /// Connected displays, in AppKit coordinates.

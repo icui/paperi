@@ -1,3 +1,13 @@
+// FRAGILE: everything in this file uses private, undocumented Apple
+// interfaces that a macOS update may change or remove. Apple documents none
+// of the functions, arguments or returned dictionary keys.
+//
+// SkyLight (SLS*): read-only Space queries. These go back to the older CGS*
+// functions and are used by many window managers, but Apple has already
+// restricted the calls that change state (SLSMoveWindowsToManagedSpace fails
+// on macOS 26.7.2). SkyLightHealth.swift checks them at runtime and pauses
+// Paperi with a visible reason instead of silently managing nothing.
+// Verified on macOS 26.7.2 (arm64), 2026-11-10.
 #include "PaperiBridge.h"
 #include <dlfcn.h>
 #include <pthread.h>
@@ -41,12 +51,32 @@ uint64_t paperi_active_space(void) {
     uint64_t (*fn)(int) = sky ? dlsym(sky, "SLSGetActiveSpace") : NULL;
     return cid && fn ? fn(cid) : 0;
 }
+int paperi_skylight_connection(void) { return connection(); }
+CFArrayRef paperi_copy_missing_private_functions(void) {
+    pthread_once(&once, load);
+    static const char *sky_names[] = {
+        "SLSMainConnectionID", "SLSCopyManagedDisplaySpaces", "SLSCopySpacesForWindows",
+        "SLSSpaceGetType", "SLSGetActiveSpace"
+    };
+    CFMutableArrayRef missing = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+    for (size_t i = 0; i < sizeof sky_names / sizeof *sky_names; i++) {
+        if (!sky || !dlsym(sky, sky_names[i])) {
+            CFStringRef name = CFStringCreateWithCString(NULL, sky_names[i], kCFStringEncodingUTF8);
+            CFArrayAppendValue(missing, name);
+            CFRelease(name);
+        }
+    }
+    if (!dlsym(RTLD_DEFAULT, "_AXUIElementGetWindow")) CFArrayAppendValue(missing, CFSTR("_AXUIElementGetWindow"));
+    return missing;
+}
 
 // MARK: MultitouchSupport
 //
 // FRAGILE: MultitouchSupport is private and undocumented. The record layout
-// below was found by inspection and verified on macOS 26.7.2 (arm64) on
-// 2026-11-10; any macOS update may change it. Missing symbols make
+// below comes from community reverse engineering (a header circulating since
+// about 2010, used by MiddleClick and similar tools), not from Apple, and was
+// verified to count fingers correctly on macOS 26.7.2 (arm64) on 2026-11-10;
+// any macOS update may change it. Missing symbols make
 // paperi_mt_start return 0 (no blocking). A changed layout gives wrong counts:
 // app gestures leak during swipes, or two-finger scrolling is withheld.
 // Re-verify after OS updates (README: "Trackpad swipe and blocking app gestures").

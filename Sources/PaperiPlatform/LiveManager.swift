@@ -1545,7 +1545,8 @@ import PaperiCore
                 "enabled": false,
                 "blockedBy": gestureConflicts
             ]
-            return ["ok": true, "paused": true, "gesture": gestureStatus]
+            return ["ok": true, "paused": true, "gesture": gestureStatus,
+                    "problem": DisplayArrangement.currentProblem() ?? NSNull()]
         default: break
         }
         guard running else { return ["ok": false, "error": paused ? "paused (paperi msg resume)" : "not running"] }

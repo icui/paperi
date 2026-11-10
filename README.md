@@ -63,6 +63,26 @@ While the swipe's fingers are on the trackpad, Paperi stops the app under the cu
 > - Trackpads are looked up only when the swipe gesture starts (launch, resume, reload, or a change of system gesture settings). A Magic Trackpad connected later is not covered until one of those happens.
 > - With `--verbose`, each swipe logs `app gestures blocked (3 fingers down)` and `app gestures released (dropped N events)`.
 
+### Private macOS interfaces
+
+> **Warning: Paperi depends on private Apple interfaces that any macOS update may change or remove.** Apple documents none of them. All are loaded at runtime in `Sources/PaperiBridge/PaperiBridge.c`, so a missing one never stops Paperi from launching. Verified on macOS 26.7.2 (arm64) on 2026-11-10.
+
+| Interface | Used for | If a macOS update breaks it |
+| --- | --- | --- |
+| **SkyLight** (`SLSCopyManagedDisplaySpaces`, `SLSCopySpacesForWindows`, `SLSSpaceGetType`, `SLSGetActiveSpace`, `SLSMainConnectionID`) | Each display's Spaces, which Space each window is on, desktop vs full-screen Spaces, the active Space | Live mode cannot work. Paperi **pauses** and shows “Paperi paused: macOS compatibility” with the reason (menu, popover, `paperi msg status` → `problem`). Windows stay where they are. It re-checks every 5 s and resumes by itself if the problem clears. |
+| **`_AXUIElementGetWindow`** | Matching accessibility windows to window-server IDs | If the function is gone, Paperi pauses as above. If it still exists but returns 0, those windows are just never managed. `paperi check-apps` shows why. |
+| **MultitouchSupport** | Counting fingers so app gestures are blocked during swipes | Blocking stops (or, with a changed data layout, two-finger scrolling may be withheld). See the warning above. |
+
+Only read-only queries are used. Apple has already restricted the SkyLight calls that *change* state, which is why Paperi has no move-to-Space command (`SLSMoveWindowsToManagedSpace` fails on 26.7.2). Read-only Space queries go back to the older `CGS…` functions and are used by many window managers, but nothing guarantees them.
+
+The pause covers missing functions, no window-server connection, no Space data while displays are connected, renamed dictionary keys (`"Display Identifier"`, `"Spaces"`, `"ManagedSpaceID"`), and changed Space type codes (no Space reporting type 0, a normal desktop). It does not cover subtler changes, such as `SLSCopySpacesForWindows` returning wrong Spaces or the unexplained `7` argument changing meaning. Those show up as windows that are not managed, or managed on the wrong Space.
+
+**After every macOS update**, check that:
+1. Paperi is not paused with “macOS compatibility”.
+2. `paperi msg status` lists each display with its Spaces, and windows tile on every display.
+3. Moving a window to another Space in Mission Control moves its column to that Space's strip.
+4. A three-finger swipe does not also scroll or navigate the page in a Chromium browser, and two-finger scrolling still works.
+
 ## Disposable preview
 
 ```sh
