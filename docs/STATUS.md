@@ -36,10 +36,11 @@ The responsible process (terminal/editor, or `dist/Paperi.app`) needs Accessibil
 
 ### Next
 
-1. **Multi-display validation** ("Displays have separate Spaces" on, displays stacked above/below): built-in strip verified with an external display above; upper-display tiling and unplug/replug tested by the user; separate Spaces disabled now pauses management.
-2. **Daily use**: `./scripts/install.sh`, grant the installed app, enable Start at Login, run all day and record per-app limitations.
-3. Decide whether to copy the Hammerspoon create/destroy auto-centering (`PaperWM.windows.centerWindow()`), which the plan flags as a pain point to guard.
-4. Then baseline/performance (AX traffic per refresh, observer-driven incremental surveys), launch at login, and the eight-hour soak.
+1. **Instrument the current refresh/command path:** separate discovery, tab reconciliation, layout, and AX-write costs; count AX calls and establish animation-disabled latency.
+2. **Add minimal interruptible same-Space focus-scroll animation:** compute the target once, pace position updates, retarget repeated J/K from the current position, and cancel on mouse interaction or lifecycle changes. Keep animation echoes separate from user resizing. See [the animation milestone](../PLAN.md#next-milestone-focus-scroll-animation-and-measurement--2026-11-10).
+3. **Tune performance alongside that implementation:** compare animation on/off, measure frame pacing and final-frame accuracy, reduce redundant surveys, and isolate slow apps.
+4. Continue daily-use, installed-app/login, recovery, and eight-hour soak validation. Upper-display tiling and unplug/replug have been tested by the user; separate Spaces disabled now pauses management.
+5. Decide separately whether to add guarded create/destroy auto-centering. Creation/closure animations, dragging animations, Space transitions, and trackpad paging are outside the initial focus-scroll milestone.
 
 ## Handoff — 2026-11-09
 

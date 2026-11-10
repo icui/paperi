@@ -6,7 +6,7 @@ Implementation has started. See [current status](docs/STATUS.md), [development i
 
 ## Recommendation
 
-Build a native Swift menu bar app using AppKit, Accessibility observers, and a small Objective-C/C adapter for private window/Spaces APIs. Keep the layout engine independent of macOS APIs. Start with keyboard-driven parity and immediate frame changes; add animation only after measuring performance.
+Build a native Swift menu bar app using AppKit, Accessibility observers, and a small Objective-C/C adapter for private window/Spaces APIs. Keep the layout engine independent of macOS APIs. Start with keyboard-driven parity and immediate frame changes. Next, instrument the current path, add a minimal interruptible same-Space focus-scroll animation, and tune performance against that implementation.
 
 Replicate the intended interaction model and shortcuts, with explicit fixes for existing pain points. The implementation is free to use different algorithms, state models, event handling, and macOS integration; this is not a line-by-line translation or a requirement to preserve bugs. Swift is the proposed app language, with C/Objective-C where useful; validate the hot path before deciding whether more native code is necessary.
 
@@ -186,6 +186,25 @@ Use one coordinate convention in the core and explicit conversions at AppKit/AX 
 
 ## Performance investigation and targets
 
+### Next milestone: focus-scroll animation and measurement — 2026-11-10
+
+Develop animations alongside performance tuning, after basic instrumentation; completing all optimization is not a prerequisite. The agreed sequence is:
+
+1. **Instrument the current path.** Measure discovery, native-tab reconciliation, layout calculation, and AX writes separately. Count AX calls and record command-to-first-motion and command-to-confirmed-stable-frame latency, establishing an animation-disabled baseline.
+2. **Implement a minimal interruptible same-Space focus-scroll transition.** Calculate the final layout once per command and interpolate affected window positions toward it using a paced scheduler. Do not survey apps or recalculate layout on every animation frame. Start with a short configurable duration and an animation-off option. Focus changes that do not scroll the strip need no geometry animation. Creation, closure, dragging, and system Space transitions are outside this initial scope; trackpad paging remains a separate stretch milestone.
+3. **Tune the combined path.** Measure frame pacing, AX traffic, responsiveness, and final-frame accuracy with animation enabled and disabled. Reduce redundant surveys, retain fallback discovery, and isolate slow apps based on measured costs. Report intentional transition duration separately from processing overhead; retain the animation-disabled latency target below.
+
+Interruption and correctness requirements:
+
+- Repeated J/K commands retarget from the current in-flight position without snapping to the previous target or replaying queued transitions. Keep logical focus and final target authoritative; reject stale scheduler work using generations.
+- Mouse interaction immediately cancels animation writes and returns control to the user. Preserve the existing no-frame-writes-while-held behavior.
+- Track intermediate animation frames as expected AX effects so their move/resize notifications cannot be adopted as user resizes or trigger a feedback loop. Continue recognizing genuine external changes.
+- Cancel safely on Space/display changes, pause/stop, window destruction, or lost eligibility. Confirm final geometry with bounded reconciliation, and prevent stale effects from applying after cancellation.
+- A slow or unresponsive app must not stall motion for every other window. Validate the AX scheduling approach before committing to a smoothness target.
+
+Acceptance: exercise repeated and reversed focus commands, no-scroll focus changes, mouse interruption, slow apps, lifecycle cancellation, and animation-off behavior. Verify final layout/focus and absence of stale writes or geometry-adoption loops. Start with a few visible real-app windows, then expand the workload. This milestone is separate from deciding create/destroy auto-centering and from the daily-use soak.
+
+
 The installed code suggests these candidates for measurement:
 
 - Tiling reads frames across a Space and performs Space queries; `moveWindow` reads the frame again before skipping unchanged work.
@@ -269,7 +288,7 @@ the limited preview until their adapter is verified.
 2. **Native feasibility spike.** Build a menu bar app that obtains AX access, discovers/focuses/resizes windows, maps window IDs, and lists Spaces. Demonstrate cross-Space move-and-follow with SIP enabled and no injection, native-tab identity through selection/merge/detach, classification of Control Center and application popups, and command ownership on two displays. Compare an original backend with selectively adapted yabai patterns. Verify cancellation and error paths. Exit: the four platform risks—Spaces, tabs, classification, and display ownership—have demonstrated solutions or an explicit support limitation before expanding the app.
 3. **Pure layout core.** Implement ordered columns/rows, logical tab-container slots, virtual positions, gaps, focus lookup, swaps, resizing, split, slurp/barf, and floating state. Use installed PaperWM traces for intended interactions, with new specification fixtures for corrected behavior; upstream output is not an oracle for known bugs. Exit: deterministic fixtures and invariants pass, including empty/single-window layouts, tab representative changes, transient focus, display ownership, and screen edges.
 4. **Live keyboard parity and pain-point fixes.** Connect the scheduler, AX adapter, current shortcuts, guarded auto-centering, native tabs, Space transactions, and display/lifecycle observers. Add pause/resume and classification/state diagnostics. Exit: every active binding works in real applications, native-tab acceptance passes, two-display actions are deterministic, and popups neither move nor leave management suspended after dismissal.
-5. **Performance and resilience.** Profile against the baseline, reduce AX traffic, isolate slow apps, tune coalescing, and validate failures/recovery. Exercise sleep/wake, permission revocation, app termination, minimize/hide/fullscreen, display changes, rapid input, and Mission Control. Exit: parity checklist passes and benchmark results justify the performance claim.
+5. **Focus-scroll animation, performance and resilience.** Instrument the immediate path, implement the minimal interruptible same-Space focus-scroll transition described above, then profile and tune the combined path with animation enabled and disabled. Reduce AX traffic, isolate slow apps, tune coalescing, and validate failures/recovery. Exercise sleep/wake, permission revocation, app termination, minimize/hide/fullscreen, display changes, rapid input, and Mission Control. Exit: parity checklist passes and benchmark results justify the performance claim.
 6. **Daily-use release.** Add validated configuration reload, launch at login, signing/notarization, license notices, and installation/recovery documentation. Disable PaperWM's start call and its extra watcher/hotkeys before enabling Paperi, keeping a backup for rollback. Hammerspoon may remain available for unrelated tasks. Exit: an eight-hour daily-use soak and a working rollback procedure.
 7. **Stretch: section-anchored trackpad paging.** Prototype global three-/four-finger capture and system-gesture arbitration, validate stable section grouping, then connect finger-following offsets to a display-paced frame scheduler with threshold-based page selection and anchor settling. Exit: the gesture acceptance matrix and measured motion targets above pass; otherwise retain keyboard operation and document the unsupported gesture/backend combinations.
 
