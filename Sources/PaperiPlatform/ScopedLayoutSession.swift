@@ -68,10 +68,12 @@ import PaperiCore
     }
 
     @discardableResult func admitTabs(members: [UInt32], active: UInt32, ownerPID: pid_t, spaceID: UInt64,
-                                     classification: Classification, ticket: UUID) throws -> Bool {
+                                     classification: Classification, ticket: UUID,
+                                     allowActiveOnly: Bool = false) throws -> Bool {
         guard accepts(ticket), ownerPID == self.ownerPID, spaceID > 0,
               self.spaceID == nil || self.spaceID == spaceID, canvas.isValid,
-              classification.eligibility == .tiled, members.count > 1,
+              classification.eligibility == .tiled,
+              allowActiveOnly ? !members.isEmpty : members.count > 1,
               members.allSatisfy({ $0 > 0 && slots[$0] == nil }), Set(members).count == members.count,
               members.contains(active) else { return false }
         let id = "container-\(UUID())"

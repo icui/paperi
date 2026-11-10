@@ -1,10 +1,10 @@
 # Implementation status
 
-Current state and resume instructions only. The chronological increment log (increments 1–60) and the original initial-host validation are in [HISTORY.md](HISTORY.md); those entries describe evidence at their original dates.
+Current state and resume instructions only. The chronological increment log (increments 1–61) and the original initial-host validation are in [HISTORY.md](HISTORY.md); those entries describe evidence at their original dates.
 
 ## Current checkpoint: 2026-11-09
 
-Includes increment 60. Paperi is a diagnostic/prototype application: general user-window management is disabled, no global shortcuts are registered, and menu/snapshot/record stay inactive/read-only as applicable. Route: [ordinary-window path followed early by one native-tab app](../plan.md#agreed-implementation-order--2026-11-08), informed by the [pinned-source audit](REFERENCE-AUDIT.md).
+Includes increment 61. Paperi is a diagnostic/prototype application: general user-window management is disabled, no global shortcuts are registered, and menu/snapshot/record stay inactive/read-only as applicable. Route: [ordinary-window path followed early by one native-tab app](../plan.md#agreed-implementation-order--2026-11-08), informed by the [pinned-source audit](REFERENCE-AUDIT.md).
 
 ### Capability matrix
 
@@ -15,8 +15,8 @@ Includes increment 60. Paperi is a diagnostic/prototype application: general use
 | Interactive preview (`paperi preview-fixture`) | Verified, 60-second run (`probe-preview-input` passes 11/11) | — | Local AppKit controls/key equivalents (Narrower/Wider/Stack/Unstack/Next Space/Stop) only |
 | Scoped session: frontmost ownership, stable slots, stop-ticket invalidation | Verified | Terminal session uses its guards | App/Space scoped; unknown membership is rejected |
 | Controlled stop and geometry restoration | Verified | Terminal position and width restored | Not crash or abrupt-exit recovery |
-| Native-tab membership & tab-bar-free singleton detection (external AX) | Verified | Terminal and Finder verified (`check-finder-documents.rb --new-tab`, 7/7 checks); Preview untested | Every tab member must be visited, including after topology changes |
-| Native-tab lifecycle: switch, detach, re-merge, new member, active/last close | Verified, debug/release | Terminal verified in sustained shared session (`--session`, 12/12 checks) | Atomic reconciliation keeps slot/width; incomplete topology withholds writes until relearned |
+| Native-tab membership & tab-bar-free singleton detection (external AX) | Verified (`requireComplete: true/false`) | Terminal and Finder verified (`check-finder-documents.rb --new-tab`, 7/7 checks); Preview untested | Active-first mode (`requireComplete: false`) admits and tiles the active tab immediately; strict mode (`requireComplete: true`) still requires visiting all tabs |
+| Native-tab lifecycle: switch, detach, re-merge, new member, active/last close | Verified, debug/release (`allowLazyUnvisited: true/false`) | Terminal verified in sustained shared session (`--session`, 12/12 checks) | `allowLazyUnvisited: true` reconciles newly clicked background tabs in place and infers known merged windows without clicking inactive tabs |
 | Stacked-column native reconciliation & slurp/barf | Verified (`ScopedLayoutSession.reconcileTabs`, `NativeTabTopologyTests`) | Not attempted | Preserves column index, row order, width and stack weights across tab switch/detach/merge/growth/close |
 | Popups/transients | App utility panel and sheet | OS, Control Center, cross-display untested | — |
 | Cross-Space container transfer | Verified end-to-end in debug/release (`paperi probe-space-session`, 12/12 checks; `PaperiSpaceProbe --backend mission-control`) | Not attempted | Direct SkyLight compatibility path fails; Mission Control app-grouping (`expose-group-apps = 1`) clusters multiple untabbed windows of one app on crowded Spaces |
@@ -26,6 +26,8 @@ Includes increment 60. Paperi is a diagnostic/prototype application: general use
 
 ### Tests and evidence
 
+- Increment 61:
+  - Added active-first tab admission (`NativeTabMembership.inspect(_:requireComplete: false)` and `ScopedLayoutSession.admitTabs(_:allowActiveOnly: true)` / `DisplaySpaceCoordinator.admitTabs(_:allowActiveOnly: true)`) and lazy unvisited tab reconciliation (`NativeTabTopology.inspect(_:allowLazyUnvisited: true)` and `DisplaySpaceCoordinator.reconcileTabs`), allowing tabbed windows with unvisited background tabs to be tiled immediately, switching representative in place when a background tab is clicked, and inferring already-managed windows merged into an unvisited tab. All 122 Swift regressions (32 core, 90 platform) pass in debug and release.
 - Increment 60:
   - End-to-end cross-Space 2-tab session probe (`paperi probe-space-session`) passes all 12 checks in both debug (`captures/space-session-increment60-tabs-debug3.json`) and release (`captures/space-session-increment60-tabs-release.json`): learns a 2-tab native container externally, admits it into `DisplaySpaceCoordinator` on Space `1`, transfers it via Mission Control (`SpaceTransfer.moveWindowViaMissionControl`) and `DisplaySpaceCoordinator.transferContainer` to Space `378` with confirmed AX placement, transfers it back to Space `1` with confirmed AX placement while preserving the logical slot ID and both tab members, and restores the original frame on stop.
   - `paperi probe-preview-input` passes all 11 checks (`captures/preview-input-increment60-debug.json`), and all 120 Swift regressions pass in debug and release.

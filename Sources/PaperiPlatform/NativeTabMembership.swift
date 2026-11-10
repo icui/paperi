@@ -10,6 +10,10 @@ struct NativeTabMembership: Equatable {
     let active: UInt32
 
     static func inspect(_ application: [String: Any]) -> [Self] {
+        inspect(application, requireComplete: true)
+    }
+
+    static func inspect(_ application: [String: Any], requireComplete: Bool) -> [Self] {
         guard application["windowsError"] as? Int32 == 0,
               application["truncated"] as? Bool == false,
               application["identityTruncated"] as? Bool == false,
@@ -24,6 +28,7 @@ struct NativeTabMembership: Equatable {
         guard let groups = capture.groups else { return [] }
         return groups.compactMap { group in
             guard let selected = group.selected,
+                  group.controls.count > 1,
                   let index = nodes.firstIndex(where: { $0["axIdentity"] as? Int == group.group }),
                   // Native AppKit window tabs are direct children. Nested
                   // document-content tabs are outside this adapter's scope.
@@ -34,10 +39,10 @@ struct NativeTabMembership: Equatable {
                       return (children["nodes"] as? [Int])?.contains(index) == true
                   }),
                   let candidate = candidates.first(where: { $0["group"] as? Int == group.group }),
-                  candidate["complete"] as? Bool == true,
+                  !requireComplete || (candidate["complete"] as? Bool == true),
                   candidate["quarantined"] as? Bool == false,
                   let bindings = candidate["bindings"] as? [[String: Any]],
-                  bindings.count == group.controls.count, bindings.count > 1 else { return nil }
+                  requireComplete ? (bindings.count == group.controls.count && bindings.count > 1) : !bindings.isEmpty else { return nil }
             var byControl: [Int: UInt32] = [:]
             for binding in bindings {
                 guard let control = binding["control"] as? Int, group.controls.contains(control),
@@ -46,7 +51,9 @@ struct NativeTabMembership: Equatable {
                 byControl[control] = window
             }
             let members = group.controls.compactMap { byControl[$0] }
-            guard Set(members).count == members.count, byControl[selected] == group.window else { return nil }
+            guard Set(members).count == members.count,
+                  members.count == byControl.count,
+                  byControl[selected] == group.window else { return nil }
             return Self(scope: scope, group: group.group, members: members, active: group.window)
         }
     }

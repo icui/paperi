@@ -88,4 +88,29 @@ struct NativeTabMembershipTests {
         app["nodes"] = nodes
         #expect(NativeTabMembership.inspectSingletons(app).isEmpty)
     }
+
+    @Test func activeOnlyInspectionAdmitsVisitedTabWithoutClickingInactiveSiblings() {
+        let owner: [String: Any] = ["error": Int32(0), "nodes": [0]]
+        let nodes: [[String: Any]] = [
+            ["AXRole": "AXWindow", "windowID": UInt32(101), "rootValidation": ["status": "accepted"],
+             "AXChildren": ["error": Int32(0), "nodes": [1]]],
+            ["AXRole": "AXTabGroup", "axIdentity": 1, "AXWindow": owner,
+             "AXTabs": ["error": Int32(0), "count": 3, "nodes": [2, 3, 4]]],
+            ["AXRole": "AXRadioButton", "AXSubrole": "AXTabButton", "axIdentity": 11,
+             "AXValue": true, "AXWindow": owner],
+            ["AXRole": "AXRadioButton", "AXSubrole": "AXTabButton", "axIdentity": 12,
+             "AXValue": false, "AXWindow": owner],
+            ["AXRole": "AXRadioButton", "AXSubrole": "AXTabButton", "axIdentity": 13,
+             "AXValue": false, "AXWindow": owner]
+        ]
+        let tracker = SelectionAssociations()
+        let report = tracker.observe(scope: "test", groups: [.init(group: 1, controls: [11, 12, 13], selected: 11, window: 101)])
+        let app: [String: Any] = ["windowsError": Int32(0), "truncated": false, "identityTruncated": false,
+                                  "identityScope": "test", "nodes": nodes, "roots": [0], "observedRoots": [0],
+                                  "selectionAssociations": report.json]
+        #expect(NativeTabMembership.inspect(app).isEmpty)
+        #expect(NativeTabMembership.inspect(app, requireComplete: false) == [
+            .init(scope: "test", group: 1, members: [101], active: 101)
+        ])
+    }
 }

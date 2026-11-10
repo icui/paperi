@@ -98,12 +98,28 @@ public struct DisplaySpaceTopology: Equatable, Sendable {
     }
 
     @discardableResult func admitTabs(members: [UInt32], active: UInt32, ownerPID: pid_t, spaceID: UInt64,
-                                      classification: Classification) throws -> Bool {
+                                      classification: Classification,
+                                      allowActiveOnly: Bool = false) throws -> Bool {
         guard running, members.allSatisfy({ spaceForWindow[$0] == nil }), let session = sessions[spaceID] else { return false }
         let admitted = try session.admitTabs(members: members, active: active, ownerPID: ownerPID,
-                                             spaceID: spaceID, classification: classification, ticket: session.ticket)
+                                             spaceID: spaceID, classification: classification,
+                                             ticket: session.ticket, allowActiveOnly: allowActiveOnly)
         if admitted { for member in members { spaceForWindow[member] = spaceID } }
         return admitted
+    }
+
+    @discardableResult func reconcileTabs(in spaceID: UInt64, partitions: [NativeTabPartition],
+                                          destroyed: Set<UInt32>, classification: Classification,
+                                          admitted: Set<UInt32> = []) throws -> Bool {
+        guard running, let session = sessions[spaceID],
+              admitted.allSatisfy({ spaceForWindow[$0] == nil }) else { return false }
+        let changed = try session.reconcileTabs(partitions, destroyed: destroyed, ownerPID: ownerPID,
+                                                spaceID: spaceID, classification: classification,
+                                                ticket: session.ticket, admitted: admitted)
+        let activeMembers = Set(session.slots.keys)
+        for wid in destroyed { spaceForWindow.removeValue(forKey: wid) }
+        for wid in activeMembers { spaceForWindow[wid] = spaceID }
+        return changed
     }
 
     /// Moves a whole logical container (including all confirmed native-tab

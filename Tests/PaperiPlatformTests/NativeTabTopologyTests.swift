@@ -146,4 +146,65 @@ struct NativeTabTopologyTests {
             destroyed: [1, 2, 3], ownerPID: 42, spaceID: 7, classification: eligible, ticket: ticket))
         #expect(session.state.layout.columns.count == 1 && session.state.layout.columns[0].slots.map(\.id) == [bottomSlot])
     }
+
+    @MainActor @Test func lazyUnvisitedTabsTileImmediatelySwitchOnClickAndInferMergedKnownWindows() throws {
+        let session = ScopedLayoutSession(ownerPID: 42, canvas: Rect(x: 0, y: 0, width: 1000, height: 600))
+        let eligible = WindowPolicy.classify(WindowFacts(bundleID: "test", role: "AXWindow", subrole: "AXStandardWindow",
+            isRoot: true, movable: true, resizable: true, level: 0))
+        let ticket = session.ticket
+
+        // Window 101 has 3 tabs (controls 11, 12, 13), but only tab 11 (101) has ever been visited.
+        let owner0: [String: Any] = ["error": Int32(0), "nodes": [0]]
+        func makeThreeTabApp(activeWindow: UInt32, selectedControl: Int, tracker: SelectionAssociations) -> [String: Any] {
+            let nodes: [[String: Any]] = [
+                ["AXRole": "AXWindow", "windowID": activeWindow, "rootValidation": ["status": "accepted"],
+                 "AXChildren": ["error": Int32(0), "nodes": [1]]],
+                ["AXRole": "AXTabGroup", "axIdentity": 1, "AXWindow": owner0,
+                 "AXTabs": ["error": Int32(0), "count": 3, "nodes": [2, 3, 4]]],
+                ["AXRole": "AXRadioButton", "AXSubrole": "AXTabButton", "axIdentity": 11,
+                 "AXValue": selectedControl == 11, "AXWindow": owner0],
+                ["AXRole": "AXRadioButton", "AXSubrole": "AXTabButton", "axIdentity": 12,
+                 "AXValue": selectedControl == 12, "AXWindow": owner0],
+                ["AXRole": "AXRadioButton", "AXSubrole": "AXTabButton", "axIdentity": 13,
+                 "AXValue": selectedControl == 13, "AXWindow": owner0]
+            ]
+            let report = tracker.observe(scope: "test", groups: [
+                .init(group: 1, controls: [11, 12, 13], selected: selectedControl, window: activeWindow)
+            ])
+            return ["windowsError": Int32(0), "truncated": false, "identityTruncated": false,
+                    "identityScope": "test", "nodes": nodes, "roots": [0], "observedRoots": [0],
+                    "selectionAssociations": report.json]
+        }
+
+        let tracker = SelectionAssociations()
+        let initialApp = makeThreeTabApp(activeWindow: 101, selectedControl: 11, tracker: tracker)
+        let activeGroups = NativeTabMembership.inspect(initialApp, requireComplete: false)
+        #expect(activeGroups == [.init(scope: "test", group: 1, members: [101], active: 101)])
+
+        // Admit and tile 101 immediately without waiting for tabs 12 or 13 to be clicked.
+        #expect(try session.admitTabs(members: [101], active: 101, ownerPID: 42, spaceID: 7,
+                                      classification: eligible, ticket: ticket, allowActiveOnly: true))
+        let slotID = session.slots[101]!
+
+        // Clicking tab 12 reveals window 102 while tab 13 remains unvisited; slot updates in place.
+        let switchedApp = makeThreeTabApp(activeWindow: 102, selectedControl: 12, tracker: tracker)
+        #expect(NativeTabTopology.inspect(switchedApp, managed: [101], destroyed: [], additions: [102]) == nil)
+        let lazySwitched = NativeTabTopology.inspect(switchedApp, managed: [101], destroyed: [],
+                                                     additions: [102], allowLazyUnvisited: true)
+        #expect(lazySwitched == [.init(members: [101, 102], active: 102)])
+        #expect(try session.reconcileTabs(lazySwitched!, destroyed: [], ownerPID: 42, spaceID: 7,
+                                          classification: eligible, ticket: ticket, admitted: [102]))
+        #expect(session.slots[101] == slotID && session.slots[102] == slotID)
+        #expect(session.state.layout.columns.count == 1 && session.state.layout.columns[0].slots[0].activeMember == 102)
+
+        // Merging an already-managed window 103 into the unvisited 3rd tab (control 13) infers 103 without clicking tab 13.
+        try session.insert(windowID: 103, ownerPID: 42, spaceID: 7, classification: eligible, knownSingleton: true, ticket: ticket)
+        #expect(session.state.layout.columns.count == 2)
+        let inferredMerge = NativeTabTopology.inspect(switchedApp, managed: [101, 102, 103], destroyed: [],
+                                                      allowLazyUnvisited: true)
+        #expect(inferredMerge == [.init(members: [101, 102, 103], active: 102)])
+        #expect(try session.reconcileTabs(inferredMerge!, destroyed: [], ownerPID: 42, spaceID: 7,
+                                          classification: eligible, ticket: ticket))
+        #expect(session.state.layout.columns.count == 1 && session.slots[103] == slotID)
+    }
 }

@@ -47,6 +47,15 @@ struct DisplaySpaceCoordinatorTests {
         #expect(Set(d2Placements.map(\.windowID)) == [301, 102])
         #expect(d2Placements.allSatisfy { $0.frame.x < 0 })
 
+        // Admit an active-only tab group on Space 378 and lazily reconcile a newly clicked background tab (402).
+        #expect(try coordinator.admitTabs(members: [401], active: 401, ownerPID: 42, spaceID: 378,
+                                          classification: eligible, allowActiveOnly: true))
+        let lazySlot = coordinator.sessions[378]?.slots[401]
+        #expect(lazySlot != nil && coordinator.spaceForWindow[401] == 378)
+        #expect(try coordinator.reconcileTabs(in: 378, partitions: [.init(members: [401, 402], active: 402)],
+                                              destroyed: [], classification: eligible, admitted: [402]))
+        #expect(coordinator.sessions[378]?.slots[402] == lazySlot && coordinator.spaceForWindow[402] == 378)
+
         coordinator.stop()
         #expect(!coordinator.running && coordinator.sessions.isEmpty && coordinator.spaceForWindow.isEmpty)
     }
