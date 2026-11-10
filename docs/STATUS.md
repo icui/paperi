@@ -36,11 +36,16 @@ The responsible process (terminal/editor, or `dist/Paperi.app`) needs Accessibil
 
 ### Next
 
-1. **Instrument the current refresh/command path:** separate discovery, tab reconciliation, layout, and AX-write costs; count AX calls and establish animation-disabled latency.
-2. **Add minimal interruptible same-Space focus-scroll animation:** compute the target once, pace position updates, retarget repeated J/K from the current position, and cancel on mouse interaction or lifecycle changes. Keep animation echoes separate from user resizing. See [the animation milestone](../PLAN.md#next-milestone-focus-scroll-animation-and-measurement--2026-11-10).
-3. **Tune performance alongside that implementation:** compare animation on/off, measure frame pacing and final-frame accuracy, reduce redundant surveys, and isolate slow apps.
-4. Continue daily-use, installed-app/login, recovery, and eight-hour soak validation. Upper-display tiling and unplug/replug have been tested by the user; separate Spaces disabled now pauses management.
-5. Decide separately whether to add guarded create/destroy auto-centering. Creation/closure animations, dragging animations, Space transitions, and trackpad paging are outside the initial focus-scroll milestone.
+Instrumentation (`status.performance`) and the interruptible focus-scroll animation landed in commits 936697a and 86008e5; live multi-app profiling of them is still pending.
+
+1. **Profile the focus-scroll animation live** (animation on vs `focusScrollDuration: 0`): tick cost, missed ticks, AX writes, first/final/confirmed timings with 3–6 windows across Terminal, Finder, TextEdit, Zed. These numbers are the baseline for the gesture's feasibility, so do this first.
+2. **Three-finger one-slot scrolling** — see [the plan](../PLAN.md#next-feature-realtime-three-finger-one-slot-scrolling--planned-2026-11-10). Overall difficulty **medium-high (3–4 increments)**: logic is low-risk because it reuses the animator; touch capture on macOS 26 and real-app smoothness are the uncertain parts. Order:
+   1. *Detect system three-finger gestures* (`TrackpadThreeFinger{HorizSwipe,VertSwipe}Gesture`, `TrackpadThreeFingerDrag` in `com.apple.AppleMultitouchTrackpad` and `com.apple.driver.AppleBluetoothMultitouch.trackpad`); disable the Paperi gesture, report it in `status`, and warn via menu item + popover. On this host all three-finger keys are 0 (2026-11-10), so the gesture would be enabled.
+   2. *Capture spike in live mode*: event tap on gesture events with `NSEvent.allTouches()` (PaperWM's path), `-v` logging; decide whether the private `MultitouchSupport` fallback is needed.
+   3. *Pure `SlotSwipe` reducer + scrubbed motion*: refactor `animateFocus` into one scheduler with a time or finger progress source; clamp to one slot with rubber band; commit/snap-back on release.
+   4. *Live validation and tuning* against the gesture performance gate.
+3. Continue daily-use, installed-app/login, recovery, and eight-hour soak validation. Upper-display tiling and unplug/replug have been tested by the user; separate Spaces disabled now pauses management.
+4. Decide separately whether to add guarded create/destroy auto-centering.
 
 ## Handoff — 2026-11-09
 
