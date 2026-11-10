@@ -29,28 +29,31 @@ enum LiveReconciliation {
     }
 
     /// A column scrolled out of view is kept as a sliver at the canvas edge
-    /// (PaperWM-style). When that sliver would spill onto a neighbouring display,
-    /// the window server would reassign it to that display's Space, so it is
-    /// parked below its own display instead (or left as a sliver if a display is
-    /// below too). The same applies to a partly visible column that lies mostly
-    /// on a neighbouring display: the window server assigns a window to the
-    /// display holding most of it, so the peek is given up to keep the window.
-    static func park(_ frame: Rect, canvas: Rect, display: CGRect, otherDisplays: [CGRect], margin: Double = 1) -> Rect {
+    /// (PaperWM-style), and a partly visible column peeks in. The window server
+    /// assigns a window to the display holding most of it, so when a sliver or
+    /// peek would lie mostly on a neighbouring display it is slid back toward
+    /// its own display until just over half of it stays there. That part sits
+    /// under the neighbouring visible column, so on screen it still reads as an
+    /// edge sliver or peek; the part over the neighbour is not drawn there
+    /// ("Displays have separate Spaces"). Parking below the display instead
+    /// left a title-bar strip visible, since macOS keeps title bars on screen.
+    static func park(_ frame: Rect, display: CGRect, otherDisplays: [CGRect]) -> Rect {
         func rect(_ r: Rect) -> CGRect { CGRect(x: r.x, y: r.y, width: r.width, height: r.height) }
-        func area(_ a: CGRect, _ b: CGRect) -> CGFloat {
+        func area(_ a: CGRect, _ b: CGRect) -> Double {
             let i = a.intersection(b)
-            return i.isNull ? 0 : i.width * i.height
+            return i.isNull ? 0 : Double(i.width * i.height)
         }
         let own = area(display, rect(frame))
         let foreign = otherDisplays.map { area($0, rect(frame)) }.max() ?? 0
-        let hiddenLeft = frame.x + frame.width <= canvas.x + margin + 0.5
-        let hiddenRight = frame.x >= canvas.x + canvas.width - margin - 0.5
-        guard foreign >= 1, hiddenLeft || hiddenRight || foreign >= own else { return frame }
-        // Partly visible: park on the side it sticks out of.
-        let left = hiddenLeft || (!hiddenRight && frame.x + frame.width / 2 < canvas.x + canvas.width / 2)
-        let below = Rect(x: left ? canvas.x : canvas.x + canvas.width - frame.width,
-                         y: Double(display.maxY) - margin, width: frame.width, height: frame.height)
-        if !otherDisplays.contains(where: { intersects($0, rect(below)) }) { return below }
-        return frame
+        guard foreign >= 1, foreign >= own else { return frame }
+        // Keep `keep` points more of the window on its own display than off it.
+        let keep = 16.0
+        var moved = frame
+        if frame.x + frame.width / 2 > Double(display.midX) {
+            moved.x = Double(display.maxX) - frame.width / 2 - keep
+        } else {
+            moved.x = Double(display.minX) - frame.width / 2 + keep
+        }
+        return moved
     }
 }

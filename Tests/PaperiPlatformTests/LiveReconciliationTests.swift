@@ -53,31 +53,33 @@ import PaperiCore
         let left = CGRect(x: -1920, y: 0, width: 1920, height: 1080)
         let hidden = Rect(x: canvas.x + 1 - 600, y: 33, width: 600, height: 851)
         // No neighbour: keep the PaperWM sliver.
-        #expect(LiveReconciliation.park(hidden, canvas: canvas, display: main, otherDisplays: []) == hidden)
-        // A display on the left would capture the window: park below instead.
-        let parked = LiveReconciliation.park(hidden, canvas: canvas, display: main, otherDisplays: [left])
-        #expect(parked.y == 899 && parked.x == canvas.x)
-        // Visible columns are never parked.
+        #expect(LiveReconciliation.park(hidden, display: main, otherDisplays: []) == hidden)
+        // A display on the left would capture the window: slide it right until
+        // just over half stays on its own display, under the visible columns.
+        let parked = LiveReconciliation.park(hidden, display: main, otherDisplays: [left])
+        #expect(parked == Rect(x: -300 + 16, y: 33, width: 600, height: 851))
+        // Visible columns are never moved.
         let visible = Rect(x: 100, y: 33, width: 600, height: 851)
-        #expect(LiveReconciliation.park(visible, canvas: canvas, display: main, otherDisplays: [left]) == visible)
+        #expect(LiveReconciliation.park(visible, display: main, otherDisplays: [left]) == visible)
     }
 
-    @Test func partlyVisibleColumnsMostlyOnANeighbourAreParked() {
-        let main = CGRect(x: 0, y: 0, width: 1440, height: 900)
-        let left = CGRect(x: -1280, y: 0, width: 1280, height: 720)
+    @Test func peeksMostlyOnANeighbourStayMostlyOnTheirOwnDisplay() {
+        // The live layout: built-in display with an external one on its left.
+        let builtIn = CGRect(x: 0, y: 0, width: 1440, height: 932)
+        let external = CGRect(x: -1280, y: 0, width: 1280, height: 720)
+        // External strip: focused column fills it, the next column lies past
+        // its right edge, i.e. over the built-in display.
+        let hiddenRight = Rect(x: -9, y: 39, width: 1248, height: 673)
+        let slid = LiveReconciliation.park(hiddenRight, display: external, otherDisplays: [builtIn])
+        #expect(slid == Rect(x: -624 - 16, y: 39, width: 1248, height: 673))
+        // Built-in strip: a 160 pt peek whose rest lies over the external display.
+        let peekLeft = Rect(x: -1248, y: 38, width: 1408, height: 886)
+        #expect(LiveReconciliation.park(peekLeft, display: builtIn, otherDisplays: [external]).x == -704 + 16)
+        // Mostly on its own display already: unchanged.
+        let mostlyOwn = Rect(x: -200, y: 38, width: 1000, height: 886)
+        #expect(LiveReconciliation.park(mostlyOwn, display: builtIn, otherDisplays: [external]) == mostlyOwn)
+        // No neighbour on that side: unchanged.
         let right = CGRect(x: 1440, y: 0, width: 1280, height: 720)
-        // 160 pt peek on the main display, the rest on the left display: the
-        // window server would move it there, so it is parked below instead.
-        let peekLeft = Rect(x: -1248, y: 33, width: 1408, height: 851)
-        let parked = LiveReconciliation.park(peekLeft, canvas: canvas, display: main, otherDisplays: [left])
-        #expect(parked == Rect(x: canvas.x, y: 899, width: 1408, height: 851))
-        let peekRight = Rect(x: canvas.x + canvas.width - 160, y: 33, width: 1408, height: 851)
-        let parkedRight = LiveReconciliation.park(peekRight, canvas: canvas, display: main, otherDisplays: [right])
-        #expect(parkedRight == Rect(x: canvas.x + canvas.width - 1408, y: 899, width: 1408, height: 851))
-        // Mostly on its own display: the peek stays.
-        let mostlyOwn = Rect(x: -200, y: 33, width: 1000, height: 851)
-        #expect(LiveReconciliation.park(mostlyOwn, canvas: canvas, display: main, otherDisplays: [left]) == mostlyOwn)
-        // No neighbour on that side: the peek stays.
-        #expect(LiveReconciliation.park(peekLeft, canvas: canvas, display: main, otherDisplays: [right]) == peekLeft)
+        #expect(LiveReconciliation.park(peekLeft, display: builtIn, otherDisplays: [right]) == peekLeft)
     }
 }

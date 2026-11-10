@@ -779,7 +779,7 @@ import PaperiCore
                 allConfirmed = false
                 guard let pid = pidForWindow[wid], !unresponsive.contains(pid), Self.windowSpace(wid) == space else { continue }
             }
-            let target = LiveReconciliation.park(placement.frame, canvas: session.canvas, display: own, otherDisplays: others)
+            let target = LiveReconciliation.park(placement.frame, display: own, otherDisplays: others)
             if let frame = row?.frame, matches(frame, target) {
                 expected[wid] = (target, ProcessInfo.processInfo.systemUptime); displaced.removeValue(forKey: wid); continue
             }
