@@ -123,18 +123,40 @@ struct SlotSwipeTests {
     @Test func holdBeforeReleasePreservesDistanceCommit() {
         var swipe = SlotSwipe()
         swipe.begin(at: 0)
-        _ = swipe.move(dx: -0.15, dy: 0, at: 0.01)
+        _ = swipe.move(dx: -0.24, dy: 0, at: 0.01)
         #expect(swipe.end(at: 1) == .commit(.right))
     }
 
-    @Test func reversalFlickCanCommitOppositeToProgress() {
+    @Test func reversalFlickReturnsInsteadOfSelectingOppositeSlot() {
         for sign in [-1.0, 1.0] {
             var swipe = SlotSwipe()
             swipe.begin(at: 0)
             _ = swipe.move(dx: -sign * 0.05, dy: 0, at: 0.1)
             _ = swipe.move(dx: sign * 0.025, dy: 0, at: 0.11)
-            #expect(swipe.end(at: 0.11) == .commit(sign > 0 ? .left : .right))
+            #expect(swipe.end(at: 0.11) == .snapBack)
         }
+    }
+
+    @Test func tinyFastSwipeDoesNotCommit() {
+        var swipe = SlotSwipe()
+        swipe.begin(at: 0)
+        _ = swipe.move(dx: -0.016, dy: 0, at: 0.001)
+        #expect(swipe.end(at: 0.002) == .snapBack)
+    }
+
+    @Test func visualSpeedIsLimitedAndNeverOvershoots() {
+        #expect(SlotSwipe.advanceVisualProgress(0, toward: 1, elapsed: 0.01) == 0.08)
+        #expect(SlotSwipe.advanceVisualProgress(0, toward: -1, elapsed: 0.01) == -0.08)
+        #expect(SlotSwipe.advanceVisualProgress(0.49, toward: 0.5, elapsed: 0.01) == 0.5)
+        #expect(SlotSwipe.advanceVisualProgress(0, toward: 1, elapsed: 1) < 0.27)
+        #expect(SlotSwipe.advanceVisualProgress(0.5, toward: 0, elapsed: 0) == 0.5)
+    }
+
+    @Test func settlingHasTimeToAnimateAndIsBounded() {
+        #expect(SlotSwipe.settleDuration(distance: 0, base: 0.22) == 0)
+        #expect(SlotSwipe.settleDuration(distance: 0.01, base: 0.22) == 0.16)
+        #expect(SlotSwipe.settleDuration(distance: 1.3, base: 0.22) == 0.325)
+        #expect(SlotSwipe.settleDuration(distance: 2, base: 2) == 0.5)
     }
 
     @Test func ambiguousDiagonalCanResolveHorizontally() {

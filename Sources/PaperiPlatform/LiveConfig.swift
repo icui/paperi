@@ -25,7 +25,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public var flickVelocity: Double
         public var invert: Bool
 
-        public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.25,
+        public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.4,
                     commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false) {
             self.enabled = enabled
             self.fingers = fingers
@@ -144,7 +144,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "gesture": {
         "enabled": true,
         "fingers": 3,
-        "travel": 0.25,
+        "travel": 0.4,
         "commitThreshold": 0.5,
         "flickVelocity": 1.5,
         "invert": false

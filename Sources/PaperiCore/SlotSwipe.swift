@@ -33,7 +33,7 @@ public struct SlotSwipe: Equatable, Sendable {
         public var lockThreshold: Double
         public var invert: Bool
 
-        public init(travel: Double = 0.25,
+        public init(travel: Double = 0.4,
                     commitThreshold: Double = 0.5,
                     flickVelocity: Double = 1.5,
                     lockThreshold: Double = 0.015,
@@ -65,6 +65,24 @@ public struct SlotSwipe: Equatable, Sendable {
         return sign * resisted
     }
 
+    /// At most eight slots per second, even if input arrives in one large jump.
+    public static let maximumVisualSpeed = 8.0
+
+    public static func advanceVisualProgress(_ current: Double, toward target: Double, elapsed: Double) -> Double {
+        guard current.isFinite, target.isFinite, elapsed.isFinite, elapsed > 0 else { return current }
+        // Never catch up a stalled run loop in one visible jump.
+        let step = maximumVisualSpeed * min(elapsed, 1.0 / 30.0)
+        return current + min(step, max(-step, target - current))
+    }
+
+    /// The ease-out curve peaks below twice its average speed. Budget enough
+    /// time for that peak too, so releasing cannot bypass the tracking limit.
+    public static func settleDuration(distance: Double, base: Double) -> Double {
+        guard distance.isFinite, base.isFinite, distance > 0 else { return 0 }
+        return max(0.16, min(0.4, max(0.16, base)) * sqrt(min(1, distance)),
+                   2 * distance / maximumVisualSpeed)
+    }
+
     public mutating func begin(at time: Double) {
         state = .detecting(accDx: 0, accDy: 0, startTime: time)
     }
@@ -86,7 +104,7 @@ public struct SlotSwipe: Equatable, Sendable {
                     let dirFactor = config.invert ? 1.0 : -1.0
                     let rawProg = (newX * dirFactor) / max(0.01, config.travel)
                     let clamped = Self.rubberBand(rawProg)
-                    let dt = max(0.001, time - start)
+                    let dt = max(1.0 / 120.0, time - start)
                     let vel = rawProg / dt
                     state = .active(rawProgress: rawProg, clampedProgress: clamped, velocity: vel, lastTime: time)
                     return .started
@@ -108,9 +126,12 @@ public struct SlotSwipe: Equatable, Sendable {
             let deltaProg = (dx * dirFactor) / max(0.01, config.travel)
             let newRaw = rawProg + deltaProg
             let clamped = Self.rubberBand(newRaw)
-            let dt = max(0.001, time - lastTime)
-            let instantVel = deltaProg / dt
-            let newVel = lastVel * 0.4 + instantVel * 0.6
+            guard time > lastTime else { return nil }
+            let dt = time - lastTime
+            let instantVel = deltaProg / max(1.0 / 120.0, dt)
+            // A time-based filter behaves consistently across trackpad report rates.
+            let weight = 1 - exp(-dt / 0.025)
+            let newVel = lastVel + weight * (instantVel - lastVel)
             state = .active(rawProgress: newRaw, clampedProgress: clamped, velocity: newVel, lastTime: time)
             return .updated(progress: clamped)
         }
@@ -123,22 +144,16 @@ public struct SlotSwipe: Equatable, Sendable {
             // Stationary touches produce no move events. Fade stale velocity out
             // over 100 ms so a hold before release cannot act as a flick.
             let releaseVelocity = vel * max(0, 1 - max(0, time - lastTime) / 0.1)
-            let absVel = abs(releaseVelocity)
-            let absClamped = abs(clampedProg)
-
-            // A flick commits if velocity exceeds flickVelocity in the direction of progress.
-            if absVel >= config.flickVelocity {
-                if vel > 0 && rawProg > -0.15 {
-                    decision = .commit(.right)
-                } else if vel < 0 && rawProg < 0.15 {
-                    decision = .commit(.left)
-                } else if absClamped >= config.commitThreshold {
-                    decision = clampedProg > 0 ? .commit(.right) : .commit(.left)
-                } else {
-                    decision = .snapBack
-                }
-            } else if absClamped >= config.commitThreshold {
-                decision = clampedProg > 0 ? .commit(.right) : .commit(.left)
+            let distance = abs(rawProg)
+            let aligned = releaseVelocity * rawProg > 0
+            // Require intentional travel as well as speed. A tiny twitch must
+            // not jump a whole slot, nor should reversing select an unseen slot.
+            let flick = distance >= 0.12 && aligned
+                && abs(releaseVelocity) >= config.flickVelocity
+            let retreating = releaseVelocity * rawProg < 0
+                && abs(releaseVelocity) >= config.flickVelocity
+            if flick || (abs(clampedProg) >= config.commitThreshold && !retreating) {
+                decision = rawProg > 0 ? .commit(.right) : .commit(.left)
             } else {
                 decision = .snapBack
             }

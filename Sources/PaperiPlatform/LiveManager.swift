@@ -973,6 +973,8 @@ import PaperiCore
         let neighbours: [Direction: UInt32]
         var starts: [UInt32: Rect] = [:]
         var progress = 0.0
+        var targetProgress = 0.0
+        var lastVisualTime = 0.0
         var ready = false
         var tracking = true
         var failed = false
@@ -1055,6 +1057,9 @@ import PaperiCore
         }
         switch event {
         case .begin(let time):
+            // Do not tear down a visible landing for a new contact sequence.
+            // Its capture could otherwise contain the previous overlay too.
+            guard swipe?.released == nil else { return }
             // Capture while determining the axis, but keep the overlay hidden
             // until horizontal movement locks. This overlaps input with capture.
             _ = beginSwipe(pendingLock: true)
@@ -1157,12 +1162,13 @@ import PaperiCore
         motionSpace = space
         swipeBegan = ProcessInfo.processInfo.systemUptime
         swipeMetrics = ["state": "capturing", "windows": surveys.count]
-        let guardTimer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+        let guardTimer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 guard self.swipe != nil else {
                     self.swipeGuard?.invalidate(); self.swipeGuard = nil; return
                 }
+                self.advanceSwipeVisuals()
                 if NSEvent.pressedMouseButtons != 0 || !AXIsProcessTrusted()
                     || self.coordinator.display(forSpace: space)?.activeSpaceID != space
                     || DisplayArrangement.currentProblem() != nil {
@@ -1186,7 +1192,11 @@ import PaperiCore
                 self.swipe = state
                 self.swipeMetrics = ["state": "tracking", "windows": surveys.count, "captureMS": overlay.captureMS,
                                      "textureBytes": overlay.textureBytes]
-                overlay.place(self.swipeFrames(state))
+                // A quick gesture can finish before capture. Begin that release
+                // at the real windows instead of flashing a displaced snapshot.
+                overlay.place(state.starts)
+                state.lastVisualTime = ProcessInfo.processInfo.systemUptime
+                self.swipe = state
                 if state.tracking { overlay.show() }
                 if let commit = state.released { state.released = nil; self.swipe = state; self.endSwipe(commit: commit, direction: state.releaseDirection) }
             } catch {
@@ -1201,17 +1211,26 @@ import PaperiCore
         return ["ok": true, "neighbours": neighbours.count]
     }
 
-    /// Latest finger progress; images move immediately (no queue, no AX).
+    /// Keep only the newest finger target; the visual clock limits travel speed.
     func updateSwipe(_ progress: Double) {
         guard var state = swipe, state.released == nil, progress.isFinite else { return }
         let wasTracking = state.tracking
         state.tracking = true
-        state.progress = min(1.3, max(-1.3, progress))
+        state.targetProgress = min(1.3, max(-1.3, progress))
         swipe = state
-        if state.ready {
-            state.overlay.place(swipeFrames(state))
-            if !wasTracking { state.overlay.show() }
-        }
+        if state.ready && !wasTracking { state.overlay.show() }
+    }
+
+    private func advanceSwipeVisuals() {
+        guard var state = swipe, state.ready, state.tracking, state.released == nil else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let next = SlotSwipe.advanceVisualProgress(state.progress, toward: state.targetProgress,
+                                                   elapsed: now - state.lastVisualTime)
+        state.lastVisualTime = now
+        let changed = next != state.progress
+        state.progress = next
+        swipe = state
+        if changed { state.overlay.place(swipeFrames(state)) }
     }
 
     private func swipeFrames(_ state: Swipe) -> [UInt32: Rect] {
@@ -1235,9 +1254,9 @@ import PaperiCore
     /// for simulations. A rejected commit slides back with no writes.
     func endSwipe(commit requested: Bool, direction requestedDirection: Direction? = nil) {
         guard var state = swipe, state.released == nil else { return }
-        let direction: Direction = requestedDirection ?? (state.progress < 0 ? .left : .right)
+        let direction: Direction = requestedDirection ?? (state.targetProgress < 0 ? .left : .right)
         let target = state.neighbours[direction]
-        let commit = requested && (requestedDirection != nil || state.progress != 0) && target != nil
+        let commit = requested && (requestedDirection != nil || state.targetProgress != 0) && target != nil
         state.releaseDirection = direction
         let settle = max(0.12, options.config.focusScrollDuration ?? 0.22)
         if !state.ready && !state.failed { state.released = commit; swipe = state; return }
@@ -1253,7 +1272,7 @@ import PaperiCore
         let generation = state.generation, space = state.space, overlay = state.overlay
         guard commit, let wid = target, let session = coordinator.sessions[space],
               let ends = state.ends[direction] else {
-            let duration = settle * abs(state.progress)
+            let duration = SlotSwipe.settleDuration(distance: abs(state.progress), base: settle)
             overlay.slide(to: state.starts, duration: duration)
             swipeTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
@@ -1272,7 +1291,7 @@ import PaperiCore
         apply(space: space, byID: state.surveys)
         _ = raise(wid)
         let destinationProgress = direction == .left ? -1.0 : 1.0
-        let duration = settle * abs(destinationProgress - state.progress)
+        let duration = SlotSwipe.settleDuration(distance: abs(destinationProgress - state.progress), base: settle)
         overlay.slide(to: ends, duration: duration)
         let released = ProcessInfo.processInfo.systemUptime
         swipeTask = Task { [weak self] in
@@ -1305,6 +1324,10 @@ import PaperiCore
                 try? await Task.sleep(for: .milliseconds(90))
                 guard self.swipe?.generation == generation else { return }
             }
+            // AX geometry can settle before WindowServer presents the apps'
+            // newly drawn surfaces. Keep the mask for two 60 Hz frames.
+            try? await Task.sleep(for: .milliseconds(34))
+            guard self.swipe?.generation == generation, !Task.isCancelled else { return }
             overlay.hide(); self.swipe = nil; self.swipeTask = nil
             self.swipeMetrics["state"] = result.settled ? (result.maxDeviation <= 0.5 ? "completed" : "landedAdjusted") : "handoffUnsettled"
             self.swipeMetrics["handoffMS"] = (ProcessInfo.processInfo.systemUptime - released) * 1000 - duration * 1000

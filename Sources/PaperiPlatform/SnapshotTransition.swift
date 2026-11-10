@@ -102,7 +102,13 @@ import PaperiCore
 
     var isShown: Bool { window != nil }
 
-    func show() { window?.orderFrontRegardless() }
+    func show() {
+        // Submit the fully composed layer tree before exposing the opaque window.
+        // Otherwise its first display can briefly show the black backing store.
+        window?.displayIfNeeded()
+        CATransaction.flush()
+        window?.orderFrontRegardless()
+    }
 
     /// Moves images immediately (finger tracking); cancels any running slide.
     func place(_ frames: [UInt32: Rect]) {

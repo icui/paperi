@@ -35,7 +35,7 @@ struct LiveConfigTests {
         let defaults = try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8))
         #expect(defaults.gesture.enabled == true)
         #expect(defaults.gesture.fingers == 3)
-        #expect(defaults.gesture.travel == 0.25)
+        #expect(defaults.gesture.travel == 0.4)
         #expect(defaults.gesture.commitThreshold == 0.5)
         #expect(defaults.gesture.flickVelocity == 1.5)
         #expect(defaults.gesture.invert == false)
