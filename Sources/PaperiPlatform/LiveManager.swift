@@ -341,9 +341,20 @@ import PaperiCore
 
     // MARK: discovery
 
+    /// Connected displays by UUID, with names; the first screen has the menu bar.
+    private static func displayInfos() -> [LiveConfig.DisplayInfo] {
+        NSScreen.screens.enumerated().map { index, screen in
+            let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+            let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? "Main"
+            return LiveConfig.DisplayInfo(uuid: uuid, name: screen.localizedName, isMain: index == 0)
+        }
+    }
+
+    /// Topologies of the managed displays only (config `display`).
     private func topologies() -> [DisplaySpaceTopology] {
         let inset = options.outerGap
-        return DisplaySpaceCoordinator.liveTopologies().map { display in
+        let managed = options.config.managedDisplays(Self.displayInfos()).uuids
+        return DisplaySpaceCoordinator.liveTopologies().filter { managed.contains($0.displayUUID) }.map { display in
             let c = display.canvas
             return DisplaySpaceTopology(displayUUID: display.displayUUID,
                 canvas: Rect(x: c.x + inset, y: c.y + inset, width: c.width - 2 * inset, height: c.height - 2 * inset),
@@ -486,6 +497,29 @@ import PaperiCore
             for row in rows { references[row.windowID] = row.element; pidForWindow[row.windowID] = pid }
         }
         let byID = Dictionary(surveys.values.flatMap { $0 }.map { ($0.windowID, $0) }, uniquingKeysWith: { a, _ in a })
+
+        // 2b. Windows now on a display that is not managed (moved there with
+        // Mission Control, or the config changed) leave the strip. They are
+        // left where they are, unless mostly off-screen (macOS may put a
+        // window back at a position Paperi once parked it at on that display):
+        // then they are fitted into that display.
+        let managedSpaces = Set(displays.flatMap { $0.spaces.map(\.id) })
+        var allDisplays: [DisplaySpaceTopology]?
+        for (wid, row) in byID where coordinator.spaceForWindow[wid] != nil && isActiveRepresentative(wid) {
+            guard let space = row.spaceID, !managedSpaces.contains(space) else { continue }
+            let members = (try? coordinator.removeContainer(containing: wid, classification: Self.tiled)) ?? []
+            guard !members.isEmpty else { continue }
+            // Released for good: stopping Paperi must not pull it back either.
+            for member in members { hiddenBehind.remove(member); journal.removeValue(forKey: member) }
+            persistJournal()
+            log("container of \(wid) left the managed display (Space \(space))")
+            if allDisplays == nil { allDisplays = DisplaySpaceCoordinator.liveTopologies() }
+            if let frame = row.frame, let visible = allDisplays?.first(where: { $0.spaces.contains { $0.id == space } })?.canvas,
+               let fitted = LiveReconciliation.fitOnScreen(frame, visible: visible) {
+                _ = write(fitted, to: row.element)
+                log("fitted released \(wid) into its display")
+            }
+        }
 
         // 3. Definitive state changes (minimized, fullscreen, floated by the
         // user or a rule) leave the strip. Transient metadata, e.g. a sheet
@@ -952,7 +986,8 @@ import PaperiCore
     /// an adjacent Space exists on the display showing the active Space.
     private func switchSpace(_ direction: Direction) -> [String: Any] {
         let active = paperi_active_space()
-        guard let display = coordinator.displays.first(where: { $0.spaces.contains { $0.id == active } }),
+        // Any display, managed or not: Space switching is not window management.
+        guard let display = DisplaySpaceCoordinator.liveTopologies().first(where: { $0.spaces.contains { $0.id == active } }),
               let index = display.spaces.firstIndex(where: { $0.id == active }) else {
             return ["ok": false, "error": "active Space unknown"]
         }
@@ -1078,7 +1113,10 @@ import PaperiCore
                  }]
              }]
         }
+        let selection = options.config.managedDisplays(Self.displayInfos())
+        let managedNames = Self.displayInfos().filter { selection.uuids.contains($0.uuid) }.map(\.name)
         return ["ok": true, "paused": false, "apps": options.config.include?.sorted() ?? ["all regular apps"], "displays": displays, "sessions": sessions,
+                "managedDisplay": ["config": options.config.display ?? "main", "displays": managedNames, "matched": selection.matched],
                 "floating": userFloating.sorted(), "journaled": journal.count, "lastRefreshMS": lastRefreshMS]
     }
 }

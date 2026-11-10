@@ -93,4 +93,13 @@ import PaperiCore
         let hiddenLeft = Rect(x: -1272 + 1 - 1324, y: 39, width: 1324, height: 753)
         #expect(LiveReconciliation.park(hiddenLeft, display: external, otherDisplays: [builtIn], cover: focused) == hiddenLeft)
     }
+
+    @Test func releasedWindowsAreFittedOnlyWhenMostlyOffScreen() {
+        let external = Rect(x: -1280, y: 25, width: 1280, height: 775)
+        // Left at an old parked position, mostly off the display's left edge.
+        let parked = Rect(x: -2512, y: 39, width: 1408, height: 761)
+        #expect(LiveReconciliation.fitOnScreen(parked, visible: external) == Rect(x: -1280, y: 39, width: 1280, height: 761))
+        // Already on screen: untouched.
+        #expect(LiveReconciliation.fitOnScreen(Rect(x: -1256, y: 39, width: 1248, height: 753), visible: external) == nil)
+    }
 }

@@ -26,4 +26,22 @@ struct LiveConfigTests {
         only.include = ["com.example.agent"]
         #expect(only.manages(bundleID: "com.example.agent", regular: false))
     }
+
+    @Test func managedDisplayDefaultsToMainAndMatchesUUIDOrName() throws {
+        let displays = [LiveConfig.DisplayInfo(uuid: "37D8-BUILTIN", name: "Built-in Retina Display", isMain: true),
+                        LiveConfig.DisplayInfo(uuid: "D55E-EXTERNAL", name: "InnoView", isMain: false)]
+        func pick(_ spec: String?) -> (Set<String>, Bool) {
+            var config = LiveConfig(); config.display = spec
+            let r = config.managedDisplays(displays); return (r.uuids, r.matched)
+        }
+        #expect(pick(nil) == (["37D8-BUILTIN"], true))
+        #expect(pick("main") == (["37D8-BUILTIN"], true))
+        #expect(pick("all") == (["37D8-BUILTIN", "D55E-EXTERNAL"], true))
+        #expect(pick("innoview") == (["D55E-EXTERNAL"], true))
+        #expect(pick("d55e-external") == (["D55E-EXTERNAL"], true))
+        // Unknown or disconnected: fall back to the main display, flagged.
+        #expect(pick("Studio Display") == (["37D8-BUILTIN"], false))
+        let decoded = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"display": "InnoView"}"#.utf8))
+        #expect(decoded.display == "InnoView")
+    }
 }

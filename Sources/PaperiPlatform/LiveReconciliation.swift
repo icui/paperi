@@ -55,4 +55,17 @@ enum LiveReconciliation {
         }
         return moved
     }
+
+    /// A window less than 90% inside `visible` is moved (and shrunk if needed)
+    /// to lie fully inside it, keeping its position where possible; nil if it
+    /// is already sufficiently on screen.
+    static func fitOnScreen(_ frame: Rect, visible: Rect) -> Rect? {
+        let inside = CGRect(x: frame.x, y: frame.y, width: frame.width, height: frame.height)
+            .intersection(CGRect(x: visible.x, y: visible.y, width: visible.width, height: visible.height))
+        let shown = inside.isNull ? 0 : Double(inside.width * inside.height)
+        guard frame.isValid, visible.isValid, shown < 0.9 * frame.width * frame.height else { return nil }
+        let width = min(frame.width, visible.width), height = min(frame.height, visible.height)
+        return Rect(x: min(max(frame.x, visible.x), visible.x + visible.width - width),
+                    y: min(max(frame.y, visible.y), visible.y + visible.height - height), width: width, height: height)
+    }
 }
