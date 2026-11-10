@@ -55,4 +55,31 @@ import PaperiCore
         let inside = Rect(x: 200, y: -700, width: 600, height: 500)
         #expect(LiveReconciliation.fit(inside, into: canvas) == inside)
     }
+
+    @Test func edgeGroupsListColumnsPastEachEdgeNearestFirst() {
+        let canvas = Rect(x: 8, y: 38, width: 1424, height: 886)
+        func p(_ id: UInt32, _ x: Double, _ w: Double) -> (window: UInt32, frame: Rect) {
+            (id, Rect(x: x, y: 38, width: w, height: 886))
+        }
+        let placements = [p(1, -1399, 1408), p(2, -1044, 1248), p(3, 212, 1212), p(4, 1264, 1212), p(5, 1431, 1408)]
+        #expect(LiveReconciliation.edgeGroups(placements, canvas: canvas) == [[2, 1], [4, 5]])
+        // A single column past an edge overlaps nothing.
+        #expect(LiveReconciliation.edgeGroups([p(3, 212, 1212), p(4, 1264, 1212)], canvas: canvas).isEmpty)
+    }
+
+    @Test func columnsBeyondTheNearestArePushedToTheScreenEdge() {
+        let canvas = Rect(x: 8, y: 38, width: 1424, height: 886)
+        let frames: [(window: UInt32, frame: Rect)] = [
+            (1, Rect(x: -1399, y: 38, width: 1408, height: 886)),   // left sliver behind the peek
+            (2, Rect(x: -1044, y: 38, width: 1248, height: 886)),   // left peek (nearest)
+            (3, Rect(x: 212, y: 38, width: 1212, height: 886)),     // focused
+            (4, Rect(x: 1431, y: 38, width: 1408, height: 886)),    // right sliver (alone)
+        ]
+        let tucked = LiveReconciliation.tuck(frames, canvas: canvas, screenInset: 8)
+        #expect(tucked == [1: Rect(x: 0 - 1408 + 1, y: 38, width: 1408, height: 886)])
+        let right = LiveReconciliation.tuck([(5, Rect(x: 1264, y: 38, width: 1212, height: 886)),
+                                             (6, Rect(x: 1431, y: 38, width: 1408, height: 886))],
+                                            canvas: canvas, screenInset: 8)
+        #expect(right == [6: Rect(x: 1439, y: 38, width: 1408, height: 886)])
+    }
 }

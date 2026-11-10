@@ -5,8 +5,7 @@ import PaperiCore
 
 /// Test aid only: drags a window onto a Space thumbnail through the Mission
 /// Control AX tree, as a user would, and confirms WindowServer Space membership.
-/// Live mode never moves windows between Spaces; it follows the user's moves
-/// (and only asks whether Mission Control is open).
+/// Live mode never moves windows between Spaces; it follows the user's moves.
 /// Matches the window by its exact, unique title.
 @MainActor enum SpaceTransfer {
     private static func pause(_ seconds: TimeInterval) {
@@ -38,9 +37,6 @@ import PaperiCore
               AXValueGetValue(sizeRaw as! AXValue, .cgSize, &s), s.width > 0, s.height > 0 else { return nil }
         return CGPoint(x: p.x + s.width / 2, y: p.y + s.height / 2)
     }
-
-    /// Whether Mission Control is showing (its Dock AX group exists).
-    static func missionControlOpen() -> Bool { missionControlGroup() != nil }
 
     private static func missionControlGroup() -> AXUIElement? {
         guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return nil }
