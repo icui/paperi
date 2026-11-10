@@ -3,48 +3,60 @@ import QuartzCore
 @preconcurrency import ScreenCaptureKit
 import PaperiCore
 
-/// Experimental, one-shot compositor. Captures never leave memory.
-/// An opaque background capture masks the real windows while their images move.
+/// Screenshot compositor for the swipe gesture. Captures never leave memory.
+/// An opaque capture of everything except the strip masks the real windows
+/// while their images move; the caller moves the real windows once underneath,
+/// slides the images onto the frames the real windows actually took, then hides.
 @MainActor final class SnapshotTransition {
     private var window: NSWindow?
     private var layers: [UInt32: CALayer] = [:]
     private var screenFrame = CGRect.zero
+    private var mainHeight = 0.0
+    /// Frames of the captured windows as ScreenCaptureKit saw them (top-left
+    /// origin). The images start here, so they line up with the real windows
+    /// even if a cached survey frame is stale.
+    private(set) var captured: [UInt32: Rect] = [:]
     private(set) var captureMS = 0.0
     private(set) var textureBytes = 0
 
-    func prepare(frames: [UInt32: Rect], canvas: Rect) async throws {
+    func prepare(windows ids: Set<UInt32>, canvas: Rect) async throws {
         let began = ProcessInfo.processInfo.systemUptime
-        guard frames.count <= 12 else { throw Failure.tooManyWindows }
+        guard ids.count <= 12 else { throw Failure.tooManyWindows }
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else { throw Failure.permission }
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         try Task.checkCancellation()
+        mainHeight = Double(NSScreen.screens.first?.frame.height ?? 0)
         guard let screen = NSScreen.screens.first(where: { screen in
-            let height = NSScreen.screens.first?.frame.height ?? 0
-            let ax = CGRect(x: screen.frame.minX, y: height - screen.frame.maxY,
+            let ax = CGRect(x: screen.frame.minX, y: mainHeight - screen.frame.maxY,
                             width: screen.frame.width, height: screen.frame.height)
             return ax.contains(CGPoint(x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height / 2))
         }), let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value,
               let display = content.displays.first(where: { $0.displayID == id }) else { throw Failure.display }
-        let windows = content.windows.filter { frames[$0.windowID] != nil }
-        guard windows.count == frames.count else { throw Failure.missingWindow }
+        let windows = content.windows.filter { ids.contains($0.windowID) }
+        guard windows.count == ids.count else { throw Failure.missingWindow }
         screenFrame = screen.frame
+        let scale = screen.backingScaleFactor
         let root = CALayer()
         root.frame = CGRect(origin: .zero, size: screen.frame.size)
         root.masksToBounds = true
-        let background = try await capture(SCContentFilter(display: display, excludingWindows: windows), scale: screen.backingScaleFactor)
+        root.actions = Self.noActions
+        root.contents = try await capture(SCContentFilter(display: display, excludingWindows: windows), scale: scale)
+        root.contentsScale = scale
         try Task.checkCancellation()
-        root.contents = background
         // ScreenCaptureKit's list is front to back; compose back to front.
         for item in windows.reversed() {
-            guard let frame = frames[item.windowID] else { continue }
-            let image = try await capture(SCContentFilter(desktopIndependentWindow: item), scale: screen.backingScaleFactor)
+            let frame = Rect(x: item.frame.minX, y: item.frame.minY, width: item.frame.width, height: item.frame.height)
+            let image = try await capture(SCContentFilter(desktopIndependentWindow: item), scale: scale)
             try Task.checkCancellation()
             let layer = CALayer()
+            layer.actions = Self.noActions
             layer.contents = image
+            layer.contentsScale = scale
             layer.contentsGravity = .resize
             layer.frame = local(frame)
             root.addSublayer(layer)
             layers[item.windowID] = layer
+            captured[item.windowID] = frame
         }
         let overlay = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
         overlay.isReleasedWhenClosed = false
@@ -76,19 +88,39 @@ import PaperiCore
         return image
     }
 
-    func show(targets: [UInt32: Rect], duration: Double) {
-        window?.orderFrontRegardless()
+    var isShown: Bool { window != nil }
+
+    func show() { window?.orderFrontRegardless() }
+
+    /// Moves images immediately (finger tracking); cancels any running slide.
+    func place(_ frames: [UInt32: Rect]) {
         CATransaction.begin()
-        CATransaction.setAnimationDuration(duration)
-        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+        CATransaction.setDisableActions(true)
         for (wid, layer) in layers {
-            guard let target = targets[wid] else { continue }
-            let end = local(target)
+            guard let frame = frames[wid] else { continue }
+            layer.removeAnimation(forKey: "slide")
+            layer.position = center(frame)
+        }
+        CATransaction.commit()
+    }
+
+    /// Slides images from wherever they are on screen now (including mid-slide).
+    func slide(to frames: [UInt32: Rect], duration: Double, easeIn: Bool = false) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (wid, layer) in layers {
+            guard let frame = frames[wid] else { continue }
+            let from = layer.presentation()?.position ?? layer.position
+            let to = center(frame)
+            layer.removeAnimation(forKey: "slide")
+            layer.position = to
+            guard duration > 0, from != to else { continue }
             let animation = CABasicAnimation(keyPath: "position")
-            animation.fromValue = NSValue(point: layer.position)
-            animation.toValue = NSValue(point: CGPoint(x: end.midX, y: end.midY))
-            layer.position = CGPoint(x: end.midX, y: end.midY)
-            layer.add(animation, forKey: "focusPosition")
+            animation.fromValue = NSValue(point: from)
+            animation.toValue = NSValue(point: to)
+            animation.duration = duration
+            animation.timingFunction = CAMediaTimingFunction(name: easeIn ? .easeInEaseOut : .easeOut)
+            layer.add(animation, forKey: "slide")
         }
         CATransaction.commit()
         CATransaction.flush()
@@ -100,11 +132,18 @@ import PaperiCore
         layers.removeAll()
     }
 
-    private func local(_ frame: Rect) -> CGRect {
-        let height = NSScreen.screens.first?.frame.height ?? 0
-        return CGRect(x: frame.x - screenFrame.minX,
-                      y: height - frame.y - frame.height - screenFrame.minY,
-                      width: frame.width, height: frame.height)
+    private func center(_ frame: Rect) -> CGPoint {
+        let rect = local(frame)
+        return CGPoint(x: rect.midX, y: rect.midY)
     }
+
+    private func local(_ frame: Rect) -> CGRect {
+        CGRect(x: frame.x - screenFrame.minX,
+               y: mainHeight - frame.y - frame.height - screenFrame.minY,
+               width: frame.width, height: frame.height)
+    }
+
+    private static let noActions: [String: any CAAction] = ["position": NSNull(), "bounds": NSNull(),
+                                                            "contents": NSNull(), "frame": NSNull()]
     enum Failure: Error { case permission, display, missingWindow, tooManyWindows, memoryBudget }
 }

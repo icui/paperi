@@ -66,4 +66,38 @@ enum LiveReconciliation {
         }
         return result
     }
+
+    // MARK: swipe
+
+    /// Positions `progress` (0…1) of the way from `starts` to `ends`; sizes
+    /// stay at the start. Windows missing from either side keep their start.
+    static func interpolate(_ starts: [UInt32: Rect], _ ends: [UInt32: Rect], progress: Double) -> [UInt32: Rect] {
+        let t = min(1, max(0, progress.isFinite ? progress : 0))
+        return starts.reduce(into: [:]) { result, item in
+            var frame = item.value
+            if let end = ends[item.key] {
+                frame.x += (end.x - frame.x) * t
+                frame.y += (end.y - frame.y) * t
+            }
+            result[item.key] = frame
+        }
+    }
+
+    /// Hand-off check after the real windows were moved under the snapshot
+    /// overlay: `settled` once every window read the same frame twice in a
+    /// row; `landing` are the observed frames the images should finish on
+    /// (macOS or the app may not put a window exactly on its target).
+    static func handoff(previous: [UInt32: Rect], current: [UInt32: Rect], targets: [UInt32: Rect],
+                        tolerance: Double = 0.5) -> (settled: Bool, landing: [UInt32: Rect], maxDeviation: Double) {
+        var settled = true, deviation = 0.0, landing: [UInt32: Rect] = [:]
+        for (wid, target) in targets {
+            guard let now = current[wid], now.isValid else { settled = false; landing[wid] = target; continue }
+            if let before = previous[wid] {
+                if abs(before.x - now.x) > tolerance || abs(before.y - now.y) > tolerance || abs(before.width - now.width) > tolerance || abs(before.height - now.height) > tolerance { settled = false }
+            } else { settled = false }
+            landing[wid] = Rect(x: now.x, y: now.y, width: target.width, height: target.height)
+            deviation = max(deviation, abs(now.x - target.x), abs(now.y - target.y))
+        }
+        return (settled, landing, deviation)
+    }
 }

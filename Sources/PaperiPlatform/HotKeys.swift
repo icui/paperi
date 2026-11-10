@@ -121,6 +121,10 @@ public enum LiveCommand {
             return rest.isEmpty ? nil : "\(verb) takes no arguments"
         case "focus", "swap", "move":
             return rest.count == 1 && directions.contains(rest[0]) ? nil : "usage: \(verb) left|right|up|down"
+        case "swipe":
+            guard (1...2).contains(rest.count), rest[0] == "left" || rest[0] == "right" else { return "usage: swipe left|right [travel]" }
+            if rest.count == 2 { guard let t = Double(rest[1]), t > 0, t <= 1 else { return "travel must be in (0, 1]" } }
+            return nil
         case "width", "height":
             guard (1...2).contains(rest.count), rest[0] == "+" || rest[0] == "-" else { return "usage: \(verb) +|- [fraction]" }
             if rest.count == 2 { guard let f = Double(rest[1]), f > 0, f <= 1 else { return "fraction must be in (0, 1]" } }

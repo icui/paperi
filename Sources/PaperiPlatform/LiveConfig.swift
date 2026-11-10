@@ -30,7 +30,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public var tile: [FloatRule]
     /// Focus-scroll duration in seconds; zero disables animation.
     public var focusScrollDuration: Double?
-    /// Experimental screenshot compositor; requires Screen Recording permission.
+    /// Opt-in screenshot swipe prototype only; keyboard animation is unchanged.
+    /// Requires Screen Recording permission.
     public var experimentalSnapshotScroll: Bool?
     public var gap: Double?
     public var outerGap: Double?

@@ -4,6 +4,39 @@ import PaperiCore
 @testable import PaperiPlatform
 
 @MainActor struct LiveReconciliationTests {
+    @Test func swipeInterpolationClampsAndPreservesSizes() {
+        let start = Rect(x: -200, y: 40, width: 500, height: 700)
+        let end = Rect(x: 300, y: 60, width: 800, height: 900)
+        #expect(LiveReconciliation.interpolate([1: start], [1: end], progress: 0.5)[1]
+                == Rect(x: 50, y: 50, width: 500, height: 700))
+        #expect(LiveReconciliation.interpolate([1: start], [1: end], progress: -3)[1] == start)
+        #expect(LiveReconciliation.interpolate([1: start], [1: end], progress: .nan)[1] == start)
+        #expect(LiveReconciliation.interpolate([1: start], [:], progress: 1)[1] == start)
+        #expect(LiveReconciliation.interpolate([1: start], [1: end], progress: 3)[1]?.x == 300)
+    }
+
+    @Test func handoffNeedsCompleteStableObservationsAndReportsClamping() {
+        let target = Rect(x: -500, y: 40, width: 600, height: 700)
+        let actual = Rect(x: -490, y: 40, width: 600, height: 700)
+        #expect(!LiveReconciliation.handoff(previous: [:], current: [1: actual], targets: [1: target]).settled)
+        let result = LiveReconciliation.handoff(previous: [1: actual], current: [1: actual], targets: [1: target])
+        #expect(result.settled)
+        #expect(result.landing[1] == actual)
+        #expect(result.maxDeviation == 10)
+        #expect(!LiveReconciliation.handoff(previous: [1: actual], current: [:], targets: [1: target]).settled)
+        var resized = actual; resized.width += 10
+        #expect(!LiveReconciliation.handoff(previous: [1: actual], current: [1: resized], targets: [1: target]).settled)
+    }
+
+    @Test func swipeCommandRejectsInvalidTravelAndVerticalDirections() {
+        #expect(LiveCommand.validate(["swipe", "right"]) == nil)
+        #expect(LiveCommand.validate(["swipe", "left", "0.3"]) == nil)
+        for args in [["swipe"], ["swipe", "up"], ["swipe", "left", "nan"],
+                     ["swipe", "right", "0"], ["swipe", "right", "2"]] {
+            #expect(LiveCommand.validate(args) != nil)
+        }
+    }
+
     let canvas = Rect(x: 8, y: 33, width: 1424, height: 851)
     var eligible: Classification { WindowPolicy.classify(WindowFacts(bundleID: "test", role: "AXWindow",
         subrole: "AXStandardWindow", isRoot: true, movable: true, resizable: true, level: 0)) }
