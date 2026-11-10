@@ -29,27 +29,29 @@ import PaperiPlatform
 var args = Array(CommandLine.arguments.dropFirst())
 if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["--menu"] }
 @MainActor func runLive(_ arguments: [String]) -> Never {
-    var apps: Set<String> = [], singletons: Set<String> = []
+    var include: [String] = [], singletons: [String] = []
     var verbose = false, restore = true, hotkeys = true
     var i = 0
     while i < arguments.count {
         switch arguments[i] {
-        case "--app" where i + 1 < arguments.count: apps.insert(arguments[i + 1]); i += 1
-        case "--singleton-app" where i + 1 < arguments.count:
-            apps.insert(arguments[i + 1]); singletons.insert(arguments[i + 1]); i += 1
+        case "--app" where i + 1 < arguments.count: include.append(arguments[i + 1]); i += 1
+        case "--singleton-app" where i + 1 < arguments.count: singletons.append(arguments[i + 1]); i += 1
         case "--verbose", "-v": verbose = true
         case "--no-restore": restore = false
         case "--no-hotkeys": hotkeys = false
         default:
-            FileHandle.standardError.write(Data("Unknown option \(arguments[i])\n".utf8)); exit(2)
+            print("Usage: paperi run [--app bundle.id ...] [--singleton-app bundle.id ...] [--verbose] [--no-restore] [--no-hotkeys]")
+            exit(2)
         }
         i += 1
     }
-    guard !apps.isEmpty else {
-        print("Usage: paperi run --app bundle.id [--app ...] [--singleton-app bundle.id ...] [--verbose] [--no-restore] [--no-hotkeys]")
-        exit(2)
-    }
-    var options = LiveManager.Options(bundleIDs: apps, singletonBundleIDs: singletons)
+    var config: LiveConfig
+    do { config = try LiveConfig.load() }
+    catch { FileHandle.standardError.write(Data("paperi run: invalid \(LiveConfig.defaultURL.path): \(error)\n".utf8)); exit(2) }
+    if !include.isEmpty { config.include = (config.include ?? []) + include }
+    config.singleton += singletons
+    let apps = config.include?.sorted() ?? ["all regular apps"]
+    var options = LiveManager.Options(config: config)
     options.verbose = verbose; options.restoreOnStop = restore
     let manager = LiveManager(options: options)
     var server: LiveCommandServer?
@@ -108,9 +110,8 @@ case "msg":
         FileHandle.standardError.write(Data("paperi msg: \(error)\n".utf8)); exit(1)
     }
 case "check-apps":
-    guard args.count > 1 else { print("Usage: paperi check-apps bundle.id [...]"); exit(2) }
     guard AXIsProcessTrusted() else { print("Accessibility access is required."); exit(1) }
-    Diagnostics.printJSON(LiveManager.checkApps(Array(args.dropFirst())))
+    Diagnostics.printJSON(LiveManager.checkApps(Array(args.dropFirst()), config: (try? LiveConfig.load()) ?? LiveConfig()))
 case "restore":
     guard AXIsProcessTrusted() else { print("Accessibility access is required."); exit(1) }
     Diagnostics.printJSON(LiveManager.restore())
@@ -245,11 +246,11 @@ case "benchmark-core":
 default:
     print("""
     Paperi (opt-in live management; Option–Command shortcuts from the PaperWM config)
-      paperi run --app ID [--app ID ...] [--singleton-app ID ...] [-v] [--no-restore] [--no-hotkeys]
-                                        Manage windows of allowlisted apps on each display's active Space
+      paperi run [--app ID ...] [--singleton-app ID ...] [-v] [--no-restore] [--no-hotkeys]
+                                        Manage all regular apps (or only --app ones) on each display's active Space
       paperi msg COMMAND                 focus|swap left|right|up|down, width|height +|- [fraction],
                                         center, split, slurp, barf, float, space N, retile, status, stop
-      paperi check-apps ID [...]         Read-only: what live mode would decide for each window
+      paperi check-apps [ID ...]         Read-only: what live mode would decide for each on-screen window
       paperi restore                     Restore frames journaled by a run that did not stop cleanly
       paperi snapshot [--include-titles]  Read-only JSON snapshot
       paperi tab-evidence identifier     Bounded read-only AX tab structure for one app

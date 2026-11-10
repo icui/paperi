@@ -10,13 +10,19 @@ public struct WindowFacts: Codable, Equatable, Sendable {
     public var fullscreen: Bool?
     public var minimized: Bool?
     public var level: Int?
+    /// Whether the window offers a fullscreen (green) button. Document windows
+    /// do; utility windows such as Finder's Get Info or settings panes do not.
+    /// nil means unknown and applies no heuristic.
+    public var hasFullScreenButton: Bool?
 
     public init(bundleID: String, role: String? = nil, subrole: String? = nil,
                 isRoot: Bool? = nil, movable: Bool? = nil, resizable: Bool? = nil,
-                fullscreen: Bool? = false, minimized: Bool? = false, level: Int? = nil) {
+                fullscreen: Bool? = false, minimized: Bool? = false, level: Int? = nil,
+                hasFullScreenButton: Bool? = nil) {
         self.bundleID = bundleID; self.role = role; self.subrole = subrole
         self.isRoot = isRoot; self.movable = movable; self.resizable = resizable
         self.fullscreen = fullscreen; self.minimized = minimized; self.level = level
+        self.hasFullScreenButton = hasFullScreenButton
     }
 }
 
@@ -27,7 +33,9 @@ public struct Classification: Codable, Equatable, Sendable {
 }
 
 public enum WindowPolicy {
-    public static func classify(_ facts: WindowFacts, userFloating: Bool = false) -> Classification {
+    /// `forceTile` overrides the utility-window heuristic (user config), never
+    /// the structural popup/sheet/panel exclusions.
+    public static func classify(_ facts: WindowFacts, userFloating: Bool = false, forceTile: Bool = false) -> Classification {
         func result(_ eligibility: Eligibility, _ reason: String) -> Classification {
             Classification(eligibility: eligibility, reason: reason)
         }
@@ -45,6 +53,9 @@ public enum WindowPolicy {
         guard facts.fullscreen != nil, facts.minimized != nil else { return result(.pending, "missing presentation metadata") }
         guard let movable = facts.movable, let resizable = facts.resizable else { return result(.pending, "missing capability metadata") }
         guard movable && resizable else { return result(.excluded, "not a movable resizable document") }
+        if facts.hasFullScreenButton == false && !forceTile && !userFloating {
+            return result(.floating, "utility window (no fullscreen button)")
+        }
         return result(userFloating ? .floating : .tiled, userFloating ? "user floating" : "eligible document")
     }
 }

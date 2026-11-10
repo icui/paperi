@@ -128,6 +128,7 @@ public enum Diagnostics {
     private let runningApplications: () -> [NSRunningApplication]
     private let emit: ([String: Any]) -> Void
     private let bundleIDs: Set<String>?
+    private let filter: (@MainActor (NSRunningApplication) -> Bool)?
     private let observeWorkspaceEvents: Bool
 
     public convenience init(bundleIDs: Set<String>? = nil, observeWorkspaceEvents: Bool = true) {
@@ -141,12 +142,14 @@ public enum Diagnostics {
     init(workspaceCenter: NotificationCenter,
          runningApplications: @escaping () -> [NSRunningApplication],
          bundleIDs: Set<String>? = nil,
+         filter: (@MainActor (NSRunningApplication) -> Bool)? = nil,
          observeWorkspaceEvents: Bool = true,
          emit: @escaping ([String: Any]) -> Void) {
         self.workspaceCenter = workspaceCenter
         self.runningApplications = runningApplications
         self.emit = emit
         self.bundleIDs = bundleIDs
+        self.filter = filter
         self.observeWorkspaceEvents = observeWorkspaceEvents
     }
     public func start() {
@@ -204,6 +207,7 @@ public enum Diagnostics {
     }
 
     private func includes(_ app: NSRunningApplication) -> Bool {
+        if let filter { return filter(app) }
         guard let bundleIDs else { return true }
         return app.bundleIdentifier.map { bundleIDs.contains($0) } ?? false
     }

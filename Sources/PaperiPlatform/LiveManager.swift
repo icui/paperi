@@ -11,18 +11,15 @@ import PaperiCore
 /// Commands arrive through `LiveCommandServer` (`paperi msg ...`).
 @MainActor public final class LiveManager {
     public struct Options: Sendable {
-        public var bundleIDs: Set<String>
-        /// Apps whose windows have no native macOS tabs (e.g. Chromium/Electron
-        /// with in-content tab strips); every eligible window is a singleton.
-        public var singletonBundleIDs: Set<String>
-        public var gap: Double = 8
-        public var outerGap: Double = 8
+        public var config: LiveConfig
+        public var gap: Double { config.gap ?? 8 }
+        public var outerGap: Double { config.outerGap ?? 8 }
         public var restoreOnStop = true
         public var journalURL: URL
         public var verbose = false
 
-        public init(bundleIDs: Set<String>, singletonBundleIDs: Set<String> = [], journalURL: URL = LiveManager.defaultJournalURL) {
-            self.bundleIDs = bundleIDs; self.singletonBundleIDs = singletonBundleIDs; self.journalURL = journalURL
+        public init(config: LiveConfig = LiveConfig(), journalURL: URL = LiveManager.defaultJournalURL) {
+            self.config = config; self.journalURL = journalURL
         }
     }
 
@@ -36,6 +33,8 @@ import PaperiCore
         let pid: pid_t
         let element: AXUIElement
         let classification: Classification
+        let facts: WindowFacts
+        let floatRequested: Bool
         let spaceID: UInt64?
         let frame: Rect?
     }
@@ -50,6 +49,9 @@ import PaperiCore
     private var destroyedNotified: Set<UInt32> = []
     private var expected: [UInt32: (frame: Rect, at: Double)] = [:]
     private var refreshScheduled = false
+    /// Apps whose AX requests timed out are skipped briefly so one hung app
+    /// cannot stall management of every other app.
+    private var slowUntil: [pid_t: Double] = [:]
     private var forceApply = true
     private var timer: Timer?
     private var workspaceTokens: [NSObjectProtocol] = []
@@ -80,7 +82,8 @@ import PaperiCore
         coordinator = DisplaySpaceCoordinator(ownerPIDs: [], displays: topologies())
         recorder = EventRecorder(workspaceCenter: NSWorkspace.shared.notificationCenter,
                                  runningApplications: { NSWorkspace.shared.runningApplications },
-                                 bundleIDs: options.bundleIDs, observeWorkspaceEvents: true,
+                                 filter: { [config = options.config] app in Self.considered(app, config: config) },
+                                 observeWorkspaceEvents: true,
                                  emit: { [weak self] event in self?.receive(event) })
         recorder.start()
         let center = NSWorkspace.shared.notificationCenter
@@ -185,10 +188,30 @@ import PaperiCore
         }
     }
 
+    static func considered(_ app: NSRunningApplication, config: LiveConfig) -> Bool {
+        !app.isTerminated && app.processIdentifier != ProcessInfo.processInfo.processIdentifier &&
+            config.manages(bundleID: app.bundleIdentifier, regular: app.activationPolicy == .regular)
+    }
+
     private func allowlistedApps() -> [NSRunningApplication] {
-        NSWorkspace.shared.runningApplications.filter {
-            !$0.isTerminated && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier &&
-                $0.bundleIdentifier.map(options.bundleIDs.contains) == true
+        NSWorkspace.shared.runningApplications.filter { Self.considered($0, config: options.config) }
+    }
+
+    /// Apps worth an AX survey this pass: those with a normal-level window on
+    /// screen (cheap window-server query) or with containers already managed.
+    /// Everything else (dozens of background apps) costs nothing.
+    private func appsToSurvey(_ apps: [NSRunningApplication]) -> [NSRunningApplication] {
+        let rows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        var onScreen: Set<pid_t> = []
+        for row in rows where (row[kCGWindowLayer as String] as? Int ?? -1) == 0 {
+            if let pid = row[kCGWindowOwnerPID as String] as? pid_t { onScreen.insert(pid) }
+        }
+        let managedOwners = Set(coordinator.spaceForWindow.keys.compactMap { pidForWindow[$0] })
+        let now = ProcessInfo.processInfo.systemUptime
+        return apps.filter { app in
+            let pid = app.processIdentifier
+            guard (slowUntil[pid] ?? 0) <= now else { return false }
+            return onScreen.contains(pid) || managedOwners.contains(pid)
         }
     }
 
@@ -201,7 +224,15 @@ import PaperiCore
         let pid = app.processIdentifier
         let application = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(application, 0.2)
-        guard let windows = Diagnostics.attribute(application, kAXWindowsAttribute) as? [AXUIElement] else { return [] }
+        var value: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value)
+        if error == .cannotComplete {
+            slowUntil[pid] = ProcessInfo.processInfo.systemUptime + 5
+            log("\(app.bundleIdentifier ?? "pid \(pid)") did not answer AX; skipping for 5 s")
+            return []
+        }
+        guard error == .success, let windows = value as? [AXUIElement] else { return [] }
+        let bundleID = app.bundleIdentifier ?? ""
         return windows.compactMap { ref in
             AXUIElementSetMessagingTimeout(ref, 0.2)
             let wid = paperi_window_id(ref)
@@ -218,10 +249,26 @@ import PaperiCore
                 resizable: resizeResult == .success ? resize.boolValue : nil,
                 fullscreen: Diagnostics.attribute(ref, "AXFullScreen") as? Bool ?? false,
                 minimized: Diagnostics.attribute(ref, kAXMinimizedAttribute) as? Bool,
-                level: levels[wid])
-            let classification = WindowPolicy.classify(facts, userFloating: userFloating.contains(wid))
-            return Survey(windowID: wid, pid: pid, element: ref, classification: classification,
+                level: levels[wid], hasFullScreenButton: Self.hasFullScreenButton(ref))
+            let title = (options.config.float.isEmpty && options.config.tile.isEmpty) ? nil
+                : Diagnostics.attribute(ref, kAXTitleAttribute) as? String
+            let ruleFloat = !options.config.float.isEmpty && options.config.floats(bundleID: bundleID, title: title)
+            let ruleTile = !options.config.tile.isEmpty && options.config.tiles(bundleID: bundleID, title: title)
+            let classification = WindowPolicy.classify(facts, userFloating: ruleFloat || userFloating.contains(wid),
+                                                       forceTile: ruleTile)
+            return Survey(windowID: wid, pid: pid, element: ref, classification: classification, facts: facts,
+                          floatRequested: ruleFloat || userFloating.contains(wid),
                           spaceID: Self.windowSpace(wid), frame: Diagnostics.frame(ref))
+        }
+    }
+
+    /// Absent attribute → false; read failure (timeout) → unknown.
+    private static func hasFullScreenButton(_ window: AXUIElement) -> Bool? {
+        var value: CFTypeRef?
+        switch AXUIElementCopyAttributeValue(window, "AXFullScreenButton" as CFString, &value) {
+        case .success: return value != nil
+        case .noValue, .attributeUnsupported: return false
+        default: return nil
         }
     }
 
@@ -256,7 +303,7 @@ import PaperiCore
 
         // 2. Survey allowlisted apps.
         var surveys: [pid_t: [Survey]] = [:]
-        for app in apps where !app.isHidden { surveys[app.processIdentifier] = survey(app, levels: levels) }
+        for app in appsToSurvey(apps) where !app.isHidden { surveys[app.processIdentifier] = survey(app, levels: levels) }
         for app in apps where app.isHidden {
             // Hidden apps leave the strip and return at the focused position when shown.
             let windows = coordinator.spaceForWindow.keys.filter { pidForWindow[$0] == app.processIdentifier }
@@ -269,8 +316,11 @@ import PaperiCore
         }
         let byID = Dictionary(surveys.values.flatMap { $0 }.map { ($0.windowID, $0) }, uniquingKeysWith: { a, _ in a })
 
-        // 3. Ineligible now (minimized, fullscreen, user floating): leave the strip.
-        for (wid, row) in byID where coordinator.spaceForWindow[wid] != nil && row.classification.eligibility != .tiled {
+        // 3. Definitive state changes (minimized, fullscreen, floated by the
+        // user or a rule) leave the strip. Transient metadata, e.g. a sheet
+        // making its parent temporarily non-movable, keeps the slot.
+        for (wid, row) in byID where coordinator.spaceForWindow[wid] != nil &&
+            (row.facts.minimized == true || row.facts.fullscreen == true || row.floatRequested) {
             if isActiveRepresentative(wid) { _ = try? coordinator.removeContainer(containing: wid, classification: Self.tiled) }
         }
 
@@ -288,7 +338,10 @@ import PaperiCore
         for app in apps where !app.isHidden {
             let pid = app.processIdentifier
             guard let rows = surveys[pid] else { continue }
-            let singletonApp = app.bundleIdentifier.map(options.singletonBundleIDs.contains) == true
+            let singletonApp = app.bundleIdentifier.map(options.config.singleton.contains) == true
+            let relevant = rows.contains { row in row.spaceID.map(activeSpaces.contains) == true &&
+                (row.classification.eligibility == .tiled || coordinator.spaceForWindow[row.windowID] != nil) }
+            guard relevant else { continue }
             let evidence = singletonApp ? nil : (recorder.tabEvidence(processID: pid)["applications"] as? [[String: Any]])?.first
             for space in activeSpaces {
                 guard let session = coordinator.sessions[space] else { continue }
@@ -437,6 +490,8 @@ import PaperiCore
         for placement in placements {
             let wid = placement.windowID
             guard let element = references[wid], let row = byID[wid], row.spaceID == space else { allConfirmed = false; continue }
+            // Do not fight a window that is temporarily not movable (open sheet).
+            guard row.classification.eligibility == .tiled else { allConfirmed = false; continue }
             let target = LiveReconciliation.park(placement.frame, canvas: session.canvas, display: own, otherDisplays: others)
             if let frame = row.frame, matches(frame, target) { expected[wid] = (target, ProcessInfo.processInfo.systemUptime); continue }
             session.expect(windowID: wid, frame: target, now: ProcessInfo.processInfo.systemUptime, ticket: session.ticket)
@@ -609,7 +664,7 @@ import PaperiCore
         for row in CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? [] {
             if let id = row[kCGWindowNumber as String] as? UInt32 { levels[id] = row[kCGWindowLayer as String] as? Int ?? 0 }
         }
-        let rows = allowlistedApps().filter { !$0.isHidden }.flatMap { survey($0, levels: levels) }
+        let rows = appsToSurvey(allowlistedApps()).filter { !$0.isHidden }.flatMap { survey($0, levels: levels) }
         for row in rows { references[row.windowID] = row.element; pidForWindow[row.windowID] = row.pid }
         return Dictionary(rows.map { ($0.windowID, $0) }, uniquingKeysWith: { a, _ in a })
     }
@@ -698,19 +753,25 @@ import PaperiCore
 
     /// Read-only: what live mode would decide for each current-Space window of
     /// the given apps (eligibility, singleton proof, native tab groups).
-    public static func checkApps(_ bundleIDs: [String]) -> [String: Any] {
+    /// Empty `bundleIDs` checks every app live mode would consider (config applied).
+    public static func checkApps(_ bundleIDs: [String], config: LiveConfig = LiveConfig()) -> [String: Any] {
+        var config = config
+        if !bundleIDs.isEmpty { config.include = bundleIDs }
+        let considered = NSWorkspace.shared.runningApplications.filter { Self.considered($0, config: config) }
+        let pids = Set(considered.map(\.processIdentifier))
         let recorder = EventRecorder(workspaceCenter: NotificationCenter(),
                                      runningApplications: { NSWorkspace.shared.runningApplications },
-                                     bundleIDs: Set(bundleIDs), observeWorkspaceEvents: false, emit: { _ in })
+                                     filter: { pids.contains($0.processIdentifier) },
+                                     observeWorkspaceEvents: false, emit: { _ in })
         recorder.start(); defer { recorder.stop() }
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.3))
-        let probe = LiveManager(options: Options(bundleIDs: Set(bundleIDs)))
+        let probe = LiveManager(options: Options(config: config))
         var levels: [UInt32: Int] = [:]
         for row in CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? [] {
             if let id = row[kCGWindowNumber as String] as? UInt32 { levels[id] = row[kCGWindowLayer as String] as? Int ?? 0 }
         }
         var apps: [[String: Any]] = []
-        for app in NSWorkspace.shared.runningApplications where app.bundleIdentifier.map(bundleIDs.contains) == true {
+        for app in probe.appsToSurvey(considered) {
             let evidence = (recorder.tabEvidence(processID: app.processIdentifier)["applications"] as? [[String: Any]])?.first ?? [:]
             let singletons = Set(NativeTabMembership.inspectSingletons(evidence))
             let groups = NativeTabMembership.inspect(evidence, requireComplete: false)
@@ -725,7 +786,9 @@ import PaperiCore
             let windows = probe.survey(app, levels: levels).map { row -> [String: Any] in
                 let group = groups.first { $0.members.contains(row.windowID) }
                 let decision: String
-                if row.classification.eligibility != .tiled { decision = "skipped: \(row.classification.reason)" }
+                if row.classification.reason == "user floating" { decision = "floating (config rule)" }
+                else if row.classification.eligibility == .floating { decision = "floating: \(row.classification.reason)" }
+                else if row.classification.eligibility != .tiled { decision = "skipped: \(row.classification.reason)" }
                 else if let group { decision = "tab container \(group.members)" }
                 else if singletons.contains(row.windowID) { decision = "managed as window" }
                 else { decision = "withheld: tab membership unknown (use --singleton-app if it has no native tabs)" }
@@ -754,7 +817,7 @@ import PaperiCore
                  }]
              }]
         }
-        return ["ok": true, "apps": options.bundleIDs.sorted(), "displays": displays, "sessions": sessions,
+        return ["ok": true, "apps": options.config.include?.sorted() ?? ["all regular apps"], "displays": displays, "sessions": sessions,
                 "floating": userFloating.sorted(), "journaled": journal.count, "lastRefreshMS": lastRefreshMS]
     }
 }

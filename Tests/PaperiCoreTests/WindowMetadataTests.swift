@@ -29,3 +29,19 @@ struct WindowMetadataTests {
         #expect(restored == facts)
     }
 }
+
+struct UtilityWindowHeuristicTests {
+    let base = WindowFacts(bundleID: "com.apple.finder", role: "AXWindow", subrole: "AXStandardWindow",
+                           isRoot: true, movable: true, resizable: true, level: 0)
+    @Test func windowsWithoutFullScreenButtonFloatUnlessForced() {
+        var facts = base
+        #expect(WindowPolicy.classify(facts).eligibility == .tiled)          // unknown: no heuristic
+        facts.hasFullScreenButton = true
+        #expect(WindowPolicy.classify(facts).eligibility == .tiled)
+        facts.hasFullScreenButton = false
+        #expect(WindowPolicy.classify(facts).eligibility == .floating)
+        #expect(WindowPolicy.classify(facts, forceTile: true).eligibility == .tiled)
+        facts.subrole = "AXDialog"
+        #expect(WindowPolicy.classify(facts, forceTile: true).eligibility == .excluded)
+    }
+}

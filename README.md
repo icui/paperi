@@ -6,10 +6,10 @@ Standalone macOS scrolling window manager (PaperWM-style) in development.
 
 ```sh
 ./scripts/swift.sh build
-.build/debug/paperi run --app com.apple.TextEdit --app com.apple.finder -v
+.build/debug/paperi run -v            # all regular apps; or limit with --app ID ...
 ```
 
-Manages windows of the allowlisted apps on each display's active Space as one horizontally scrolling strip, including native macOS tab containers and Mission Control Space transfers. It registers the Option–Command shortcuts from the PaperWM Hammerspoon config (`--no-hotkeys` disables them); every shortcut runs the same command as `paperi msg`:
+Manages the windows of every regular (Dock-visible) app on each display's active Space as one horizontally scrolling strip, including native macOS tab containers and Mission Control Space transfers. Only real document windows are tiled: menus, popovers, sheets, dialogs, panels, Control Center and Spotlight are never touched, and windows without a fullscreen button (Open/Save panels, Finder Get Info, System Settings) float. It registers the Option–Command shortcuts from the PaperWM Hammerspoon config (`--no-hotkeys` disables them); every shortcut runs the same command as `paperi msg`:
 
 | Keys (⌥⌘) | Command | Effect |
 | --- | --- | --- |
@@ -26,7 +26,19 @@ Manages windows of the allowlisted apps on each display's active Space as one ho
 
 Quit Hammerspoon (or stop PaperWM) first: a combination already registered by another process is reported in `hotkeyFailures` and left to that process.
 
-Run `paperi check-apps ID …` (read-only) to see what live mode would decide for each window. Windows without a tab bar are managed as plain windows automatically (verified: Slack, Beeper, Zed, System Settings). Only if a window shows a tab bar that is drawn by the app rather than macOS is it reported as `withheld`; `--singleton-app ID` then forces plain-window handling. Ctrl-C or `paperi msg stop` restores admission frames; after a crash, `paperi restore` uses the persisted journal. The responsible terminal/editor (or `dist/Paperi.app`) needs Accessibility access. See [docs/STATUS.md](docs/STATUS.md) for verified scope and limits.
+`paperi check-apps [ID …]` (read-only) shows what live mode would decide for each on-screen window. Optional `~/Library/Application Support/Paperi/config.json` (all keys optional):
+
+```json
+{
+  "exclude": ["us.zoom.xos"],
+  "float": [{"app": "com.apple.finder", "titleContains": "Copy"}],
+  "tile": [{"app": "com.apple.systempreferences"}],
+  "singleton": ["com.google.Chrome"],
+  "include": null, "gap": 8, "outerGap": 8
+}
+```
+
+`exclude` skips apps, `float` keeps matching windows out of the strip, `tile` overrides the no-fullscreen-button rule, `singleton` (or `--singleton-app`) treats an app's in-content tab bar as a plain window, and `include` (or `--app`) limits management to listed apps. System UI agents are always excluded. Ctrl-C or `paperi msg stop` restores admission frames; after a crash, `paperi restore` uses the persisted journal. The responsible terminal/editor (or `dist/Paperi.app`) needs Accessibility access. See [docs/STATUS.md](docs/STATUS.md) for verified scope and limits.
 
 ## Disposable preview
 
@@ -38,7 +50,7 @@ Click one of its two document windows, then use **Narrower/Wider/Stack/Unstack/N
 
 Standalone macOS scrolling window manager in development. See [plan.md](plan.md) for the intended behavior and release gates, and [docs/STATUS.md](docs/STATUS.md) for current capability status and handoff details.
 
-The current implementation provides a pure Swift layout core (including resize, split, stacked-column slurp/barf, and floating transitions), scoped per-Space/per-display session management (`ScopedLayoutSession`, `DisplaySpaceCoordinator`), active-first and strict native-tab discovery and lifecycle reconciliation (`NativeTabMembership`, `NativeTabTopology`), Mission Control cross-Space container transfers (`SpaceTransfer`), opt-in disposable and real-app probes (Finder and Terminal), regression tests, read-only native diagnostics, and an inactive menu bar shell. Live mode manages only explicitly allowlisted apps and registers the user's Option–Command shortcuts while running.
+The current implementation provides a pure Swift layout core (including resize, split, stacked-column slurp/barf, and floating transitions), scoped per-Space/per-display session management (`ScopedLayoutSession`, `DisplaySpaceCoordinator`), active-first and strict native-tab discovery and lifecycle reconciliation (`NativeTabMembership`, `NativeTabTopology`), Mission Control cross-Space container transfers (`SpaceTransfer`), opt-in disposable and real-app probes (Finder and Terminal), regression tests, read-only native diagnostics, and an inactive menu bar shell. Live mode manages all regular apps (configurable) and registers the user's Option–Command shortcuts while running.
 
 `./scripts/swift.sh build` followed by `./scripts/swift.sh run --skip-build paperi probe-placement` runs an opt-in AX effect test on a newly spawned disposable fixture only. It applies a pure-core frame using size → position → size, confirms the observed frame within two points, restores and confirms the original frame, then terminates the fixture. Accessibility trust is required. It accepts no PID/window arguments and never targets existing user windows. Its scope is ordinary single-window placement, without focus changes, hotkeys or Space movement; it is not an enabled manager.
 

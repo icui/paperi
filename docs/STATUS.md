@@ -1,14 +1,14 @@
 # Implementation status
 
-Current state and resume instructions only. The chronological increment log (increments 1–64) and the original initial-host validation are in [HISTORY.md](HISTORY.md); those entries describe evidence at their original dates.
+Current state and resume instructions only. The chronological increment log (increments 1–65) and the original initial-host validation are in [HISTORY.md](HISTORY.md); those entries describe evidence at their original dates.
 
-## Current checkpoint: 2026-11-09 (increment 64)
+## Current checkpoint: 2026-11-09 (increment 65)
 
-Paperi now has an **opt-in live mode that manages real windows** of allowlisted applications on the active Space of every display, controlled from the command line. While running it registers the Option–Command shortcuts copied from `~/.hammerspoon/init.lua` (J/K focus with Space fallback, arrows swap, F/C/S/L/H/U/N/I/O, 1–9 move to Space); each dispatches the same command as `paperi msg`.
+Paperi now has a **live mode that manages real windows** of all regular applications (configurable via `config.json`) on the active Space of every display. While running it registers the Option–Command shortcuts copied from `~/.hammerspoon/init.lua` (J/K focus with Space fallback, arrows swap, F/C/S/L/H/U/N/I/O, 1–9 move to Space); each dispatches the same command as `paperi msg`.
 
 ```sh
 ./scripts/swift.sh build
-.build/debug/paperi run --app com.apple.TextEdit --app com.apple.finder -v   # foreground; Ctrl-C stops and restores
+.build/debug/paperi run -v                 # foreground, all regular apps; Ctrl-C stops and restores
 .build/debug/paperi msg focus right        # same as ⌥⌘K
 .build/debug/paperi msg status
 .build/debug/paperi restore                # only after a crash: restores journaled frames
@@ -20,7 +20,8 @@ The responsible process (terminal/editor, or `dist/Paperi.app`) needs Accessibil
 
 | Capability | Real apps (live mode) | Disposable fixture / tests | Remaining limits |
 | --- | --- | --- | --- |
-| Admission, closure, minimise/hide, eligibility | TextEdit, Finder verified | Verified | Non-allowlisted apps untouched; unknown tab membership stays unmanaged |
+| Admission, closure, minimise/hide, eligibility | All regular apps: Terminal, Finder, Zed, Slack, Beeper, TextEdit verified | Verified | Excluded/`include`-limited apps untouched; unknown tab membership stays unmanaged |
+| Popups (manage-all) | Control Center, Wi‑Fi menu, context menu, menu bar menu, Spotlight, Get Info, Open dialog, Save sheet: no managed window moved, management resumes after dismissal | Policy unit-tested | Windows without a fullscreen button float (override with `tile`); OS alerts from other processes and cross-display popups untested |
 | Commands: focus, swap, width, height, center, split, slurp, barf, float | Verified via `paperi msg` | Verified | No scroll-only commands |
 | Native tabs: active-first admission, merge (lazy), switch, detach, close active/last | TextEdit, Finder verified | Verified | Chromium/Electron in-content tab strips need `--singleton-app` |
 | Space transfer (`space N`) with follow, tab containers | Verified Space 1 ↔ 378 (Mission Control) | Verified | Needs a unique window title; `expose-group-apps = 1` can cluster same-app untabbed windows |
@@ -28,12 +29,12 @@ The responsible process (terminal/editor, or `dist/Paperi.app`) needs Accessibil
 | Multi-display | Per-display strips, canvas updates, neighbour-aware parking of off-canvas columns | Unit-tested (negative origins, parking) | **No second physical display on this host**; cross-display `space N` is untested |
 | Stop/crash recovery | Stop restores admission frames; journal persisted | Verified | Windows the app recreated after a crash are not matched |
 | Global keyboard shortcuts (⌥⌘, from the PaperWM config) | Verified via synthesized keys: J/K incl. edge → adjacent Space, H, →, I, O, C | Binding table unit-tested | 1–9 share the verified `space N` path but were not pressed live; conflicting registrations (Hammerspoon) are reported, not overridden; PaperWM's auto-center on create/destroy is not copied |
-| Baseline, performance, soak | Not started | — | Release gates; refresh cost is reported as `lastRefreshMS` (~55 ms with 3 windows) |
+| Baseline, performance, soak | Not started | — | Release gates; refresh cost is reported as `lastRefreshMS` (58–99 ms with 6 windows, all apps; only apps with on-screen windows are surveyed) |
 
 ### Next
 
 1. **Multi-display validation** on hardware with "Displays have separate Spaces" enabled: per-display strips, parking at a shared edge, cross-display `space N`, display unplug/replug.
-2. **Daily-app compatibility**: run against the user's daily apps (Zed, Slack, Beeper, browsers with `--singleton-app`) and record per-app limitations; exercise popups/sheets/Control Center while managing.
+2. **Daily use**: run all day and record per-app limitations (browsers with in-content tab bars need `singleton`); menu bar item, launch at login and stable signing.
 3. Decide whether to copy the Hammerspoon create/destroy auto-centering (`PaperWM.windows.centerWindow()`), which the plan flags as a pain point to guard.
 4. Then baseline/performance (AX traffic per refresh, observer-driven incremental surveys), launch at login, and the eight-hour soak.
 

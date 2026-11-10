@@ -537,6 +537,13 @@ Course correction (2026-11-09, user direction): stop adding disposable-window pr
 - J/K follow `focusWindowByTwo`: one column with nearest-row fallback; at the strip edge or without a managed focused window they post Control–arrow when an adjacent Space exists on the active display.
 - Live validation with synthesized keystrokes on TextEdit: ⌥⌘J, H, →, I, O, C changed layout as expected; ⌥⌘K at the right edge and ⌥⌘J on a Space without managed windows switched Spaces; stop restored all frames. 130 Swift regressions pass.
 
+## Increment 65: manage all regular apps with per-window popup safety
+
+- `paperi run` without `--app` manages every regular app; `LiveConfig` (`config.json`) adds `exclude`, `float`, `tile`, `singleton`, `include`, gaps; system UI agents are always excluded. The recorder takes an app filter; refresh surveys only apps with on-screen normal windows or managed containers; apps whose AX times out are skipped for 5 s.
+- `WindowPolicy`: windows without a fullscreen button float ("utility window"), overridable by `tile` rules; structural exclusions (non-standard subroles, child windows, non-zero levels) cannot be overridden.
+- Fix: only minimise/fullscreen/explicit float removes a managed window; transient capability loss (a sheet making its parent non-movable) keeps the slot and suppresses writes. Previously a Save sheet evicted its document window.
+- Live popup matrix with all apps managed (Terminal, Finder, Zed, Slack, Beeper, TextEdit): Control Center, Wi‑Fi menu, Finder context menu, menu bar menu, Spotlight, Finder Get Info, TextEdit Open dialog and Save sheet moved no managed window; suppression cleared automatically after dismissal and commands worked. Refresh 58–99 ms with 6 managed windows. 133 Swift regressions pass.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)
