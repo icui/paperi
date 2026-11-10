@@ -17,6 +17,15 @@ import PaperiPlatform
     private var verbose = false
     private var hotkeyReport: (registered: Int, failures: [String: Int32], errors: [String]) = (0, [:], [])
     private var hotkeyBindings: [HotKeyBindings.Binding] = []
+    /// Why management is paused because displays sit side by side; nil when
+    /// not paused for that reason. Cleared (and management resumed) once the
+    /// displays are stacked again.
+    private var arrangementPause: String?
+    /// Arrangement for which the user resumed anyway; not paused again until
+    /// the arrangement changes.
+    private var arrangementOverride: String?
+    private var arrangementCheck: DispatchWorkItem?
+    private var warning: NSPopover?
 
     static func main(_ arguments: [String]) -> Never {
         let app = LiveApp()
@@ -94,11 +103,19 @@ import PaperiPlatform
     }
 
     private func startManaging() {
-        do { try manager.start() } catch {
+        let unsupported = Self.arrangementProblem()
+        do {
+            if let unsupported { try manager.startPaused(); arrangementPause = unsupported } else { try manager.start() }
+        } catch {
             FileHandle.standardError.write(Data("paperi run: \(error)\n".utf8)); shutdown(1)
         }
         registerHotkeys()
-        item?.button?.title = "▥"
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleArrangementCheck() }
+        }
+        updateTitle()
+        if let unsupported { showWarning(unsupported) }
         Diagnostics.printJSON(["event": "paperiRunning",
                                "apps": manager.options.config.include?.sorted() ?? ["all regular apps"],
                                "socket": LiveCommandServer.defaultPath, "hotkeys": hotkeyReport.registered,
@@ -117,8 +134,101 @@ import PaperiPlatform
         }
     }
 
+    // MARK: display arrangement
+
+    private static func screens() -> [DisplayArrangement.Display] {
+        NSScreen.screens.map { DisplayArrangement.Display(name: $0.localizedName, frame: $0.frame) }
+    }
+
+    /// A gentle explanation when two displays sit side by side, else nil.
+    private static func arrangementProblem() -> String? {
+        guard let (left, right) = DisplayArrangement.sideBySide(screens()).first else { return nil }
+        return "“\(left.name)” is to the left of “\(right.name)”. Windows that Paperi scrolls past "
+            + "that edge would jump to the other display. Place your displays above or below "
+            + "each other in Displays settings and Paperi resumes on its own."
+    }
+
+    /// Displays settle over several notifications while being rearranged.
+    private func scheduleArrangementCheck() {
+        arrangementCheck?.cancel()
+        let work = DispatchWorkItem { MainActor.assumeIsolated { [weak self] in self?.checkArrangement() } }
+        arrangementCheck = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
+    }
+
+    private func checkArrangement() {
+        let screens = Self.screens()
+        guard let problem = Self.arrangementProblem() else {
+            arrangementOverride = nil
+            if arrangementPause != nil {
+                arrangementPause = nil
+                warning?.close()
+                manager.resume()
+                log("displays are stacked again: resumed")
+            }
+            updateTitle()
+            return
+        }
+        // Already paused (by the user or for this reason), or resumed anyway.
+        guard arrangementPause == nil, !manager.paused,
+              arrangementOverride != DisplayArrangement.signature(screens) else { return }
+        manager.pause()
+        arrangementPause = problem
+        log("displays side by side: paused")
+        updateTitle()
+        showWarning(problem)
+    }
+
+    /// A small popover under the menu bar item; it closes on its own.
+    private func showWarning(_ text: String) {
+        guard let button = item?.button else { return }
+        warning?.close()
+        let width: CGFloat = 300
+        let title = NSTextField(wrappingLabelWithString: "Paperi paused: displays are side by side")
+        title.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        let body = NSTextField(wrappingLabelWithString: text)
+        for label in [title, body] {
+            label.preferredMaxLayoutWidth = width
+            label.widthAnchor.constraint(equalToConstant: width).isActive = true
+        }
+        let open = NSButton(title: "Open Displays Settings", target: self, action: #selector(openDisplaySettings))
+        open.bezelStyle = .rounded; open.keyEquivalent = "\r"
+        let dismiss = NSButton(title: "Dismiss", target: self, action: #selector(dismissWarning))
+        dismiss.bezelStyle = .rounded
+        let buttons = NSStackView(views: [dismiss, open])
+        let stack = NSStackView(views: [title, body, buttons])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
+        let controller = NSViewController()
+        controller.view = stack
+        stack.layoutSubtreeIfNeeded()
+        controller.preferredContentSize = stack.fittingSize
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.behavior = .applicationDefined
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        warning = popover
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak popover] in popover?.close() }
+    }
+
+    @objc private func dismissWarning() { warning?.close() }
+    @objc private func openDisplaySettings() {
+        warning?.close()
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Displays-Settings.extension")!)
+    }
+
+    private func log(_ message: String) {
+        FileHandle.standardError.write(Data("[paperi] \(message)\n".utf8))
+    }
+
     @discardableResult private func dispatch(_ command: [String], source: String) -> [String: Any] {
         var reply: [String: Any]
+        if command.first == "resume", arrangementPause != nil {
+            // Resumed by hand: respect it for this arrangement.
+            arrangementPause = nil
+            arrangementOverride = DisplayArrangement.signature(Self.screens())
+            warning?.close()
+        }
         switch command.first {
         case "reload": reply = reload()
         default: reply = manager.handle(command)
@@ -169,12 +279,14 @@ import PaperiPlatform
     private func updateTitle() {
         guard AXIsProcessTrusted() else { return }
         item?.button?.title = manager.paused ? "▥ ⏸" : "▥"
+        item?.button?.toolTip = arrangementPause == nil ? "Paperi" : "Paperi paused: displays are side by side"
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let state: String
         if !AXIsProcessTrusted() { state = "Waiting for Accessibility access" }
+        else if arrangementPause != nil { state = "Paused (displays side by side)" }
         else if manager.paused { state = "Paused" }
         else { state = "Managing \(manager.managedWindowCount) window\(manager.managedWindowCount == 1 ? "" : "s")" }
         menu.addItem(withTitle: "Paperi — \(state)", action: nil, keyEquivalent: "")
@@ -190,8 +302,13 @@ import PaperiPlatform
         }
         let config = menu.addItem(withTitle: "Show Config", action: nil, keyEquivalent: "")
         config.submenu = configMenu()
+        if let reason = arrangementPause {
+            let why = menu.addItem(withTitle: "Arrange displays above/below each other to resume", action: nil, keyEquivalent: "")
+            why.toolTip = reason
+            add(menu, "Open Displays Settings…", #selector(openDisplaySettings))
+        }
         menu.addItem(.separator())
-        add(menu, manager.paused ? "Resume" : "Pause", #selector(togglePause))
+        add(menu, manager.paused ? (arrangementPause != nil ? "Resume Anyway" : "Resume") : "Pause", #selector(togglePause))
         add(menu, "Retile", #selector(retile))
         add(menu, "Reload Config", #selector(reloadConfig))
         add(menu, "Open Config…", #selector(openConfig))

@@ -143,6 +143,15 @@ import PaperiCore
         refresh()
     }
 
+    /// Starts in the paused state without touching any window (e.g. the
+    /// display arrangement is unsupported); `resume` starts management.
+    public func startPaused() throws {
+        guard !running, !paused else { return }
+        guard AXIsProcessTrusted() else { throw LiveError.accessibility }
+        try restoreStaleJournal()
+        paused = true
+    }
+
     /// Leaves windows where they are; `resume` re-admits them and a later
     /// stop still restores their original (pre-Paperi) frames.
     @discardableResult public func pause() -> [String: Any] {
