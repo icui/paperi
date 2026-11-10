@@ -228,9 +228,13 @@ Build a limited ordinary-window path first, retaining logical tab-container slot
 from the beginning. Per user direction on 2026-11-09, prioritize a working version
 with proper native macOS tabs (including active-first admission without clicking
 inactive tabs and lazy unvisited reconciliation), cross-Space transfers, and
-multi-display/multi-Space support rather than global keyboard shortcuts. See
+multi-display/multi-Space support before global keyboard shortcuts. Clarified the
+same day: that working version must manage real application windows (opt-in
+allowlist, CLI-driven commands are acceptable); shortcuts follow once it shows
+tabs, Spaces and multiple displays are resolved. Prefer extending live mode over
+new disposable probes. See
 [docs/STATUS.md](docs/STATUS.md) for the current capability matrix and handoff
-instructions through increment 62.
+instructions through increment 63.
 
 1. Connect native discovery/events → lifecycle reducer → layout → confirmed AX
    effects, first on disposable windows. Creation/closure, focus, commands and

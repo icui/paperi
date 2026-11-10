@@ -1,69 +1,51 @@
 # Implementation status
 
-Current state and resume instructions only. The chronological increment log (increments 1–62) and the original initial-host validation are in [HISTORY.md](HISTORY.md); those entries describe evidence at their original dates.
+Current state and resume instructions only. The chronological increment log (increments 1–63) and the original initial-host validation are in [HISTORY.md](HISTORY.md); those entries describe evidence at their original dates.
 
-## Current checkpoint: 2026-11-09
+## Current checkpoint: 2026-11-09 (increment 63)
 
-Includes increment 62. Paperi is a diagnostic/prototype application: general user-window management is disabled, no global shortcuts are registered, and menu/snapshot/record stay inactive/read-only as applicable. Route: [ordinary-window path followed early by one native-tab app](../plan.md#agreed-implementation-order--2026-11-08), informed by the [pinned-source audit](REFERENCE-AUDIT.md).
+Paperi now has an **opt-in live mode that manages real windows** of allowlisted applications on the active Space of every display, controlled from the command line. Global keyboard shortcuts are not registered yet: per user direction they follow a working implementation that demonstrates native tabs, Spaces and multi-display handling. Bind `paperi msg …` with any hotkey tool in the meantime.
+
+```sh
+./scripts/swift.sh build
+.build/debug/paperi run --app com.apple.TextEdit --app com.apple.finder -v   # foreground; Ctrl-C stops and restores
+.build/debug/paperi msg focus right        # from a hotkey tool while a managed window is focused
+.build/debug/paperi msg status
+.build/debug/paperi restore                # only after a crash: restores journaled frames
+```
+
+The responsible process (terminal/editor, or `dist/Paperi.app`) needs Accessibility access.
 
 ### Capability matrix
 
-| Capability | Disposable fixture | Real apps | Remaining limits |
+| Capability | Real apps (live mode) | Disposable fixture / tests | Remaining limits |
 | --- | --- | --- | --- |
-| Native create/close → reducer → confirmed AX effects | Verified, debug/release | Terminal verified (`check-terminal-tabs.rb --session`) | Owned test windows only |
-| Observed resize, width commands, focus suppression | Verified | Terminal measured cell-grid resize verified (`--resize`) | Per-app focus; panel focus suppresses commands without replay |
-| Interactive preview (`paperi preview-fixture`) | Verified (`probe-preview-input` passes 12/12: lazy tab merge/switch/detach, width grow/shrink, stack/unstack, stop/restore) | — | Local AppKit controls/key equivalents (Narrower/Wider/Stack/Unstack/Next Space/Stop) only |
-| Scoped session: frontmost ownership, stable slots, stop-ticket invalidation | Verified | Terminal session uses its guards | App/Space scoped; unknown membership is rejected |
-| Controlled stop and geometry restoration | Verified | Terminal position and width restored | Not crash or abrupt-exit recovery |
-| Native-tab membership & tab-bar-free singleton detection (external AX) | Verified (`requireComplete: true/false`, including `-25200` unvisited `AXValue`) | Terminal and Finder verified (`check-finder-documents.rb --new-tab`, 7/7 checks); Preview untested | Active-first mode (`requireComplete: false`) admits and tiles the active tab immediately; strict mode (`requireComplete: true`) still requires visiting all tabs |
-| Native-tab lifecycle: switch, detach, re-merge, new member, active/last close | Verified, debug/release (`allowLazyUnvisited: true/false`) | Terminal verified in sustained shared session (`--session`, 12/12 checks) | `allowLazyUnvisited: true` reconciles newly clicked background tabs in place and infers known merged windows without clicking inactive tabs |
-| Stacked-column native reconciliation & slurp/barf | Verified live (`paperi probe-preview-input`) and in unit tests (`ScopedLayoutSession.reconcileTabs`, `NativeTabTopologyTests`) | Not attempted | Preserves column index, row order, width and stack weights across tab switch/detach/merge/growth/close |
-| Popups/transients | App utility panel and sheet | OS, Control Center, cross-display untested | — |
-| Cross-Space container transfer | Verified end-to-end in debug/release (`paperi probe-space-session`, 14/14 checks; `PaperiSpaceProbe --backend mission-control`) | Not attempted | Direct SkyLight compatibility path fails; Mission Control app-grouping (`expose-group-apps = 1`) clusters multiple untabbed windows of one app on crowded Spaces |
-| Multi-display & multi-Space coordinator | Verified live across user Spaces (`paperi probe-space-session`) and in unit tests (`DisplaySpaceCoordinatorTests`, including negative-origin secondary monitor and 1-based Space numbering) | Single-display Spaces enumerated live | Physical multi-monitor live hardware not connected on this host ("Displays have separate Spaces" disabled) |
-| Global keyboard routing | Disabled | — | Deprioritized per user direction |
-| Baseline, performance, soak | Not started | — | Release gates |
-
-### Tests and evidence
-
-- Increment 62:
-  - Wired lazy native-tab reconciliation (`allowLazyUnvisited: true`), stacked-column `slurp`/`barf`, and post-transfer Space reassignment (`ScopedLayoutSession.reassignSpace`) into `paperi preview-fixture` (`LifecycleProbe.swift`, `Tools/AXFixture/main.swift`).
-  - Added `TabSelectionEvidence.lazySelectedControl(for:in:)` (`SelectionAssociations.swift`) so when macOS AppKit returns `AXError.failure (-25200)` for an unvisited background tab's `AXValue` while the active tab button reports `AXValue == true`, active-first admission and lazy topology reconciliation still resolve the active tab without clicking the background tab.
-  - Live `paperi probe-preview-input` (`captures/preview-input-increment62-pass.json`) passes all 12/12 checks (lazy tab merge before visiting the background tab, tab switch A→B→A, tab detach back to 2 columns, width `grow`/`shrink`, stacked-column `slurp`/`barf` with 6 confirmed AX writes each, and full frame restoration on stop), and `paperi probe-space-session` (`captures/space-session-increment62-pass.json`) passes all 14/14 checks (including `activeFirstTabAdmitted` and `lazySecondTabReconciled` before outbound/return Mission Control Space transfers). All 122 Swift regressions pass in debug and release.
-- Increment 61:
-  - Added active-first tab admission (`NativeTabMembership.inspect(_:requireComplete: false)` and `ScopedLayoutSession.admitTabs(_:allowActiveOnly: true)` / `DisplaySpaceCoordinator.admitTabs(_:allowActiveOnly: true)`) and lazy unvisited tab reconciliation (`NativeTabTopology.inspect(_:allowLazyUnvisited: true)` and `DisplaySpaceCoordinator.reconcileTabs`), allowing tabbed windows with unvisited background tabs to be tiled immediately, switching representative in place when a background tab is clicked, and inferring already-managed windows merged into an unvisited tab. All 122 Swift regressions (32 core, 90 platform) pass in debug and release.
-- Increment 60:
-  - End-to-end cross-Space 2-tab session probe (`paperi probe-space-session`) passes all 12 checks in both debug (`captures/space-session-increment60-tabs-debug3.json`) and release (`captures/space-session-increment60-tabs-release.json`): learns a 2-tab native container externally, admits it into `DisplaySpaceCoordinator` on Space `1`, transfers it via Mission Control (`SpaceTransfer.moveWindowViaMissionControl`) and `DisplaySpaceCoordinator.transferContainer` to Space `378` with confirmed AX placement, transfers it back to Space `1` with confirmed AX placement while preserving the logical slot ID and both tab members, and restores the original frame on stop.
-  - `paperi probe-preview-input` passes all 11 checks (`captures/preview-input-increment60-debug.json`), and all 120 Swift regressions pass in debug and release.
-- Increment 59:
-  - Sustained shared-session Terminal native-tab lifecycle (`ruby scripts/check-terminal-tabs.rb --session captures/terminal-session-increment59`) passes all 12 checks (`tabSupport: "verifiedInOwnedSession"`, `cleanup: "closed"`).
-  - Finder native-tab membership & singleton detection (`ruby scripts/check-finder-documents.rb --new-tab captures/finder-tabs-increment59`) passes all 7 checks (`sharedMembershipVerified: true`, `ownedSingletonsConfirmed: true`).
-- Increment 58: `PaperiSpaceProbe --backend mission-control` passes outbound (`1`→`378`) and return (`378`→`1`) membership and active-Space follow in both debug and release.
-- Increment 57: debug Terminal resize run passes eight baseline/membership/geometry/column-restoration checks (`captures/terminal-resize-increment57-final/summary.json`).
-- The last full ten-mode integrated cycle passed 9/10 and has not been repeated. Intermittent AX role/reference and restart rediscovery failures remain open.
+| Admission, closure, minimise/hide, eligibility | TextEdit, Finder verified | Verified | Non-allowlisted apps untouched; unknown tab membership stays unmanaged |
+| Commands: focus, swap, width, height, center, split, slurp, barf, float | Verified via `paperi msg` | Verified | `focus` at a strip edge does not yet switch Space; no scroll-only commands |
+| Native tabs: active-first admission, merge (lazy), switch, detach, close active/last | TextEdit, Finder verified | Verified | Chromium/Electron in-content tab strips need `--singleton-app` |
+| Space transfer (`space N`) with follow, tab containers | Verified Space 1 ↔ 378 (Mission Control) | Verified | Needs a unique window title; `expose-group-apps = 1` can cluster same-app untabbed windows |
+| User Mission Control/display drags | Container follows to the new Space (observed after our transfers) | Unit-tested | Manual drag not separately exercised |
+| Multi-display | Per-display strips, canvas updates, neighbour-aware parking of off-canvas columns | Unit-tested (negative origins, parking) | **No second physical display on this host**; cross-display `space N` is untested |
+| Stop/crash recovery | Stop restores admission frames; journal persisted | Verified | Windows the app recreated after a crash are not matched |
+| Global keyboard shortcuts | Not registered | — | Next after multi-display validation |
+| Baseline, performance, soak | Not started | — | Release gates; refresh cost is reported as `lastRefreshMS` (~55 ms with 3 windows) |
 
 ### Next
 
-1. **Real-App Lazy Tab & Preview.app Validation:** Exercise active-first admission (`requireComplete: false`, `allowActiveOnly: true`) and lazy unvisited tab reconciliation (`allowLazyUnvisited: true`) in the sustained Terminal session probe (`paperi probe-terminal-session`) and validate `Preview.app` native-tab and singleton discovery via `nativeTabEvidence` (`membershipCandidates`, `activeTabCandidates`, `singletonCandidates`).
-2. **Mission Control App-Cluster Expansion (`expose-group-apps = 1`):** When `com.apple.dock` `expose-group-apps = 1` is active on a crowded Space, evaluate expanding a multi-window untabbed app's Mission Control cluster before dragging so a single untabbed window can transfer Spaces without pulling same-app siblings.
-3. **Multi-App Scoped Runtime Coordinator:** Generalize `DisplaySpaceCoordinator` from a single `ownerPID` to an allowlisted multi-app session registry while keeping global keyboard shortcuts deprioritized. Abrupt-exit recovery, OS/cross-display popup recovery, physical multi-monitor validation, and baseline/soak measurements remain release gates.
+1. **Multi-display validation** on hardware with "Displays have separate Spaces" enabled: per-display strips, parking at a shared edge, cross-display `space N`, display unplug/replug.
+2. **Daily-app compatibility**: run against the user's daily apps (Zed, Slack, Beeper, browsers with `--singleton-app`) and record per-app limitations; exercise popups/sheets/Control Center while managing.
+3. **Global shortcuts** (Option–Command bindings from the plan) dispatching the same `LiveManager.handle` commands, plus `focus` edge → adjacent Space.
+4. Then baseline/performance (AX traffic per refresh, observer-driven incremental surveys), launch at login, and the eight-hour soak.
 
 ## Handoff — 2026-11-09
 
-Implementation through increment 62 validates:
-- **Active-first native-tab admission & lazy unvisited reconciliation** (`NativeTabMembership.inspect(_:requireComplete: false)`, `TabSelectionEvidence.lazySelectedControl(for:in:)`, `ScopedLayoutSession.admitTabs(_:allowActiveOnly: true)`, `NativeTabTopology.inspect(_:allowLazyUnvisited: true)`, `DisplaySpaceCoordinator.reconcileTabs`): windows with unvisited background tabs (including AppKit's `-25200` `AXValue` on unvisited `AXTabButton`s) are tiled immediately via their active tab, switch representatives in place when a background tab is clicked, and infer already-managed windows merged into an unvisited tab.
-- **Interactive preview with live lazy tab merge/detach and stacked columns** (`paperi preview-fixture` / `paperi probe-preview-input`, 12/12 checks): lazy merge of two preview windows into 1 tab slot before the background tab is visited, tab switch A→B→A, detach back to 2 columns, width `grow`/`shrink` (`⌥⌘L`/`⌥⌘H`), stacked-column `slurp`/`barf` (`⌥⌘I`/`⌥⌘O`), post-transfer Space reassignment (`Next Space`, `⌥⌘N`), and full frame restoration on stop.
-- **End-to-end cross-Space 2-tab container transfer** (`paperi probe-space-session`, 14/14 checks including `activeFirstTabAdmitted` and `lazySecondTabReconciled`; `PaperiSpaceProbe --backend mission-control`): outbound (`Space 1` → `378`) and return (`Space 378` → `1`) Mission Control transfer + `DisplaySpaceCoordinator.transferContainer`, per-Space AX placement confirmation, and frame restoration on stop.
-- **Real-app native-tab & singleton compatibility:**
-  - Sustained shared-session Terminal native-tab lifecycle (`ruby scripts/check-terminal-tabs.rb --session`, 12/12 checks: initial pair admission, representative switch, 3rd-tab growth, active/last tab closure, frame restoration).
-  - Finder native-tab membership learning alongside tab-bar-free singleton detection (`ruby scripts/check-finder-documents.rb --new-tab`, 7/7 checks, skipping non-window `AXScrollArea` desktop roots).
-- **122 Swift regressions** (32 core, 90 platform) passing in both debug and release builds.
-
 ### Resume here
 
-1. Wire `requireComplete: false` / `allowLazyUnvisited: true` into `Diagnostics.probeTerminalSession(tag:)` (`Sources/PaperiPlatform/TerminalPlacementProbe.swift`) or an opt-in `--lazy-session` flag in `scripts/check-terminal-tabs.rb` so Terminal `⌘T` tab growth reconciles immediately without re-clicking prior tabs.
-2. Add a disposable `Preview.app` harness (or extend diagnostics) to verify `Preview.app` native tabs and singletons through `nativeTabEvidence` (`membershipCandidates`, `activeTabCandidates`, `singletonCandidates`).
-3. For untabbed multi-window apps on crowded Spaces when `com.apple.dock` `expose-group-apps = 1` is active, evaluate expanding the app cluster in Mission Control (`SpaceTransfer.moveWindowViaMissionControl`) before dragging.
+- Live mode entry points: [LiveManager.swift](../Sources/PaperiPlatform/LiveManager.swift) (refresh pipeline: displays → destruction → survey → ineligible removal → Space follow → per-app tab topology/admission → focus/reveal → width adoption → effects), [LiveCommandServer.swift](../Sources/PaperiPlatform/LiveCommandServer.swift), [LiveReconciliation.swift](../Sources/PaperiPlatform/LiveReconciliation.swift), CLI in [main.swift](../Sources/Paperi/main.swift).
+- A refresh runs on AX/workspace events (40 ms debounce) and every second. Only active Spaces are written; windows on inactive Spaces keep their session state until that Space is shown.
+- Closure is recognised from `AXUIElementDestroyed`, window-server absence or owner exit; enumeration absence alone is never closure (inactive native tabs are not enumerated).
+- Each app's tab reconciliation passes other apps' containers as identity partitions so one strip can mix apps.
+- Disposable probes (`probe-*`, `preview-fixture`) remain as regression tools; prefer extending live mode over adding new probes.
 
 ### Code and validation entry points
 
@@ -93,6 +75,6 @@ Implementation through increment 62 validates:
   - `DisplaySpaceCoordinator` models per-display canvases (including negative-origin secondary monitors), 1-based user-Space numbering across displays, and atomic cross-Space/cross-display container transfers (`transferContainer`). Physical multi-monitor hardware with "Displays have separate Spaces" enabled has not yet been tested live on this single-display host.
 - **Broader Release Gates:**
   - Intermittent AX reference/role failures and restart rediscovery remain open (last full 10-mode integrated cycle passed 9/10).
-  - Global keyboard routing remains disabled/deprioritized per user direction. Abrupt-exit crash recovery, OS/Control Center popup recovery, baseline/performance benchmarks, and daily-use soak remain release gates.
+  - Global shortcuts are not registered yet; they follow multi-display validation of live mode (user direction 2026-11-09). Abrupt-exit crash recovery, OS/Control Center popup recovery, baseline/performance benchmarks, and daily-use soak remain release gates.
 
 Commit validated milestones autonomously per the [commit policy](../plan.md#commit-checkpoints). Keep raw captures/scratch out of commits and preserve unrelated changes. Historical increments in [HISTORY.md](HISTORY.md) describe evidence at their original dates; this handoff and the current checkpoint are the resume instructions.

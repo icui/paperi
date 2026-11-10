@@ -5,8 +5,8 @@ import PaperiCore
 /// restoration remain the adapter's responsibility. No OS effects run here.
 @MainActor final class ScopedLayoutSession {
     enum CommandOwnership { case frontmostApplication, applicationLocalFixture }
-    let ownerPID: pid_t
-    let canvas: Rect
+    private(set) var ownerPIDs: Set<pid_t>
+    private(set) var canvas: Rect
     let ownership: CommandOwnership
     private(set) var ticket = UUID()
     private(set) var running = true
@@ -15,8 +15,25 @@ import PaperiCore
     private(set) var spaceID: UInt64?
     private var echoes = FrameEchoes()
 
-    init(ownerPID: pid_t, canvas: Rect, ownership: CommandOwnership = .frontmostApplication) {
-        self.ownerPID = ownerPID; self.canvas = canvas; self.ownership = ownership
+    convenience init(ownerPID: pid_t, canvas: Rect, ownership: CommandOwnership = .frontmostApplication) {
+        self.init(ownerPIDs: [ownerPID], canvas: canvas, ownership: ownership)
+    }
+
+    init(ownerPIDs: Set<pid_t>, canvas: Rect, ownership: CommandOwnership = .frontmostApplication) {
+        self.ownerPIDs = ownerPIDs; self.canvas = canvas; self.ownership = ownership
+    }
+
+    func owns(_ pid: pid_t?) -> Bool { pid.map(ownerPIDs.contains) ?? false }
+
+    /// Allowlisted applications may launch after the session starts.
+    func addOwner(_ pid: pid_t) { if running, pid > 0 { ownerPIDs.insert(pid) } }
+
+    /// Display geometry changes (resolution, Dock, menu bar) keep logical state;
+    /// column widths are clamped by placement to the new canvas width.
+    @discardableResult func setCanvas(_ next: Rect) -> Bool {
+        guard running, next.isValid, next != canvas else { return false }
+        canvas = next; echoes = FrameEchoes()
+        return true
     }
 
     func accepts(_ ticket: UUID) -> Bool { running && self.ticket == ticket }
@@ -24,7 +41,7 @@ import PaperiCore
     @discardableResult func insert(windowID: UInt32, ownerPID: pid_t, spaceID: UInt64,
                                    classification: Classification, knownSingleton: Bool = false,
                                    ticket: UUID) throws -> Bool {
-        guard accepts(ticket), ownerPID == self.ownerPID, windowID > 0, spaceID > 0,
+        guard accepts(ticket), owns(ownerPID), windowID > 0, spaceID > 0,
               canvas.isValid, knownSingleton, classification.eligibility == .tiled,
               self.spaceID == nil || self.spaceID == spaceID else { return false }
         let slotID = slots[windowID] ?? "container-\(UUID())"
@@ -53,7 +70,7 @@ import PaperiCore
     @discardableResult func confirmTabs(anchor: UInt32, members: [UInt32], active: UInt32,
                                         ownerPID: pid_t, spaceID: UInt64,
                                         classification: Classification, ticket: UUID) throws -> Bool {
-        guard accepts(ticket), ownerPID == self.ownerPID, self.spaceID == spaceID,
+        guard accepts(ticket), owns(ownerPID), self.spaceID == spaceID,
               classification.eligibility == .tiled, let slotID = slots[anchor],
               !members.isEmpty, members.allSatisfy({ $0 > 0 }),
               Set(members).count == members.count, members.contains(active),
@@ -70,7 +87,7 @@ import PaperiCore
     @discardableResult func admitTabs(members: [UInt32], active: UInt32, ownerPID: pid_t, spaceID: UInt64,
                                      classification: Classification, ticket: UUID,
                                      allowActiveOnly: Bool = false) throws -> Bool {
-        guard accepts(ticket), ownerPID == self.ownerPID, spaceID > 0,
+        guard accepts(ticket), owns(ownerPID), spaceID > 0,
               self.spaceID == nil || self.spaceID == spaceID, canvas.isValid,
               classification.eligibility == .tiled,
               allowActiveOnly ? !members.isEmpty : members.count > 1,
@@ -100,7 +117,7 @@ import PaperiCore
     func focus(windowID: UInt32?, ownerPID: pid_t?, classification: Classification, ticket: UUID) throws {
         guard accepts(ticket) else { return }
         // Foreign/unavailable focus withholds commands while retaining the anchor.
-        let id = ownerPID == self.ownerPID ? windowID : nil
+        let id = owns(ownerPID) ? windowID : nil
         try state.reduce(.focus(windowID: id, classification: classification))
     }
 
@@ -113,7 +130,7 @@ import PaperiCore
                                          ownerPID: pid_t, spaceID: UInt64,
                                          classification: Classification, ticket: UUID,
                                          admitted: Set<UInt32> = []) throws -> Bool {
-        guard accepts(ticket), self.ownerPID == ownerPID, self.spaceID == spaceID,
+        guard accepts(ticket), owns(ownerPID), self.spaceID == spaceID,
               classification.eligibility == .tiled, state.floating.isEmpty, state.suspended.isEmpty else { return false }
         let all = partitions.flatMap(\.members)
         guard partitions.allSatisfy({ !$0.members.isEmpty && $0.members.contains($0.active) }),
@@ -189,10 +206,14 @@ import PaperiCore
         WindowFacts(bundleID: "session", role: "AXWindow", subrole: "AXStandardWindow", isRoot: true, movable: true, resizable: true, level: 0)
     )
 
-    @discardableResult func slurpFocused(frontmostPID: pid_t?, ticket: UUID) throws -> Bool {
-        guard accepts(ticket), ownership == .applicationLocalFixture || frontmostPID == ownerPID,
+    /// Applies a pure layout command to the focused tiled container. Commands
+    /// are discarded (never replayed) while focus is foreign or transient.
+    @discardableResult func command(frontmostPID: pid_t?, ticket: UUID,
+                                    _ body: (inout Layout) throws -> Void) throws -> Bool {
+        guard accepts(ticket), ownership == .applicationLocalFixture || owns(frontmostPID),
               !state.interactionSuppressed else { return false }
-        var layout = state.layout; layout.slurp()
+        var layout = state.layout
+        try body(&layout)
         guard layout != state.layout else { return false }
         var next = LifecycleState(layout: layout, floating: state.floating)
         if let focused = state.osFocusedWindow {
@@ -202,28 +223,36 @@ import PaperiCore
         return true
     }
 
+    @discardableResult func slurpFocused(frontmostPID: pid_t?, ticket: UUID) throws -> Bool {
+        try command(frontmostPID: frontmostPID, ticket: ticket) { $0.slurp() }
+    }
+
     @discardableResult func barfFocused(frontmostPID: pid_t?, ticket: UUID) throws -> Bool {
-        guard accepts(ticket), ownership == .applicationLocalFixture || frontmostPID == ownerPID,
-              !state.interactionSuppressed else { return false }
-        var layout = state.layout; layout.barf()
-        guard layout != state.layout else { return false }
+        try command(frontmostPID: frontmostPID, ticket: ticket) { $0.barf() }
+    }
+
+    /// Scrolls the strip without changing focus (reveal/center after focus moves).
+    @discardableResult func setOffset(_ offset: Double, ticket: UUID) -> Bool {
+        guard accepts(ticket), offset.isFinite, offset != state.layout.offset else { return false }
+        var layout = state.layout; layout.offset = offset
         var next = LifecycleState(layout: layout, floating: state.floating)
         if let focused = state.osFocusedWindow {
-            try next.reduce(.focus(windowID: focused, classification: Self.tiledClassification))
+            _ = try? next.reduce(.focus(windowID: focused, classification: Self.tiledClassification))
         }
-        try next.validate(); state = next; echoes = FrameEchoes()
+        guard (try? next.validate()) != nil else { return false }
+        state = next
         return true
     }
 
     @discardableResult func resize(windowID: UInt32, ownerPID: pid_t, spaceID: UInt64,
                                    width: Double, classification: Classification, ticket: UUID) throws -> Bool {
-        guard accepts(ticket), ownerPID == self.ownerPID, self.spaceID == spaceID,
+        guard accepts(ticket), owns(ownerPID), self.spaceID == spaceID,
               slots[windowID] != nil, width.isFinite, width > 0 else { return false }
         return try state.reduce(.resizeColumn(windowID: windowID, width: min(canvas.width, width), classification: classification))
     }
 
     @discardableResult func resizeFocused(by fraction: Double, frontmostPID: pid_t?, ticket: UUID) throws -> Bool {
-        guard accepts(ticket), ownership == .applicationLocalFixture || frontmostPID == ownerPID else { return false }
+        guard accepts(ticket), ownership == .applicationLocalFixture || owns(frontmostPID) else { return false }
         return try state.reduce(.resizeFocusedWidth(by: fraction, canvas: canvas))
     }
 

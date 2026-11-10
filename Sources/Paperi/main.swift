@@ -28,7 +28,78 @@ import PaperiPlatform
 
 var args = Array(CommandLine.arguments.dropFirst())
 if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["--menu"] }
+@MainActor func runLive(_ arguments: [String]) -> Never {
+    var apps: Set<String> = [], singletons: Set<String> = []
+    var verbose = false, restore = true
+    var i = 0
+    while i < arguments.count {
+        switch arguments[i] {
+        case "--app" where i + 1 < arguments.count: apps.insert(arguments[i + 1]); i += 1
+        case "--singleton-app" where i + 1 < arguments.count:
+            apps.insert(arguments[i + 1]); singletons.insert(arguments[i + 1]); i += 1
+        case "--verbose", "-v": verbose = true
+        case "--no-restore": restore = false
+        default:
+            FileHandle.standardError.write(Data("Unknown option \(arguments[i])\n".utf8)); exit(2)
+        }
+        i += 1
+    }
+    guard !apps.isEmpty else {
+        print("Usage: paperi run --app bundle.id [--app ...] [--singleton-app bundle.id ...] [--verbose] [--no-restore]")
+        exit(2)
+    }
+    var options = LiveManager.Options(bundleIDs: apps, singletonBundleIDs: singletons)
+    options.verbose = verbose; options.restoreOnStop = restore
+    let manager = LiveManager(options: options)
+    var server: LiveCommandServer?
+    func shutdown(_ code: Int32) -> Never {
+        server?.stop()
+        Diagnostics.printJSON(manager.stop(), pretty: false)
+        exit(code)
+    }
+    server = LiveCommandServer { request in
+        let reply = manager.handle(request)
+        if reply["stop"] as? Bool == true {
+            DispatchQueue.main.async { MainActor.assumeIsolated { shutdown(0) } }
+        }
+        return reply
+    }
+    do {
+        try server?.start()
+        try manager.start()
+    } catch {
+        FileHandle.standardError.write(Data("paperi run: \(error)\n".utf8))
+        server?.stop(); exit(1)
+    }
+    var signalSources: [DispatchSourceSignal] = []
+    for sig in [SIGINT, SIGTERM, SIGHUP] {
+        signal(sig, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+        source.setEventHandler { MainActor.assumeIsolated { shutdown(0) } }
+        source.resume(); signalSources.append(source)
+    }
+    Diagnostics.printJSON(["event": "paperiRunning", "apps": apps.sorted(), "socket": LiveCommandServer.defaultPath], pretty: false)
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    withExtendedLifetime(signalSources) { app.run() }
+    shutdown(0)
+}
+
 switch args.first {
+case "run":
+    runLive(Array(args.dropFirst()))
+case "msg":
+    do {
+        let reply = try LiveCommandServer.send(Array(args.dropFirst()))
+        FileHandle.standardOutput.write(reply)
+        let ok = (try? JSONSerialization.jsonObject(with: reply) as? [String: Any])?["ok"] as? Bool ?? false
+        exit(ok ? 0 : 1)
+    } catch {
+        FileHandle.standardError.write(Data("paperi msg: \(error)\n".utf8)); exit(1)
+    }
+case "restore":
+    guard AXIsProcessTrusted() else { print("Accessibility access is required."); exit(1) }
+    Diagnostics.printJSON(LiveManager.restore())
 case "probe-space-session":
     guard args.count == 1 else { print("Usage: paperi probe-space-session"); exit(2) }
     let report = Diagnostics.probeSpaceSession()
@@ -159,7 +230,12 @@ case "benchmark-core":
         "checksum": checksum, "scope": "cached pure core only; excludes AX, rendering and input latency"])
 default:
     print("""
-    Paperi feasibility build (window management is inactive)
+    Paperi (opt-in live management; no global shortcuts)
+      paperi run --app ID [--app ID ...] [--singleton-app ID ...] [-v] [--no-restore]
+                                        Manage windows of allowlisted apps on each display's active Space
+      paperi msg COMMAND                 focus|swap left|right|up|down, width|height +|- [fraction],
+                                        center, split, slurp, barf, float, space N, retile, status, stop
+      paperi restore                     Restore frames journaled by a run that did not stop cleanly
       paperi snapshot [--include-titles]  Read-only JSON snapshot
       paperi tab-evidence identifier     Bounded read-only AX tab structure for one app
       paperi probe-native-tab-session    Native-tab effects on a disposable child only

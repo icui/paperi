@@ -27,7 +27,7 @@ public struct DisplaySpaceTopology: Equatable, Sendable {
 /// between Spaces and displays without losing their slot ID, preferred width or
 /// native-tab membership.
 @MainActor final class DisplaySpaceCoordinator {
-    let ownerPID: pid_t
+    private(set) var ownerPIDs: Set<pid_t>
     let ownership: ScopedLayoutSession.CommandOwnership
     private(set) var displays: [DisplaySpaceTopology]
     private(set) var sessions: [UInt64: ScopedLayoutSession] = [:]
@@ -35,10 +35,59 @@ public struct DisplaySpaceTopology: Equatable, Sendable {
     private(set) var running = true
     private(set) var ticket = UUID()
 
-    init(ownerPID: pid_t, displays: [DisplaySpaceTopology],
+    convenience init(ownerPID: pid_t, displays: [DisplaySpaceTopology],
+                     ownership: ScopedLayoutSession.CommandOwnership = .frontmostApplication) {
+        self.init(ownerPIDs: [ownerPID], displays: displays, ownership: ownership)
+    }
+
+    init(ownerPIDs: Set<pid_t>, displays: [DisplaySpaceTopology],
          ownership: ScopedLayoutSession.CommandOwnership = .frontmostApplication) {
-        self.ownerPID = ownerPID; self.displays = displays; self.ownership = ownership
+        self.ownerPIDs = ownerPIDs; self.displays = displays; self.ownership = ownership
         rebuildSessions()
+    }
+
+    func addOwner(_ pid: pid_t) {
+        guard running, pid > 0 else { return }
+        ownerPIDs.insert(pid)
+        for session in sessions.values { session.addOwner(pid) }
+    }
+
+    /// Adopts fresh display/Space inventory. Existing sessions keep their logical
+    /// state and adopt the (possibly changed) canvas of the display now hosting
+    /// their Space; Spaces that vanished keep their session until it is empty so
+    /// a transient enumeration gap never discards layout.
+    func updateDisplays(_ next: [DisplaySpaceTopology]) {
+        guard running, !next.isEmpty else { return }
+        displays = next
+        rebuildSessions()
+        for display in next where display.canvas.isValid {
+            for space in display.spaces where space.isUserSpace { sessions[space.id]?.setCanvas(display.canvas) }
+        }
+        let live = Set(next.flatMap(\.userSpaces))
+        for (id, session) in sessions where !live.contains(id) && session.slots.isEmpty {
+            session.stop(); sessions.removeValue(forKey: id)
+        }
+    }
+
+    func session(containing windowID: UInt32) -> ScopedLayoutSession? {
+        spaceForWindow[windowID].flatMap { sessions[$0] }
+    }
+
+    /// Removes the whole logical container holding `windowID` (closure of its
+    /// last member, minimize, user float). Other containers keep their position.
+    @discardableResult func removeContainer(containing windowID: UInt32,
+                                            classification: Classification) throws -> [UInt32] {
+        guard running, let spaceID = spaceForWindow[windowID], let session = sessions[spaceID],
+              let slotID = session.slots[windowID], let loc = session.state.layout.index(of: slotID) else { return [] }
+        let slot = session.state.layout.columns[loc.column].slots[loc.row]
+        let others = session.state.layout.columns.flatMap(\.slots).filter { $0.id != slotID }
+            .map { NativeTabPartition(members: $0.members, active: $0.activeMember) }
+        guard let pid = session.ownerPIDs.first,
+              try session.reconcileTabs(others, destroyed: Set(slot.members), ownerPID: pid, spaceID: spaceID,
+                                        classification: classification, ticket: session.ticket) ||
+                session.slots[windowID] == nil else { return [] }
+        for member in slot.members { spaceForWindow.removeValue(forKey: member) }
+        return slot.members
     }
 
     static func liveTopologies() -> [DisplaySpaceTopology] {
@@ -73,7 +122,7 @@ public struct DisplaySpaceTopology: Equatable, Sendable {
     private func rebuildSessions() {
         for display in displays where display.canvas.isValid {
             for space in display.spaces where space.isUserSpace && sessions[space.id] == nil {
-                sessions[space.id] = ScopedLayoutSession(ownerPID: ownerPID, canvas: display.canvas, ownership: ownership)
+                sessions[space.id] = ScopedLayoutSession(ownerPIDs: ownerPIDs, canvas: display.canvas, ownership: ownership)
             }
         }
     }
@@ -113,6 +162,7 @@ public struct DisplaySpaceTopology: Equatable, Sendable {
                                           admitted: Set<UInt32> = []) throws -> Bool {
         guard running, let session = sessions[spaceID],
               admitted.allSatisfy({ spaceForWindow[$0] == nil }) else { return false }
+        guard let ownerPID = session.ownerPIDs.first else { return false }
         let changed = try session.reconcileTabs(partitions, destroyed: destroyed, ownerPID: ownerPID,
                                                 spaceID: spaceID, classification: classification,
                                                 ticket: session.ticket, admitted: admitted)
@@ -143,6 +193,7 @@ public struct DisplaySpaceTopology: Equatable, Sendable {
             }
         }
         guard remaining == Set(sourcePartitions.flatMap(\.members)) else { return nil }
+        guard let ownerPID = source.ownerPIDs.first else { return nil }
         try source.reconcileTabs(sourcePartitions, destroyed: Set(slot.members), ownerPID: ownerPID,
                                  spaceID: sourceSpace, classification: classification, ticket: source.ticket)
         _ = try destination.insertSlot(slot, width: width, spaceID: destinationSpace,

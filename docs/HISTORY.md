@@ -522,6 +522,15 @@ This recorder is not the live management registry and does not feed the lifecycl
 - Updated `ScopedLayoutSession.reconcileTabs` so non-suppressed `osFocusedWindow` tracks its slot's new `activeMember` when a merge or tab switch changes the active representative.
 - Live `paperi probe-preview-input` (`captures/preview-input-increment62-pass.json`) passes all 12/12 checks: lazy merge of the two preview windows before the background tab is visited (`slotCount: 1`), tab switch A→B→A, detach back to 2 columns (`slotCount: 2`), width `grow`/`shrink` (`⌥⌘L`/`⌥⌘H`), stacked-column `slurp`/`barf` (`⌥⌘I`/`⌥⌘O` with 6 confirmed AX writes each), and restoration of both windows to their original frames on stop. Live `paperi probe-space-session` (`captures/space-session-increment62-pass.json`) passes all 14/14 checks (including `activeFirstTabAdmitted` and `lazySecondTabReconciled` before outbound/return Mission Control Space transfers), and all 122 Swift regressions pass in debug and release.
 
+## Increment 63: opt-in live management of real application windows
+
+Course correction (2026-11-09, user direction): stop adding disposable-window probes and deliver a working manager that proves native tabs, Spaces and multi-display handling on real windows; CLI commands are an acceptable control surface until global shortcuts are added.
+
+- Added `paperi run --app ID … [--singleton-app ID …]` (`LiveManager`), `paperi msg COMMAND` over a mode-0600 Unix socket (`LiveCommandServer`) and `paperi restore` for crash recovery from a persisted journal.
+- Generalised `ScopedLayoutSession`/`DisplaySpaceCoordinator` to multiple owner PIDs, live display/canvas updates (`updateDisplays`) and whole-container removal (`removeContainer`); added `Layout.reveal` and pure `LiveReconciliation` helpers (destroyed-member partitions, other-app identity partitions, neighbour-display-aware off-canvas parking).
+- Live validation on this host (TextEdit + Finder, debug build): admission of real windows on the active Space; `focus`/`swap`/`width`/`height`/`center`/`split`/`slurp`/`barf`/`float` with confirmed frames; native-tab merge inferred without visiting background tabs, tab switch representative change, width command on the active tab, detach, close-active-tab, singleton close, minimise/unminimise; `space 2` and `space 1` Mission Control transfers of a singleton and a native-tab container with follow and re-tiling; cross-app focus/swap; stop restoring original frames and removing journal/socket.
+- 129 Swift regressions (35 core, 94 platform) pass in debug and release.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

@@ -115,6 +115,21 @@ public struct Layout: Codable, Equatable, Sendable {
         let preceding = columns.prefix(i.column).reduce(0) { $0 + min($1.width, canvas.width) + gap }
         offset = (canvas.width - min(columns[i.column].width, canvas.width)) / 2 - preceding
     }
+    /// Scrolls the minimum distance needed to show the whole focused column
+    /// (PaperWM-style "ensure visible"); returns whether the offset changed.
+    @discardableResult
+    public mutating func reveal(in canvas: Rect, gap: Double = 8) throws -> Bool {
+        try validate()
+        guard canvas.isValid, gap.isFinite, gap >= 0 else { throw LayoutError.invalidGeometry }
+        guard let focused, let i = index(of: focused) else { return false }
+        let preceding = columns.prefix(i.column).reduce(0) { $0 + min($1.width, canvas.width) + gap }
+        let width = min(columns[i.column].width, canvas.width)
+        let left = preceding + offset
+        let previous = offset
+        if left < 0 { offset = -preceding }
+        else if left + width > canvas.width { offset = canvas.width - width - preceding }
+        return offset != previous
+    }
     public func placements(in canvas: Rect, gap: Double = 8, margin: Double = 1) throws -> [Placement] {
         try validate()
         guard canvas.isValid, gap.isFinite, gap >= 0, margin.isFinite, margin >= 0,
