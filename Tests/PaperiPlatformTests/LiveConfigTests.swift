@@ -3,6 +3,14 @@ import Testing
 @testable import PaperiPlatform
 
 struct LiveConfigTests {
+    @Test func snapshotExperimentIsOptIn() throws {
+        #expect(LiveConfig().experimentalSnapshotScroll == nil)
+        let config = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"experimentalSnapshotScroll":true}"#.utf8))
+        #expect(config.experimentalSnapshotScroll == true)
+        let restored = try JSONDecoder().decode(LiveConfig.self, from: JSONEncoder().encode(config))
+        #expect(restored.experimentalSnapshotScroll == true)
+    }
+
     @Test func focusDuration() throws {
         for duration in [0.0, 0.14, 1.0] {
             let config = try JSONDecoder().decode(LiveConfig.self, from: Data("{\"focusScrollDuration\":\(duration)}".utf8))
