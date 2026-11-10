@@ -30,7 +30,7 @@ Manages the windows of every regular (Dock-visible) app on each display's active
 | C / S | `center`, `split` | Center the focused column; split it with its left neighbour |
 | I / O | `slurp`, `barf` | Stack into the left column / unstack into its own column |
 | F | `float` | Toggle the focused container out of / back into the strip |
-| — | Mission Control | Move windows between Spaces and displays by dragging them in Mission Control; the container (with its tabs and width) follows to the destination strip |
+| — | Mission Control | Move windows between Spaces and displays by dragging them in Mission Control; the container (with its tabs and width) follows to the destination strip and, once Mission Control closes, is focused if it landed on a shown Space |
 | — | `retile`, `status`, `pause`, `resume`, `reload`, `stop` | Reapply layout; JSON state; pause/resume management (windows stay put); reload config; stop and restore original frames |
 
 Quit Hammerspoon (or stop PaperWM) first: a combination already registered by another process is reported in `hotkeyFailures` and left to that process.

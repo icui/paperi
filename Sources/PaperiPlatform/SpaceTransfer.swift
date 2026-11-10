@@ -5,7 +5,8 @@ import PaperiCore
 
 /// Test aid only: drags a window onto a Space thumbnail through the Mission
 /// Control AX tree, as a user would, and confirms WindowServer Space membership.
-/// Live mode never moves windows between Spaces; it follows the user's moves.
+/// Live mode never moves windows between Spaces; it follows the user's moves
+/// (and only asks whether Mission Control is open).
 /// Matches the window by its exact, unique title.
 @MainActor enum SpaceTransfer {
     private static func pause(_ seconds: TimeInterval) {
@@ -38,6 +39,9 @@ import PaperiCore
         return CGPoint(x: p.x + s.width / 2, y: p.y + s.height / 2)
     }
 
+    /// Whether Mission Control is showing (its Dock AX group exists).
+    static func missionControlOpen() -> Bool { missionControlGroup() != nil }
+
     private static func missionControlGroup() -> AXUIElement? {
         guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return nil }
         let app = AXUIElementCreateApplication(dock.processIdentifier)
@@ -61,7 +65,9 @@ import PaperiCore
     static func moveWindowViaMissionControl(windowID: UInt32, expectedTitle: String,
                                             toSpace destinationSpace: UInt64,
                                             screenOrigin: CGPoint = .zero,
-                                            destinationDisplayBounds: CGRect? = nil) -> [String: Any] {
+                                            destinationDisplayBounds: CGRect? = nil,
+                                            exitWithEscape: Bool = false,
+                                            exitClickingTitle: String? = nil) -> [String: Any] {
         var report: [String: Any] = [
             "windowID": windowID,
             "destinationSpace": destinationSpace,
@@ -209,12 +215,30 @@ import PaperiCore
         report["dragEnd"] = [drop.x, drop.y]
 
         pause(0.6)
-        let click = axCenter(targetThumbnails[targetIndex]) ?? drop
-        postMouse(.mouseMoved, click)
-        pause(0.05)
-        postMouse(.leftMouseDown, click)
-        pause(0.08)
-        postMouse(.leftMouseUp, click)
+        if exitWithEscape {
+            postEscape()
+        } else if let other = exitClickingTitle {
+            // Leave by clicking another window's thumbnail, as a user would.
+            let thumbnail = missionControlGroup().flatMap { group in
+                axChildren(group, identifier: "mc.display").lazy
+                    .flatMap { axChildren($0, identifier: "mc.windows") }
+                    .flatMap { axValue($0, kAXChildrenAttribute as String) as? [AXUIElement] ?? [] }
+                    .first { (axValue($0, kAXTitleAttribute as String) as? String) == other }
+            }
+            guard let point = thumbnail.flatMap(axCenter) else { return fail("Exit window not found in Mission Control") }
+            postMouse(.mouseMoved, point)
+            pause(0.05)
+            postMouse(.leftMouseDown, point)
+            pause(0.08)
+            postMouse(.leftMouseUp, point)
+        } else {
+            let click = axCenter(targetThumbnails[targetIndex]) ?? drop
+            postMouse(.mouseMoved, click)
+            pause(0.05)
+            postMouse(.leftMouseDown, click)
+            pause(0.08)
+            postMouse(.leftMouseUp, click)
+        }
 
         pause(1.3)
         if missionControlGroup() != nil {
@@ -224,7 +248,7 @@ import PaperiCore
 
         var confirmed = false
         for _ in 0..<30 {
-            if windowSpaces(windowID) == [destinationSpace] && paperi_active_space() == destinationSpace {
+            if windowSpaces(windowID) == [destinationSpace] && (exitWithEscape || exitClickingTitle != nil || paperi_active_space() == destinationSpace) {
                 confirmed = true
                 break
             }
@@ -245,7 +269,8 @@ extension Diagnostics {
     /// Drags a real window onto a Space thumbnail in Mission Control, as a user
     /// would, on whichever display hosts that Space. Used to exercise how live
     /// mode follows user Mission Control moves (same- and cross-display).
-    @MainActor public static func missionControlMove(windowID: UInt32, toSpace space: UInt64) -> [String: Any] {
+    @MainActor public static func missionControlMove(windowID: UInt32, toSpace space: UInt64,
+                                                     exitWithEscape: Bool = false, exitClicking other: UInt32? = nil) -> [String: Any] {
         let rows = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(windowID)) as? [[String: Any]] ?? []
         guard let pid = rows.first?[kCGWindowOwnerPID as String] as? pid_t else { return ["failure": "window not found"] }
         let app = AXUIElementCreateApplication(pid)
@@ -253,6 +278,15 @@ extension Diagnostics {
         guard let element = windows.first(where: { paperi_window_id($0) == windowID }),
               let title = attribute(element, kAXTitleAttribute) as? String, !title.isEmpty else {
             return ["failure": "window has no AX title"]
+        }
+        var otherTitle: String?
+        if let other {
+            let rows = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(other)) as? [[String: Any]] ?? []
+            guard let otherPID = rows.first?[kCGWindowOwnerPID as String] as? pid_t,
+                  let ref = (attribute(AXUIElementCreateApplication(otherPID), kAXWindowsAttribute) as? [AXUIElement] ?? [])
+                    .first(where: { paperi_window_id($0) == other }),
+                  let t = attribute(ref, kAXTitleAttribute) as? String, !t.isEmpty else { return ["failure": "exit window has no AX title"] }
+            otherTitle = t
         }
         guard let display = DisplaySpaceCoordinator.liveTopologies().first(where: { $0.spaces.contains { $0.id == space } }) else {
             return ["failure": "unknown Space"]
@@ -264,6 +298,7 @@ extension Diagnostics {
             if uuid == display.displayUUID { bounds = CGDisplayBounds(id) }
         }
         return SpaceTransfer.moveWindowViaMissionControl(windowID: windowID, expectedTitle: title, toSpace: space,
-                                                        screenOrigin: bounds.origin, destinationDisplayBounds: bounds)
+                                                        screenOrigin: bounds.origin, destinationDisplayBounds: bounds,
+                                                        exitWithEscape: exitWithEscape, exitClickingTitle: otherTitle)
     }
 }

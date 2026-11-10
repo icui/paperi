@@ -71,6 +71,12 @@ import PaperiCore
     /// while: macOS and apps (e.g. leaving a fullscreen Space) may move
     /// off-canvas windows on screen once their Space is shown again.
     private var forceUntil: Double = 0
+    /// A container that just followed a user Mission Control move into a shown
+    /// Space. Once Mission Control has closed it is focused and raised, unless
+    /// the user focused another window meanwhile (e.g. by clicking it to leave
+    /// Mission Control). `focusAtDrop` is the OS focus seen right after the move.
+    private var arrival: (window: UInt32, focusAtDrop: UInt32??)?
+    private var missionControlWatch = false
     /// Last column width of every managed member, kept after the window leaves
     /// the strip (minimize, hide, fullscreen, float) so it returns at that
     /// width, as in PaperWM.
@@ -300,6 +306,25 @@ import PaperiCore
         poll()
     }
 
+    /// Polls until Mission Control has closed, then refreshes once so a moved
+    /// window can be focused (closing Mission Control posts no event we observe).
+    private func refreshWhenMissionControlCloses() {
+        guard !missionControlWatch else { return }
+        missionControlWatch = true
+        func poll() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if self.running, self.arrival != nil,
+                       NSEvent.pressedMouseButtons & 1 != 0 || SpaceTransfer.missionControlOpen() { poll(); return }
+                    self.missionControlWatch = false
+                    self.scheduleRefresh()
+                }
+            }
+        }
+        poll()
+    }
+
     func scheduleRefresh() {
         guard running, !refreshScheduled else { return }
         refreshScheduled = true
@@ -468,14 +493,19 @@ import PaperiCore
         }
 
         // 4. Representatives that changed Space (Mission Control drag, display drag).
+        var followed: [UInt32] = []
         for (wid, row) in byID {
             guard let current = coordinator.spaceForWindow[wid], let space = row.spaceID, space != current,
                   isActiveRepresentative(wid), coordinator.sessions[space] != nil else { continue }
             if (try? coordinator.transferContainer(containing: wid, to: space, classification: Self.tiled)) != nil {
                 forceApply = true
+                followed.append(wid)
                 log("container of \(wid) followed to Space \(space)")
             }
         }
+        // Only a single moved container is focused; several at once (e.g. a
+        // display was disconnected) are not a user's choice of one window.
+        if !followed.isEmpty { arrival = followed.count == 1 ? (followed[0], nil) : nil }
 
         // 5. Per-app tab topology and admission on active Spaces.
         for app in apps where !app.isHidden {
@@ -555,10 +585,26 @@ import PaperiCore
             }.first
             raiseAfterApply = focusedWindow
         }
+        var focusedPID = front?.processIdentifier
+        var activateArrival: UInt32?
+        if var pending = arrival {
+            if pending.focusAtDrop == nil { pending.focusAtDrop = .some(focusedWindow); arrival = pending }
+            if coordinator.spaceForWindow[pending.window].map(activeSpaces.contains) != true || !isActiveRepresentative(pending.window) {
+                arrival = nil  // moved to a Space that is not shown, or gone
+            } else if focusedWindow != pending.focusAtDrop! && focusedWindow != pending.window {
+                arrival = nil  // the user focused something else
+            } else if mouseDown || SpaceTransfer.missionControlOpen() {
+                refreshWhenMissionControlCloses()
+            } else {
+                arrival = nil
+                activateArrival = pending.window
+                focusedWindow = pending.window; focusedPID = pidForWindow[pending.window]; raiseAfterApply = nil
+            }
+        }
         for (space, session) in coordinator.sessions where activeSpaces.contains(space) {
             let owned = focusedWindow.flatMap { session.slots[$0] != nil ? $0 : nil }
             let classification = owned != nil ? Self.tiled : WindowPolicy.classify(WindowFacts(bundleID: "foreign"))
-            try? session.focus(windowID: owned, ownerPID: owned != nil ? front?.processIdentifier : nil,
+            try? session.focus(windowID: owned, ownerPID: owned != nil ? focusedPID : nil,
                                classification: classification, ticket: session.ticket)
             // Removals, insertions and focus changes can leave the focused
             // column partly off-canvas; reveal is minimal and idempotent.
@@ -624,6 +670,7 @@ import PaperiCore
                 AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
                 log("raised \(wid): app activated without a focused window")
             }
+            if let wid = activateArrival, raise(wid) { log("focused \(wid) after it followed a Mission Control move") }
         }
         rememberWidths()
         lastRefreshMS = (ProcessInfo.processInfo.systemUptime - started) * 1000

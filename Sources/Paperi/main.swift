@@ -52,10 +52,16 @@ case "restore":
     guard AXIsProcessTrusted() else { print("Accessibility access is required."); exit(1) }
     Diagnostics.printJSON(LiveManager.restore())
 case "mission-control-move":
-    guard args.count == 3, let wid = UInt32(args[1]), let space = UInt64(args[2]) else {
-        print("Usage: paperi mission-control-move windowID spaceID"); exit(2)
+    var rest = args.filter { $0 != "--escape" }
+    var exitClick: UInt32?
+    if let i = rest.firstIndex(of: "--exit-click"), rest.indices.contains(i + 1) {
+        exitClick = UInt32(rest[i + 1]); rest.removeSubrange(i...(i + 1))
     }
-    let report = Diagnostics.missionControlMove(windowID: wid, toSpace: space)
+    guard rest.count == 3, let wid = UInt32(rest[1]), let space = UInt64(rest[2]) else {
+        print("Usage: paperi mission-control-move windowID spaceID [--escape | --exit-click windowID]"); exit(2)
+    }
+    let report = Diagnostics.missionControlMove(windowID: wid, toSpace: space, exitWithEscape: args.contains("--escape"),
+                                                exitClicking: exitClick)
     Diagnostics.printJSON(report)
     exit(report["transferred"] as? Bool == true ? 0 : 1)
 case "probe-terminal-session":
@@ -208,7 +214,9 @@ default:
       paperi probe-resize                Adopt a fixture-originated resize while tracking expected AX echoes
       paperi probe-interaction           Exercise focused resize commands, panel suppression and recovery on a new fixture
       paperi probe-stop                  Stop with two live fixture windows, restore original frames and reject stale work
-      paperi mission-control-move WID SPACE Drag a real window onto a Space in Mission Control (any display)
+      paperi mission-control-move WID SPACE [--escape | --exit-click WID]
+                                        Drag a real window onto a Space in Mission Control (any display);
+                                        leave by clicking that Space, Esc, or another window
       paperi preview-fixture             Interactive disposable preview; local controls, Stop & Restore, 60-second limit
       paperi probe-preview-input         Test AppKit key-equivalent/button input on the disposable preview
       paperi --menu                      Run diagnostic menu bar shell
