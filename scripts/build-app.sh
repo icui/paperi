@@ -19,5 +19,13 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>LSUIElement</key><true/>
 </dict></plist>
 PLIST
-codesign --force --sign "${PAPERI_SIGN_IDENTITY:--}" "$app"
+if [ -n "${PAPERI_SIGN_IDENTITY:-}" ]; then
+    codesign --force --sign "$PAPERI_SIGN_IDENTITY" "$app"
+else
+    # Ad hoc signatures change their code hash on every build, and macOS ties
+    # the Accessibility grant to the designated requirement. Pin it to the
+    # bundle identifier so a grant survives rebuilds/reinstalls. (Weaker than
+    # a real identity: any local binary claiming this identifier matches.)
+    codesign --force --sign - -r='designated => identifier "dev.paperi.app"' "$app"
+fi
 printf 'Built %s (local development signature; not notarized)\n' "$app"

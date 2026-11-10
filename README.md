@@ -9,7 +9,7 @@ Standalone macOS scrolling window manager (PaperWM-style) in development.
 open ~/Applications/Paperi.app        # grant Accessibility when prompted
 ```
 
-The ▥ menu bar item shows status and offers Pause/Resume, Retile, Reload Config, Open Config…, Start at Login and Stop & Restore Windows. The installed app keeps its Accessibility grant while you rebuild the repository; reinstalling with the default ad hoc signature needs a fresh grant (set `PAPERI_SIGN_IDENTITY` to avoid that). `paperi login on|off|status` manages the LaunchAgent (prefers the installed app; log in `~/Library/Logs/Paperi.log`). Quit Hammerspoon/PaperWM first; rollback is Stop & Restore, `paperi login off`, then start Hammerspoon again.
+The ▥ menu bar item shows status and offers Pause/Resume, Retile, Reload Config, Open Config…, Start at Login and Stop & Restore Windows. The app's ad hoc signature pins its designated requirement to the bundle identifier (`dev.paperi.app`), so one Accessibility grant survives rebuilds and reinstalls. This is weaker than a real signing identity (any local binary with that identifier would match); set `PAPERI_SIGN_IDENTITY` to use one. If a grant has no effect, an entry for an older build is stale: run `tccutil reset Accessibility dev.paperi.app`, relaunch, and grant again. `paperi login on|off|status` manages the LaunchAgent (prefers the installed app; log in `~/Library/Logs/Paperi.log`). Quit Hammerspoon/PaperWM first; rollback is Stop & Restore, `paperi login off`, then start Hammerspoon again.
 
 ## Live mode
 

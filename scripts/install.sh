@@ -1,9 +1,8 @@
 #!/bin/sh
 # Builds the release app and installs it to ~/Applications/Paperi.app.
-# Grant Accessibility once to the installed app; rebuilding the repository
-# does not change it. Re-running this script replaces the binary, which with
-# the default ad hoc signature requires granting Accessibility again (set
-# PAPERI_SIGN_IDENTITY to a code-signing identity to keep the grant).
+# Grant Accessibility once to the installed app. The ad hoc signature pins
+# its designated requirement to the bundle identifier, so the grant survives
+# reinstalls (verified with a copy whose code hash differs).
 set -eu
 cd "$(dirname "$0")/.."
 ./scripts/build-app.sh
