@@ -25,6 +25,20 @@ public enum DisplayArrangement {
         return pairs
     }
 
+    public static func problem(displays: [Display], separateSpaces: Bool) -> String? {
+        guard separateSpaces else {
+            return "Paperi requires “Displays have separate Spaces”. Enable it in System Settings → Desktop & Dock → Mission Control, then log out and back in to apply the change."
+        }
+        guard let (left, right) = sideBySide(displays).first else { return nil }
+        return "“\(left.name)” is to the left of “\(right.name)”. Windows that Paperi scrolls past "
+            + "that edge would jump to the other display. Place your displays above or below "
+            + "each other in Displays settings and Paperi resumes on its own."
+    }
+
+    @MainActor public static func currentProblem() -> String? {
+        problem(displays: current(), separateSpaces: NSScreen.screensHaveSeparateSpaces)
+    }
+
     /// Connected displays, in AppKit coordinates.
     @MainActor public static func current() -> [Display] {
         NSScreen.screens.map { Display(name: $0.localizedName, frame: $0.frame) }

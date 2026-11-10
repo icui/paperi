@@ -154,6 +154,9 @@ import PaperiCore
     }
 
     @discardableResult public func resume() -> [String: Any] {
+        if let problem = DisplayArrangement.currentProblem() {
+            return ["ok": false, "paused": paused, "error": problem]
+        }
         guard paused else { return ["ok": running, "paused": false] }
         do { try start(resuming: true) } catch { return ["ok": false, "error": "\(error)"] }
         return ["ok": true, "paused": false]
@@ -425,7 +428,7 @@ import PaperiCore
         guard running, !busy else { return }
         // Side-by-side displays are unsupported (the app pauses moments later);
         // no pass may run in between and push a window onto the other display.
-        guard DisplayArrangement.sideBySide(DisplayArrangement.current()).isEmpty else { return }
+        guard DisplayArrangement.currentProblem() == nil else { return }
         busy = true; defer { busy = false }
         let started = ProcessInfo.processInfo.systemUptime
         // While the left button is held (moving, resizing, or just a click in

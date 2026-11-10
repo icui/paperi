@@ -137,10 +137,7 @@ import PaperiPlatform
 
     /// A gentle explanation when two displays sit side by side, else nil.
     private static func arrangementProblem() -> String? {
-        guard let (left, right) = DisplayArrangement.sideBySide(DisplayArrangement.current()).first else { return nil }
-        return "“\(left.name)” is to the left of “\(right.name)”. Windows that Paperi scrolls past "
-            + "that edge would jump to the other display. Place your displays above or below "
-            + "each other in Displays settings and Paperi resumes on its own."
+        DisplayArrangement.currentProblem()
     }
 
     /// Displays settle over several notifications while being rearranged.
@@ -163,11 +160,11 @@ import PaperiPlatform
         }
         // Already paused for this reason. A user pause is kept, but resuming
         // is refused while the displays stay side by side.
-        guard arrangementPause == nil else { return }
-        resumeWhenStacked = !manager.paused
+        guard arrangementPause != problem else { return }
+        if arrangementPause == nil { resumeWhenStacked = !manager.paused }
         if !manager.paused { manager.pause() }
         arrangementPause = problem
-        log("displays side by side: paused")
+        log(problem)
         updateTitle()
         showWarning(problem)
     }
@@ -177,14 +174,14 @@ import PaperiPlatform
         guard let button = item?.button else { return }
         warning?.close()
         let width: CGFloat = 300
-        let title = NSTextField(wrappingLabelWithString: "Paperi paused: displays are side by side")
+        let title = NSTextField(wrappingLabelWithString: "Paperi paused: display settings")
         title.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         let body = NSTextField(wrappingLabelWithString: text)
         for label in [title, body] {
             label.preferredMaxLayoutWidth = width
             label.widthAnchor.constraint(equalToConstant: width).isActive = true
         }
-        let open = NSButton(title: "Open Displays Settings", target: self, action: #selector(openDisplaySettings))
+        let open = NSButton(title: "Open Display Settings", target: self, action: #selector(openDisplaySettings))
         open.bezelStyle = .rounded; open.keyEquivalent = "\r"
         let dismiss = NSButton(title: "Dismiss", target: self, action: #selector(dismissWarning))
         dismiss.bezelStyle = .rounded
@@ -207,7 +204,9 @@ import PaperiPlatform
     @objc private func dismissWarning() { warning?.close() }
     @objc private func openDisplaySettings() {
         warning?.close()
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Displays-Settings.extension")!)
+        let pane = NSScreen.screensHaveSeparateSpaces
+            ? "com.apple.Displays-Settings.extension" : "com.apple.Desktop-Settings.extension"
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:\(pane)")!)
     }
 
     private func log(_ message: String) {
@@ -218,7 +217,7 @@ import PaperiPlatform
         var reply: [String: Any]
         if command.first == "resume", let problem = arrangementPause {
             showWarning(problem)
-            return ["ok": false, "paused": true, "error": "displays are side by side; arrange them above or below each other"]
+            return ["ok": false, "paused": true, "error": problem]
         }
         switch command.first {
         case "reload": reply = reload()
@@ -270,14 +269,14 @@ import PaperiPlatform
     private func updateTitle() {
         guard AXIsProcessTrusted() else { return }
         item?.button?.title = manager.paused ? "▥ ⏸" : "▥"
-        item?.button?.toolTip = arrangementPause == nil ? "Paperi" : "Paperi paused: displays are side by side"
+        item?.button?.toolTip = arrangementPause == nil ? "Paperi" : "Paperi paused: display settings"
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let state: String
         if !AXIsProcessTrusted() { state = "Waiting for Accessibility access" }
-        else if arrangementPause != nil { state = "Paused (displays side by side)" }
+        else if arrangementPause != nil { state = "Paused (display settings)" }
         else if manager.paused { state = "Paused" }
         else { state = "Managing \(manager.managedWindowCount) window\(manager.managedWindowCount == 1 ? "" : "s")" }
         menu.addItem(withTitle: "Paperi — \(state)", action: nil, keyEquivalent: "")
@@ -294,9 +293,9 @@ import PaperiPlatform
         let config = menu.addItem(withTitle: "Show Config", action: nil, keyEquivalent: "")
         config.submenu = configMenu()
         if let reason = arrangementPause {
-            let why = menu.addItem(withTitle: "Arrange displays above/below each other to resume", action: nil, keyEquivalent: "")
+            let why = menu.addItem(withTitle: "Update display settings to resume", action: nil, keyEquivalent: "")
             why.toolTip = reason
-            add(menu, "Open Displays Settings…", #selector(openDisplaySettings))
+            add(menu, "Open Display Settings…", #selector(openDisplaySettings))
         }
         menu.addItem(.separator())
         if arrangementPause == nil { add(menu, manager.paused ? "Resume" : "Pause", #selector(togglePause)) }
