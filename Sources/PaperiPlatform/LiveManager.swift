@@ -58,6 +58,7 @@ import PaperiCore
     private var dragging: UInt32? { drag?.windowID }
     private var dragTimer: Timer?
     private let highlight = SwapHighlight()
+    private var mouseUpWatch = false
     /// Last off-slot frame acted on per window, so an app that clamps its
     /// position is rewritten once rather than on every refresh.
     private var displaced: [UInt32: Rect] = [:]
@@ -281,6 +282,24 @@ import PaperiCore
         highlight.hide()
     }
 
+    /// No AX event may follow a release, so poll for mouse up and refresh once
+    /// to apply what was deferred (step 8).
+    private func refreshOnMouseUp() {
+        guard !mouseUpWatch else { return }
+        mouseUpWatch = true
+        func poll() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if self.running, NSEvent.pressedMouseButtons & 1 != 0 { poll(); return }
+                    self.mouseUpWatch = false
+                    self.scheduleRefresh()
+                }
+            }
+        }
+        poll()
+    }
+
     func scheduleRefresh() {
         guard running, !refreshScheduled else { return }
         refreshScheduled = true
@@ -396,6 +415,10 @@ import PaperiCore
         guard running, !busy else { return }
         busy = true; defer { busy = false }
         let started = ProcessInfo.processInfo.systemUptime
+        // While the left button is held (moving, resizing, or just a click in
+        // progress) the pass only observes: state is reconciled and drags are
+        // detected, but nothing scrolls, reflows or is written until mouse up.
+        let mouseDown = NSEvent.pressedMouseButtons & 1 != 0
         let displays = topologies()
         coordinator.updateDisplays(displays)
         let activeSpaces = Set(displays.compactMap(\.activeSpaceID))
@@ -515,6 +538,23 @@ import PaperiCore
                 focusedWindow = paperi_window_id(element)
             }
         }
+        // An app activated without a click (notification, Dock, ⌘-Tab, `open`)
+        // whose windows are all parked off-canvas often has no focused or main
+        // window. Treat its frontmost managed window as focused so the strip
+        // reveals it, and raise it after placement so it takes key focus.
+        var raiseAfterApply: UInt32?
+        if let front, livePIDs.contains(front.processIdentifier), focusedWindow == nil {
+            let pid = front.processIdentifier
+            // CGWindowList rows are ordered front to back.
+            focusedWindow = cgRows.lazy.compactMap { row -> UInt32? in
+                guard row[kCGWindowOwnerPID as String] as? pid_t == pid,
+                      let id = row[kCGWindowNumber as String] as? UInt32,
+                      let space = self.coordinator.spaceForWindow[id], activeSpaces.contains(space),
+                      self.isActiveRepresentative(id) else { return nil }
+                return id
+            }.first
+            raiseAfterApply = focusedWindow
+        }
         for (space, session) in coordinator.sessions where activeSpaces.contains(space) {
             let owned = focusedWindow.flatMap { session.slots[$0] != nil ? $0 : nil }
             let classification = owned != nil ? Self.tiled : WindowPolicy.classify(WindowFacts(bundleID: "foreign"))
@@ -522,11 +562,10 @@ import PaperiCore
                                classification: classification, ticket: session.ticket)
             // Removals, insertions and focus changes can leave the focused
             // column partly off-canvas; reveal is minimal and idempotent.
-            // Not mid-drag: scrolling would shift the columns under the pointer.
-            if dragging == nil { reveal(session) }
+            if !mouseDown { reveal(session) }
         }
 
-        // 7. Adopt user width changes on active representatives.
+        // 7. Adopt user width changes on active representatives (on mouse up).
         let now = ProcessInfo.processInfo.systemUptime
         for space in activeSpaces {
             guard let session = coordinator.sessions[space],
@@ -535,6 +574,7 @@ import PaperiCore
                 guard let exp = expected[placement.windowID], now - exp.at > 0.6,
                       let frame = byID[placement.windowID]?.frame, frame.isValid,
                       abs(frame.width - exp.frame.width) > 2, let pid = pidForWindow[placement.windowID] else { continue }
+                if mouseDown { continue }
                 expected[placement.windowID] = (frame, now)
                 let width = min(frame.width, maxColumnWidth(session.canvas))
                 // Wider than the cap: the window is written back to the capped width.
@@ -549,7 +589,6 @@ import PaperiCore
         // 7b. User moves. A window moved without a drag is put back. A drag is
         // tracked until mouse up (trackDrag): it swaps with a neighbouring
         // column only if released over it, then snaps into its slot.
-        let mouseDown = NSEvent.pressedMouseButtons & 1 != 0
         if !mouseDown, drag != nil { finishDrag() }
         if !forceApply, now >= forceUntil {
             for space in activeSpaces {
@@ -574,9 +613,18 @@ import PaperiCore
             }
         }
 
-        // 8. Effects.
-        for space in activeSpaces { apply(space: space, byID: byID) }
-        forceApply = false
+        // 8. Effects, deferred to mouse up (no AX event may follow the release).
+        if mouseDown {
+            refreshOnMouseUp()
+        } else {
+            for space in activeSpaces { apply(space: space, byID: byID) }
+            forceApply = false
+            if let wid = raiseAfterApply, let element = references[wid] {
+                AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+                AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
+                log("raised \(wid): app activated without a focused window")
+            }
+        }
         rememberWidths()
         lastRefreshMS = (ProcessInfo.processInfo.systemUptime - started) * 1000
     }
@@ -666,20 +714,37 @@ import PaperiCore
         let own = display.flatMap { bounds[$0.displayUUID] } ?? CGDisplayBounds(CGMainDisplayID())
         let others = bounds.filter { $0.key != display?.displayUUID }.map(\.value)
         var allConfirmed = true
+        var unresponsive: Set<pid_t> = []
         for placement in placements {
             let wid = placement.windowID
-            guard let element = references[wid], let row = byID[wid], row.spaceID == space else { allConfirmed = false; continue }
-            // Do not fight a window that is temporarily not movable (open sheet).
-            guard row.classification.eligibility == .tiled else { allConfirmed = false; continue }
-            // The dragged window follows the pointer; it is placed on mouse up.
-            if wid == dragging { allConfirmed = false; continue }
+            guard let element = references[wid] else { allConfirmed = false; continue }
+            let row = byID[wid]
+            if let row {
+                guard row.spaceID == space else { allConfirmed = false; continue }
+                // Do not fight a window that is temporarily not movable (open sheet).
+                guard row.classification.eligibility == .tiled else { allConfirmed = false; continue }
+            } else {
+                // Its app was not surveyed (slow AX, e.g. busy right after
+                // activation): still place it through the cached reference so
+                // the strip does not show a gap, unless it is on another Space
+                // or its app already failed a write this pass. Unconfirmed, so
+                // it is verified again once the app answers.
+                allConfirmed = false
+                guard let pid = pidForWindow[wid], !unresponsive.contains(pid), Self.windowSpace(wid) == space else { continue }
+            }
             let target = LiveReconciliation.park(placement.frame, canvas: session.canvas, display: own, otherDisplays: others)
-            if let frame = row.frame, matches(frame, target) {
+            if let frame = row?.frame, matches(frame, target) {
                 expected[wid] = (target, ProcessInfo.processInfo.systemUptime); displaced.removeValue(forKey: wid); continue
             }
             session.expect(windowID: wid, frame: target, now: ProcessInfo.processInfo.systemUptime, ticket: session.ticket)
             expected[wid] = (target, ProcessInfo.processInfo.systemUptime)
-            if !write(target, to: element) { allConfirmed = false }
+            if !write(target, to: element) {
+                allConfirmed = false
+                if row == nil, let pid = pidForWindow[wid] { unresponsive.insert(pid) }
+                log("write failed for \(wid)\(row == nil ? " (unsurveyed)" : "")")
+            } else if row == nil {
+                log("placed unsurveyed \(wid) via cached reference")
+            }
         }
         if allConfirmed { applied[space] = placements } else { applied.removeValue(forKey: space) }
     }
