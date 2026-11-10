@@ -316,7 +316,7 @@ import PaperiCore
                     guard let self else { return }
                     if self.running, NSEvent.pressedMouseButtons & 1 != 0 { poll(); return }
                     self.mouseUpWatch = false
-                    self.scheduleRefresh()
+                    self.refresh()
                 }
             }
         }
@@ -438,6 +438,7 @@ import PaperiCore
         guard running, !busy else { return }
         if motionTimer != nil { return }
         motionFrames.removeAll()
+        if animateCachedFocus() { return }
         // Side-by-side displays are unsupported (the app pauses moments later);
         // no pass may run in between and push a window onto the other display.
         guard DisplayArrangement.currentProblem() == nil else { return }
@@ -595,7 +596,9 @@ import PaperiCore
             }
             raiseAfterApply = focusedWindow
         }
+        var focusAnimationSpace: UInt64?
         for (space, session) in coordinator.sessions where activeSpaces.contains(space) {
+            let previousOffset = session.state.layout.offset
             let owned = focusedWindow.flatMap { session.slots[$0] != nil ? $0 : nil }
             let classification = owned != nil ? Self.tiled : WindowPolicy.classify(WindowFacts(bundleID: "foreign"))
             try? session.focus(windowID: owned, ownerPID: owned != nil ? front?.processIdentifier : nil,
@@ -603,6 +606,13 @@ import PaperiCore
             // Removals, insertions and focus changes can leave the focused
             // column partly off-canvas; reveal is minimal and idempotent.
             if !mouseDown { reveal(session) }
+            // A click can update focus while the mouse is down; reveal is
+            // deferred until release, when the stored focus already matches.
+            // The reveal's offset change is the animation trigger.
+            if owned != nil, previousOffset != session.state.layout.offset,
+               !forceApply, ProcessInfo.processInfo.systemUptime >= forceUntil {
+                focusAnimationSpace = space
+            }
         }
 
         // 7. Adopt user width changes on active representatives (on mouse up).
@@ -658,7 +668,12 @@ import PaperiCore
         if mouseDown {
             refreshOnMouseUp()
         } else {
-            for space in activeSpaces { apply(space: space, byID: byID) }
+            for space in activeSpaces where space != focusAnimationSpace { apply(space: space, byID: byID) }
+            if let space = focusAnimationSpace {
+                commandStarted = ProcessInfo.processInfo.systemUptime
+                firstWriteMS = nil; finalWriteMS = nil; confirmedMS = nil
+                animateFocus(space: space, byID: byID)
+            }
             forceApply = false
             if let wid = raiseAfterApply, let element = references[wid] {
                 AXUIElementPerformAction(element, kAXRaiseAction as CFString)
@@ -738,6 +753,7 @@ import PaperiCore
     private var latestSurvey: [UInt32: Survey] = [:]
     private var motionBegan: Double?
     private var motionFailed: Set<UInt32> = []
+    private var motionBlocked: Set<UInt32> = []
     private var motionTicks = 0
     private var motionSpace: UInt64?
     private var motionTimer: Timer?
@@ -753,6 +769,55 @@ import PaperiCore
     private func cancelMotion() {
         motionGeneration &+= 1
         motionTimer?.invalidate(); motionTimer = nil
+    }
+
+    /// Reveal an existing representative before the expensive all-app survey.
+    /// WindowServer supplies current frames; unknown windows still take the full
+    /// reconciliation path. A normal refresh follows animation completion.
+    private func animateCachedFocus() -> Bool {
+        guard !forceApply, ProcessInfo.processInfo.systemUptime >= forceUntil,
+              NSEvent.pressedMouseButtons == 0, drag == nil,
+              (options.config.focusScrollDuration ?? 0.22) > 0,
+              DisplayArrangement.currentProblem() == nil,
+              let front = NSWorkspace.shared.frontmostApplication else { return false }
+        let application = AXUIElementCreateApplication(front.processIdentifier)
+        AXUIElementSetMessagingTimeout(application, 0.02)
+        guard let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return false }
+        let wid = paperi_window_id((value as! AXUIElement))
+        guard pidForWindow[wid] == front.processIdentifier, isActiveRepresentative(wid),
+              let space = coordinator.spaceForWindow[wid],
+              Self.windowSpace(wid) == space,
+              coordinator.display(forSpace: space)?.activeSpaceID == space,
+              let session = coordinator.sessions[space], !session.state.interactionSuppressed,
+              let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap),
+              let rows = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else { return false }
+        var frames: [UInt32: Rect] = [:]
+        for row in rows {
+            guard let id = row[kCGWindowNumber as String] as? UInt32,
+                  let bounds = row[kCGWindowBounds as String] as? [String: Any],
+                  let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { continue }
+            frames[id] = Rect(x: frame.origin.x, y: frame.origin.y, width: frame.width, height: frame.height)
+        }
+        var surveys: [UInt32: Survey] = [:]
+        for placement in placements {
+            let id = placement.windowID
+            guard let cached = latestSurvey[id], cached.spaceID == space,
+                  cached.classification.eligibility == .tiled,
+                  let frame = frames[id], Self.windowSpace(id) == space else { return false }
+            surveys[id] = Survey(windowID: id, pid: cached.pid, element: cached.element,
+                                 classification: cached.classification, facts: cached.facts,
+                                 floatRequested: cached.floatRequested, spaceID: space, frame: frame)
+        }
+        let offset = session.state.layout.offset
+        try? session.focus(windowID: wid, ownerPID: front.processIdentifier,
+                           classification: Self.tiled, ticket: session.ticket)
+        reveal(session)
+        guard session.state.layout.offset != offset else { return false }
+        commandStarted = ProcessInfo.processInfo.systemUptime
+        firstWriteMS = nil; finalWriteMS = nil; confirmedMS = nil
+        animateFocus(space: space, byID: surveys)
+        return true
     }
 
     /// One target calculation, position-only ticks, no discovery in the scheduler.
@@ -777,12 +842,16 @@ import PaperiCore
                   let frame = motionFrames[wid] ?? row.frame, let target = targets[wid] else {
                 cancelMotion(); apply(space: space, byID: byID); return
             }
+            // Position-only animation cannot apply admission or resize changes.
+            guard abs(frame.width - target.width) <= 2, abs(frame.height - target.height) <= 2 else {
+                cancelMotion(); apply(space: space, byID: byID); return
+            }
             if !matches(frame, target) { starts[wid] = frame }
         }
         cancelMotion()
         guard !starts.isEmpty else { return }
         let generation = motionGeneration
-        motionBegan = nil; motionFailed.removeAll(); motionTicks = 0
+        motionBegan = nil; motionFailed.removeAll(); motionBlocked.removeAll(); motionTicks = 0
         let origins = starts
         let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -796,7 +865,7 @@ import PaperiCore
                 let progress = min(1, (tick - (self.motionBegan ?? tick)) / duration)
                 let eased = progress * progress * (3 - 2 * progress)
                 self.motionTicks += 1
-                for (wid, origin) in origins where !self.motionFailed.contains(wid) {
+                for (wid, origin) in origins where !self.motionBlocked.contains(wid) {
                     guard NSEvent.pressedMouseButtons == 0 else {
                         self.cancelMotion(); self.motionFrames.removeAll(); self.refreshOnMouseUp(); return
                     }
@@ -818,8 +887,14 @@ import PaperiCore
                     if self.firstWriteMS == nil { self.firstWriteMS = (writeStart - self.commandStarted) * 1000 }
                     if result != .success {
                         self.motionFailed.insert(wid)
+                        // A busy app can time out during activation. Retry at
+                        // the next tick's current position instead of leaving
+                        // it stationary for the rest of the animation. Each
+                        // attempt remains bounded by the 20 ms timeout.
+                        if result != .cannotComplete { self.motionBlocked.insert(wid) }
                         continue
                     }
+                    self.motionFailed.remove(wid)
                     self.motionFrames[wid] = frame
                 }
                 self.tickMS = (ProcessInfo.processInfo.systemUptime - tick) * 1000
@@ -1084,7 +1159,7 @@ import PaperiCore
         guard let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
               CFGetTypeID(value) == AXUIElementGetTypeID(),
               let frame = Diagnostics.frame(value as! AXUIElement), frame.isValid else { return }
-        edgeHint.show(along: frame, side: side)
+        edgeHint.show(along: frame, side: side, color: options.config.edgeHintColor)
     }
 
     private func surveyByID() -> [UInt32: Survey] {

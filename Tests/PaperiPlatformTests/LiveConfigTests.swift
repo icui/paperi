@@ -3,6 +3,24 @@ import Testing
 @testable import PaperiPlatform
 
 struct LiveConfigTests {
+    @Test func edgeHintColor() throws {
+        let defaults = try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8))
+        #expect(defaults.edgeHintColor == LiveConfig().edgeHintColor)
+        #expect(defaults.edgeHintColor.alpha == 1)
+        #expect(defaults.edgeHintColor.red == defaults.swapHighlightColor.red)
+        #expect(defaults.edgeHintColor.green == defaults.swapHighlightColor.green)
+        #expect(defaults.edgeHintColor.blue == defaults.swapHighlightColor.blue)
+        for color in ["#FF8800", "#11223380"] {
+            let config = try JSONDecoder().decode(LiveConfig.self, from: Data("{\"edgeHint\":\"\(color)\"}".utf8))
+            #expect(config.edgeHint == color)
+            let roundTrip = try JSONDecoder().decode(LiveConfig.self, from: JSONEncoder().encode(config))
+            #expect(roundTrip.edgeHintColor == config.edgeHintColor)
+        }
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"edgeHint":"invalid"}"#.utf8))
+        }
+    }
+
     @Test func focusDuration() throws {
         for duration in [0.0, 0.14, 1.0] {
             let config = try JSONDecoder().decode(LiveConfig.self, from: Data("{\"focusScrollDuration\":\(duration)}".utf8))

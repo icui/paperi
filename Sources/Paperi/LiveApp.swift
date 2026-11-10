@@ -357,6 +357,10 @@ import PaperiPlatform
         let swatch = value(menu, "Swap highlight: \(color)\(origin(config.swapHighlight != nil))", copy: color,
                            tip: "\"swapHighlight\": mask over the window a drag would swap with, #RRGGBB[AA]")
         swatch.image = Self.swatch(config.swapHighlightColor)
+        let edgeColor = config.edgeHint ?? LiveConfig.defaultEdgeHint
+        let edgeSwatch = value(menu, "Edge hint: \(edgeColor)\(origin(config.edgeHint != nil))", copy: edgeColor,
+                               tip: "\"edgeHint\": bar shown when focus reaches the end of the window set, #RRGGBB[AA]")
+        edgeSwatch.image = Self.swatch(config.edgeHintColor)
         menu.addItem(.separator())
 
         let cliApps = Set(cliInclude), cliSingles = Set(cliSingletons)

@@ -1,7 +1,7 @@
 import AppKit
 import PaperiCore
 
-/// Gentle "end of the row" cue: a short accent-coloured bar fades in and out
+/// Gentle "end of the row" cue: a short configurable bar fades in and out
 /// along one edge of the focused window when focus cannot move that way.
 /// Click-through and above all windows; it never takes focus.
 @MainActor final class EdgeHint {
@@ -22,14 +22,14 @@ import PaperiCore
         }
     }
 
-    func show(along frame: Rect, side: Direction) {
+    func show(along frame: Rect, side: Direction, color: HexColor) {
         let window = self.window ?? make()
         self.window = window
         let rect = Self.bar(along: frame, side: side)
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         window.setFrame(NSRect(x: rect.x, y: primaryHeight - rect.y - rect.height, width: rect.width, height: rect.height),
                         display: true)
-        window.contentView?.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor
+        window.contentView?.layer?.backgroundColor = CGColor(srgbRed: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
         generation += 1
         let current = generation
         window.alphaValue = 0

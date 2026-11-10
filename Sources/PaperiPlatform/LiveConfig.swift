@@ -37,6 +37,10 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public var hotkeys: [String: String?]
     /// Mask over the column a dragged window would swap with, `#RRGGBB[AA]`.
     public var swapHighlight: String?
+    /// Bar at the edge of the focused window when focus cannot move, `#RRGGBB[AA]`.
+    public var edgeHint: String?
+    public static let defaultEdgeHint = "#0A84FF"
+    public var edgeHintColor: HexColor { edgeHint.flatMap(HexColor.init) ?? HexColor(Self.defaultEdgeHint)! }
     public static let defaultSwapHighlight = "#0A84FF4D"
     public var swapHighlightColor: HexColor { swapHighlight.flatMap(HexColor.init) ?? HexColor(Self.defaultSwapHighlight)! }
 
@@ -47,7 +51,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         self.hotkeys = [:]
     }
 
-    enum CodingKeys: String, CodingKey { case include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight, focusScrollDuration }
+    enum CodingKeys: String, CodingKey { case include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight, edgeHint, focusScrollDuration }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         include = try c.decodeIfPresent([String].self, forKey: .include)
@@ -62,6 +66,11 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         gap = try c.decodeIfPresent(Double.self, forKey: .gap)
         outerGap = try c.decodeIfPresent(Double.self, forKey: .outerGap)
         hotkeys = try c.decodeIfPresent([String: String?].self, forKey: .hotkeys) ?? [:]
+        edgeHint = try c.decodeIfPresent(String.self, forKey: .edgeHint)
+        if let edgeHint, HexColor(edgeHint) == nil {
+            throw DecodingError.dataCorruptedError(forKey: .edgeHint, in: c,
+                debugDescription: "expected #RRGGBB or #RRGGBBAA, got \(edgeHint)")
+        }
         swapHighlight = try c.decodeIfPresent(String.self, forKey: .swapHighlight)
         if let swapHighlight, HexColor(swapHighlight) == nil {
             throw DecodingError.dataCorruptedError(forKey: .swapHighlight, in: c,
@@ -89,6 +98,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "gap": 8,
       "outerGap": 8,
       "swapHighlight": "#0A84FF4D",
+      "edgeHint": "#0A84FF",
       "hotkeys": {
         "alt-cmd-j": "focus left",
         "alt-cmd-k": "focus right"
