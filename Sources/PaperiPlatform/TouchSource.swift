@@ -24,6 +24,7 @@ public final class EventTapTouchSource: TouchSource {
     private var runLoopSource: CFRunLoopSource?
     private var activeTouches: [AnyHashable: CGPoint] = [:]
     private var tracking = false
+    private var appGestureBlocker: AppGestureBlocker?
     private static var activeInstance: EventTapTouchSource?
 
     public init(fingers: Int = 3, verbose: Bool = false) {
@@ -39,6 +40,11 @@ public final class EventTapTouchSource: TouchSource {
     public func start() {
         guard machPort == nil else { return }
         Self.activeInstance = self
+        // Head-inserted taps run newest-first: start the app gesture blocker
+        // before this tap so touch frames reach us before it withholds them.
+        let blocker = AppGestureBlocker(fingers: fingers, verbose: verbose)
+        blocker.start()
+        appGestureBlocker = blocker
         let mask = CGEventMask(1 << 29)
         guard let port = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -62,6 +68,8 @@ public final class EventTapTouchSource: TouchSource {
             },
             userInfo: nil
         ) else {
+            blocker.stop()
+            appGestureBlocker = nil
             if verbose { FileHandle.standardError.write(Data("[paperi] failed to create gesture event tap\n".utf8)) }
             return
         }
@@ -74,6 +82,8 @@ public final class EventTapTouchSource: TouchSource {
     }
 
     public func stop() {
+        appGestureBlocker?.stop()
+        appGestureBlocker = nil
         if let port = machPort {
             CGEvent.tapEnable(tap: port, enable: false)
             if let source = runLoopSource {
