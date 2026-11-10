@@ -51,6 +51,13 @@ case "login":
 case "restore":
     guard AXIsProcessTrusted() else { print("Accessibility access is required."); exit(1) }
     Diagnostics.printJSON(LiveManager.restore())
+case "mission-control-move":
+    guard args.count == 3, let wid = UInt32(args[1]), let space = UInt64(args[2]) else {
+        print("Usage: paperi mission-control-move windowID spaceID"); exit(2)
+    }
+    let report = Diagnostics.missionControlMove(windowID: wid, toSpace: space)
+    Diagnostics.printJSON(report)
+    exit(report["transferred"] as? Bool == true ? 0 : 1)
 case "probe-space-session":
     guard args.count == 1 else { print("Usage: paperi probe-space-session"); exit(2) }
     let report = Diagnostics.probeSpaceSession()
@@ -207,6 +214,7 @@ default:
       paperi probe-interaction           Exercise focused resize commands, panel suppression and recovery on a new fixture
       paperi probe-stop                  Stop with two live fixture windows, restore original frames and reject stale work
       paperi probe-space-session         Move a disposable container across Spaces via Mission Control + DisplaySpaceCoordinator
+      paperi mission-control-move WID SPACE Drag a real window onto a Space in Mission Control (any display)
       paperi preview-fixture             Interactive disposable preview; local controls, Stop & Restore, 60-second limit
       paperi probe-preview-input         Test AppKit key-equivalent/button input on the disposable preview
       paperi --menu                      Run diagnostic menu bar shell

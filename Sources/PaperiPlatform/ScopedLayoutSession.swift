@@ -115,7 +115,7 @@ import PaperiCore
               !slot.members.isEmpty, slot.members.contains(slot.activeMember),
               Set(slot.members).count == slot.members.count,
               slot.members.allSatisfy({ $0 > 0 && slots[$0] == nil }) else { return false }
-        let intent = try state.reduce(.insert(slot, width: min(canvas.width, width), classification: classification))
+        let intent = try state.reduce(.insert(slot, width: width, classification: classification))
         for member in slot.members { slots[member] = slot.id }
         self.spaceID = spaceID
         return intent

@@ -183,7 +183,9 @@ public struct DisplaySpaceTopology: Equatable, Sendable {
               let source = sessions[sourceSpace], let destination = sessions[destinationSpace],
               let slotID = source.slots[windowID], let loc = source.state.layout.index(of: slotID) else { return nil }
         let slot = source.state.layout.columns[loc.column].slots[loc.row]
-        let width = min(destination.canvas.width, source.state.layout.columns[loc.column].width)
+        // The logical width travels unchanged; placement caps it to whichever
+        // canvas shows it, so a round trip through a smaller display keeps it.
+        let width = source.state.layout.columns[loc.column].width
         guard destination.spaceID == nil || destination.spaceID == destinationSpace,
               slot.members.allSatisfy({ destination.slots[$0] == nil }) else { return nil }
         let remaining = Set(source.slots.keys).subtracting(slot.members)

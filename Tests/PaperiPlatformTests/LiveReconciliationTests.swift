@@ -61,4 +61,23 @@ import PaperiCore
         let visible = Rect(x: 100, y: 33, width: 600, height: 851)
         #expect(LiveReconciliation.park(visible, canvas: canvas, display: main, otherDisplays: [left]) == visible)
     }
+
+    @Test func partlyVisibleColumnsMostlyOnANeighbourAreParked() {
+        let main = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let left = CGRect(x: -1280, y: 0, width: 1280, height: 720)
+        let right = CGRect(x: 1440, y: 0, width: 1280, height: 720)
+        // 160 pt peek on the main display, the rest on the left display: the
+        // window server would move it there, so it is parked below instead.
+        let peekLeft = Rect(x: -1248, y: 33, width: 1408, height: 851)
+        let parked = LiveReconciliation.park(peekLeft, canvas: canvas, display: main, otherDisplays: [left])
+        #expect(parked == Rect(x: canvas.x, y: 899, width: 1408, height: 851))
+        let peekRight = Rect(x: canvas.x + canvas.width - 160, y: 33, width: 1408, height: 851)
+        let parkedRight = LiveReconciliation.park(peekRight, canvas: canvas, display: main, otherDisplays: [right])
+        #expect(parkedRight == Rect(x: canvas.x + canvas.width - 1408, y: 899, width: 1408, height: 851))
+        // Mostly on its own display: the peek stays.
+        let mostlyOwn = Rect(x: -200, y: 33, width: 1000, height: 851)
+        #expect(LiveReconciliation.park(mostlyOwn, canvas: canvas, display: main, otherDisplays: [left]) == mostlyOwn)
+        // No neighbour on that side: the peek stays.
+        #expect(LiveReconciliation.park(peekLeft, canvas: canvas, display: main, otherDisplays: [right]) == peekLeft)
+    }
 }

@@ -738,6 +738,7 @@ import PaperiCore
             }
             session.expect(windowID: wid, frame: target, now: ProcessInfo.processInfo.systemUptime, ticket: session.ticket)
             expected[wid] = (target, ProcessInfo.processInfo.systemUptime)
+            log("write \(wid) on Space \(space): \(Int(target.x)),\(Int(target.y)) \(Int(target.width))x\(Int(target.height))")
             if !write(target, to: element) {
                 allConfirmed = false
                 if row == nil, let pid = pidForWindow[wid] { unresponsive.insert(pid) }
@@ -796,7 +797,8 @@ import PaperiCore
 
     private func log(_ message: String) {
         guard options.verbose else { return }
-        FileHandle.standardError.write(Data("[paperi] \(message)\n".utf8))
+        let t = String(format: "%.3f", ProcessInfo.processInfo.systemUptime)
+        FileHandle.standardError.write(Data("[paperi \(t)] \(message)\n".utf8))
     }
 
     // MARK: commands

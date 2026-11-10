@@ -59,4 +59,22 @@ struct DisplaySpaceCoordinatorTests {
         coordinator.stop()
         #expect(!coordinator.running && coordinator.sessions.isEmpty && coordinator.spaceForWindow.isEmpty)
     }
+
+    @MainActor @Test func widthSurvivesARoundTripThroughASmallerDisplay() throws {
+        let primary = DisplaySpaceTopology(displayUUID: "D1", canvas: Rect(x: 8, y: 38, width: 1424, height: 886),
+            spaces: [.init(id: 1, isUserSpace: true)], activeSpaceID: 1)
+        let small = DisplaySpaceTopology(displayUUID: "D2", canvas: Rect(x: -1272, y: 39, width: 1264, height: 673),
+            spaces: [.init(id: 508, isUserSpace: true)], activeSpaceID: 508)
+        let coordinator = DisplaySpaceCoordinator(ownerPID: 42, displays: [primary, small], ownership: .applicationLocalFixture)
+        let eligible = WindowPolicy.classify(WindowFacts(bundleID: "test", role: "AXWindow", subrole: "AXStandardWindow",
+            isRoot: true, movable: true, resizable: true, level: 0))
+        #expect(try coordinator.insertSingleton(windowID: 7, ownerPID: 42, spaceID: 1, classification: eligible, width: 1408))
+        _ = try coordinator.transferContainer(containing: 7, to: 508, classification: eligible)
+        // Shown capped to the small display...
+        let shown = try coordinator.sessions[508]!.state.layout.placements(in: small.canvas, gap: 8)
+        #expect(shown.first?.frame.width == 1248)
+        // ...but the logical width comes back unchanged.
+        _ = try coordinator.transferContainer(containing: 7, to: 1, classification: eligible)
+        #expect(coordinator.sessions[1]?.state.layout.columns.first?.width == 1408)
+    }
 }

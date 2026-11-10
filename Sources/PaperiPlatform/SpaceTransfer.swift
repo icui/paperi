@@ -59,7 +59,8 @@ import PaperiCore
 
     static func moveWindowViaMissionControl(windowID: UInt32, expectedTitle: String,
                                             toSpace destinationSpace: UInt64,
-                                            screenOrigin: CGPoint = .zero) -> [String: Any] {
+                                            screenOrigin: CGPoint = .zero,
+                                            destinationDisplayBounds: CGRect? = nil) -> [String: Any] {
         var report: [String: Any] = [
             "windowID": windowID,
             "destinationSpace": destinationSpace,
@@ -148,8 +149,14 @@ import PaperiCore
             guard let winEl = windowElement, let dispEl = displayGroup else {
                 return fail("Owned window not found in Mission Control")
             }
+            // The Spaces bar belongs to the display hosting the destination
+            // Space, which differs from the window's display for display moves.
+            var barDisplay = dispEl
+            if let bounds = destinationDisplayBounds {
+                barDisplay = axChildren(group, identifier: "mc.display").first { axCenter($0).map(bounds.contains) == true } ?? dispEl
+            }
             var thumbnails: [AXUIElement] = []
-            for spaces in axChildren(dispEl, identifier: "mc.spaces") {
+            for spaces in axChildren(barDisplay, identifier: "mc.spaces") {
                 for list in axChildren(spaces, identifier: "mc.spaces.list") {
                     thumbnails = axValue(list, kAXChildrenAttribute as String) as? [AXUIElement] ?? []
                 }
@@ -572,5 +579,32 @@ extension Diagnostics {
         ]
         report["result"] = checks.values.allSatisfy { $0 } ? "passed" : "failed"
         return report
+    }
+}
+
+extension Diagnostics {
+    /// Drags a real window onto a Space thumbnail in Mission Control, as a user
+    /// would, on whichever display hosts that Space. Used to exercise how live
+    /// mode follows user Mission Control moves (same- and cross-display).
+    @MainActor public static func missionControlMove(windowID: UInt32, toSpace space: UInt64) -> [String: Any] {
+        let rows = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(windowID)) as? [[String: Any]] ?? []
+        guard let pid = rows.first?[kCGWindowOwnerPID as String] as? pid_t else { return ["failure": "window not found"] }
+        let app = AXUIElementCreateApplication(pid)
+        let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement] ?? []
+        guard let element = windows.first(where: { paperi_window_id($0) == windowID }),
+              let title = attribute(element, kAXTitleAttribute) as? String, !title.isEmpty else {
+            return ["failure": "window has no AX title"]
+        }
+        guard let display = DisplaySpaceCoordinator.liveTopologies().first(where: { $0.spaces.contains { $0.id == space } }) else {
+            return ["failure": "unknown Space"]
+        }
+        var bounds = CGRect.zero
+        for screen in NSScreen.screens {
+            let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+            let uuid = CGDisplayCreateUUIDFromDisplayID(id).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? "Main"
+            if uuid == display.displayUUID { bounds = CGDisplayBounds(id) }
+        }
+        return SpaceTransfer.moveWindowViaMissionControl(windowID: windowID, expectedTitle: title, toSpace: space,
+                                                        screenOrigin: bounds.origin, destinationDisplayBounds: bounds)
     }
 }
