@@ -30,6 +30,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public var tile: [FloatRule]
     /// Focus-scroll duration in seconds; zero disables animation.
     public var focusScrollDuration: Double?
+    /// Experimental screenshot compositor; requires Screen Recording permission.
+    public var experimentalSnapshotScroll: Bool?
     public var gap: Double?
     public var outerGap: Double?
     /// Key spec → command (as accepted by `paperi msg`), merged over the
@@ -51,7 +53,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         self.hotkeys = [:]
     }
 
-    enum CodingKeys: String, CodingKey { case include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight, edgeHint, focusScrollDuration }
+    enum CodingKeys: String, CodingKey { case include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight, edgeHint, focusScrollDuration, experimentalSnapshotScroll }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         include = try c.decodeIfPresent([String].self, forKey: .include)
@@ -59,6 +61,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         singleton = try c.decodeIfPresent([String].self, forKey: .singleton) ?? []
         float = try c.decodeIfPresent([FloatRule].self, forKey: .float) ?? []
         tile = try c.decodeIfPresent([FloatRule].self, forKey: .tile) ?? []
+        experimentalSnapshotScroll = try c.decodeIfPresent(Bool.self, forKey: .experimentalSnapshotScroll)
         focusScrollDuration = try c.decodeIfPresent(Double.self, forKey: .focusScrollDuration)
         if let duration = focusScrollDuration, !duration.isFinite || duration < 0 || duration > 1 {
             throw DecodingError.dataCorruptedError(forKey: .focusScrollDuration, in: c, debugDescription: "expected seconds from 0 to 1")

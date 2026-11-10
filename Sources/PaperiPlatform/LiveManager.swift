@@ -246,7 +246,7 @@ import PaperiCore
             cancelMotion(); motionFrames.removeAll()
             destroyedNotified.insert(wid)
         }
-        if motionTimer != nil && [kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification,
+        if (motionTimer != nil || snapshotTask != nil) && [kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification,
                                  kAXWindowCreatedNotification].contains(name) {
             cancelMotion(); motionFrames.removeAll()
         }
@@ -436,7 +436,7 @@ import PaperiCore
     /// topology → admissions → focus → observed resizes → effects.
     public func refresh() {
         guard running, !busy else { return }
-        if motionTimer != nil { return }
+        if motionTimer != nil || snapshotTask != nil { return }
         motionFrames.removeAll()
         if animateCachedFocus() { return }
         // Side-by-side displays are unsupported (the app pauses moments later);
@@ -751,6 +751,9 @@ import PaperiCore
     private var axWriteCalls = 0
     private var axWriteMS = 0.0
     private var latestSurvey: [UInt32: Survey] = [:]
+    private var snapshotTask: Task<Void, Never>?
+    private var snapshotOverlay: SnapshotTransition?
+    private var snapshotMetrics: [String: Any] = [:]
     private var motionBegan: Double?
     private var motionFailed: Set<UInt32> = []
     private var motionBlocked: Set<UInt32> = []
@@ -767,6 +770,8 @@ import PaperiCore
     private var missedTicks = 0
 
     private func cancelMotion() {
+        snapshotTask?.cancel(); snapshotTask = nil
+        snapshotOverlay?.hide(); snapshotOverlay = nil
         motionGeneration &+= 1
         motionTimer?.invalidate(); motionTimer = nil
     }
@@ -821,7 +826,7 @@ import PaperiCore
     }
 
     /// One target calculation, position-only ticks, no discovery in the scheduler.
-    private func animateFocus(space: UInt64, byID: [UInt32: Survey]) {
+    private func animateFocus(space: UInt64, byID: [UInt32: Survey], allowSnapshot: Bool = true) {
         let duration = options.config.focusScrollDuration ?? 0.22
         guard NSEvent.pressedMouseButtons == 0 else { cancelMotion(); refreshOnMouseUp(); return }
         guard duration > 0, let session = coordinator.sessions[space],
@@ -850,6 +855,10 @@ import PaperiCore
         }
         cancelMotion()
         guard !starts.isEmpty else { return }
+        if allowSnapshot && options.config.experimentalSnapshotScroll == true {
+            startSnapshot(space: space, byID: byID, targets: targets, duration: duration)
+            return
+        }
         let generation = motionGeneration
         motionBegan = nil; motionFailed.removeAll(); motionBlocked.removeAll(); motionTicks = 0
         let origins = starts
@@ -911,6 +920,69 @@ import PaperiCore
         motionSpace = space
         motionTimer = timer
         RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func startSnapshot(space: UInt64, byID: [UInt32: Survey], targets: [UInt32: Rect], duration: Double) {
+        let generation = motionGeneration
+        motionSpace = space
+        snapshotMetrics = ["state": "capturing"]
+        let origins = Dictionary(uniqueKeysWithValues: targets.keys.compactMap { wid in
+            byID[wid]?.frame.map { (wid, $0) }
+        })
+        snapshotTask = Task { [weak self] in
+            guard let self else { return }
+            let overlay = SnapshotTransition()
+            do {
+                guard let canvas = self.coordinator.sessions[space]?.canvas else { throw CancellationError() }
+                try await overlay.prepare(frames: origins, canvas: canvas)
+                try Task.checkCancellation()
+                guard self.motionGeneration == generation, NSEvent.pressedMouseButtons == 0,
+                      self.coordinator.display(forSpace: space)?.activeSpaceID == space else {
+                    overlay.hide(); self.cancelMotion(); self.scheduleRefresh(); return
+                }
+                self.snapshotOverlay = overlay
+                self.snapshotMetrics = ["state": "animating", "captureMS": overlay.captureMS,
+                                        "textureBytes": overlay.textureBytes]
+                overlay.show(targets: targets, duration: duration)
+                // One ordinary final placement underneath the opaque compositor.
+                self.applied.removeValue(forKey: space)
+                self.apply(space: space, byID: byID)
+                let end = ProcessInfo.processInfo.systemUptime + duration
+                while ProcessInfo.processInfo.systemUptime < end {
+                    try await Task.sleep(for: .milliseconds(8))
+                    guard NSEvent.pressedMouseButtons == 0 else {
+                        overlay.hide(); self.cancelMotion(); self.refreshOnMouseUp(); return
+                    }
+                }
+                // Bound the handoff wait; never leave a frozen screen on failure.
+                var confirmed = false
+                for _ in 0..<3 {
+                    try Task.checkCancellation()
+                    guard NSEvent.pressedMouseButtons == 0 else { throw CancellationError() }
+                    confirmed = targets.allSatisfy { wid, target in
+                        guard let element = self.references[wid], let frame = Diagnostics.frame(element) else { return false }
+                        return self.matches(frame, target)
+                    }
+                    if confirmed { break }
+                    try await Task.sleep(for: .milliseconds(30))
+                }
+                overlay.hide()
+                self.snapshotMetrics["state"] = confirmed ? "completed" : "handoffUnconfirmed"
+                self.snapshotTask = nil; self.snapshotOverlay = nil
+                self.scheduleRefresh()
+            } catch {
+                overlay.hide()
+                guard self.motionGeneration == generation else { return }
+                self.snapshotMetrics = ["state": "fallback", "reason": String(describing: error)]
+                self.snapshotTask = nil; self.snapshotOverlay = nil
+                // Never write on a mouse interruption or after losing the active Space.
+                if NSEvent.pressedMouseButtons == 0,
+                   self.coordinator.display(forSpace: space)?.activeSpaceID == space {
+                    self.animateFocus(space: space, byID: byID, allowSnapshot: false)
+                } else { self.refreshOnMouseUp() }
+                self.scheduleRefresh()
+            }
+        }
     }
 
     /// Bounded observation, reported separately from the time of the final write.
@@ -1056,7 +1128,7 @@ import PaperiCore
     }
 
     private func focusedContext() -> (session: ScopedLayoutSession, space: UInt64, pid: pid_t, window: UInt32)? {
-        if motionTimer != nil, let space = motionSpace, let session = coordinator.sessions[space],
+        if motionTimer != nil || snapshotTask != nil, let space = motionSpace, let session = coordinator.sessions[space],
            let focused = session.state.layout.focused, let loc = session.state.layout.index(of: focused) {
             let wid = session.state.layout.columns[loc.column].slots[loc.row].activeMember
             if let pid = pidForWindow[wid] { return (session, space, pid, wid) }
@@ -1280,6 +1352,7 @@ import PaperiCore
                     "commandToConfirmedFrameMS": confirmedMS as Any? ?? NSNull(),
                     "animationTicks": motionTicks, "failedAnimationWindows": motionFailed.sorted(),
                     "lastTickMS": tickMS, "overBudgetTicks": missedTicks,
-                    "animationActive": motionTimer != nil]]
+                    "snapshot": snapshotMetrics,
+                    "animationActive": motionTimer != nil || snapshotTask != nil]]
     }
 }
