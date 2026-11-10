@@ -40,13 +40,13 @@ import PaperiCore
 
     @discardableResult func insert(windowID: UInt32, ownerPID: pid_t, spaceID: UInt64,
                                    classification: Classification, knownSingleton: Bool = false,
-                                   ticket: UUID) throws -> Bool {
+                                   width: Double? = nil, ticket: UUID) throws -> Bool {
         guard accepts(ticket), owns(ownerPID), windowID > 0, spaceID > 0,
               canvas.isValid, knownSingleton, classification.eligibility == .tiled,
               self.spaceID == nil || self.spaceID == spaceID else { return false }
         let slotID = slots[windowID] ?? "container-\(UUID())"
         let intent = try state.reduce(.insert(Slot(id: slotID, members: [windowID], activeMember: windowID),
-                                               width: (canvas.width - 8) / 2, classification: classification))
+                                               width: admissionWidth(width), classification: classification))
         self.spaceID = spaceID; slots[windowID] = slotID
         return intent
     }
@@ -86,7 +86,7 @@ import PaperiCore
 
     @discardableResult func admitTabs(members: [UInt32], active: UInt32, ownerPID: pid_t, spaceID: UInt64,
                                      classification: Classification, ticket: UUID,
-                                     allowActiveOnly: Bool = false) throws -> Bool {
+                                     allowActiveOnly: Bool = false, width: Double? = nil) throws -> Bool {
         guard accepts(ticket), owns(ownerPID), spaceID > 0,
               self.spaceID == nil || self.spaceID == spaceID, canvas.isValid,
               classification.eligibility == .tiled,
@@ -95,10 +95,17 @@ import PaperiCore
               members.contains(active) else { return false }
         let id = "container-\(UUID())"
         let intent = try state.reduce(.insert(Slot(id: id, members: members, activeMember: active),
-            width: (canvas.width - 8) / 2, classification: classification))
+            width: admissionWidth(width), classification: classification))
         for member in members { slots[member] = id }
         self.spaceID = spaceID
         return intent
+    }
+
+    /// A caller-preferred width (the window's own or remembered width, as in
+    /// PaperWM) clamped to the canvas; otherwise half the canvas.
+    private func admissionWidth(_ preferred: Double?) -> Double {
+        guard let preferred, preferred.isFinite, preferred > 0 else { return (canvas.width - 8) / 2 }
+        return min(canvas.width, max(min(canvas.width, 100), preferred))
     }
 
     @discardableResult func insertSlot(_ slot: Slot, width: Double, spaceID: UInt64,

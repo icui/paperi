@@ -54,6 +54,14 @@ import PaperiCore
     /// cannot stall management of every other app.
     private var slowUntil: [pid_t: Double] = [:]
     private var forceApply = true
+    /// After an active-Space change, refreshes re-check real frames for a short
+    /// while: macOS and apps (e.g. leaving a fullscreen Space) may move
+    /// off-canvas windows on screen once their Space is shown again.
+    private var forceUntil: Double = 0
+    /// Last column width of every managed member, kept after the window leaves
+    /// the strip (minimize, hide, fullscreen, float) so it returns at that
+    /// width, as in PaperWM.
+    private var preferredWidth: [UInt32: Double] = [:]
     private var timer: Timer?
     private var workspaceTokens: [NSObjectProtocol] = []
     private(set) var running = false
@@ -92,7 +100,11 @@ import PaperiCore
                                  emit: { [weak self] event in self?.receive(event) })
         recorder.start()
         let center = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification,
+        workspaceTokens.append(center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification,
+                                                  object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.activeSpaceChanged() }
+        })
+        for name in [NSWorkspace.didActivateApplicationNotification,
                      NSWorkspace.didHideApplicationNotification, NSWorkspace.didUnhideApplicationNotification] {
             workspaceTokens.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.scheduleRefresh() }
@@ -207,6 +219,17 @@ import PaperiCore
         }
         if ["recorderReady", "recorderReconciled", "windowDiscovery", "subscriptionRetry"].contains(name) { return }
         scheduleRefresh()
+    }
+
+    private func activeSpaceChanged() {
+        forceUntil = ProcessInfo.processInfo.systemUptime + 1.6
+        scheduleRefresh()
+        // The switch animation and app re-activation settle over ~1 s.
+        for delay in [0.35, 0.8, 1.5] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                MainActor.assumeIsolated { self?.refresh() }
+            }
+        }
     }
 
     func scheduleRefresh() {
@@ -327,6 +350,9 @@ import PaperiCore
         let displays = topologies()
         coordinator.updateDisplays(displays)
         let activeSpaces = Set(displays.compactMap(\.activeSpaceID))
+        // A Space that is not shown may have its windows moved by the system;
+        // verify its frames again when it becomes active.
+        for space in applied.keys where !activeSpaces.contains(space) { applied.removeValue(forKey: space) }
 
         let cgRows = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
         var levels: [UInt32: Int] = [:]
@@ -344,6 +370,7 @@ import PaperiCore
         }
         destroyedNotified.removeAll()
         if !gone.isEmpty { removeMembers(gone) }
+        preferredWidth = preferredWidth.filter { levels[$0.key] != nil }
 
         // 2. Survey allowlisted apps.
         var surveys: [pid_t: [Survey]] = [:]
@@ -412,8 +439,10 @@ import PaperiCore
                 guard let evidence else { continue }
                 for group in NativeTabMembership.inspect(evidence, requireComplete: false)
                 where remaining.contains(group.active) && group.members.allSatisfy({ coordinator.spaceForWindow[$0] == nil }) {
+                    let width = admissionWidth(group.members, active: group.active, byID: byID, canvas: session.canvas)
                     if (try? coordinator.admitTabs(members: group.members, active: group.active, ownerPID: pid,
-                                                   spaceID: space, classification: Self.tiled, allowActiveOnly: true)) == true {
+                                                   spaceID: space, classification: Self.tiled, allowActiveOnly: true,
+                                                   width: width)) == true {
                         remember(group.active, pid: pid, frame: byID[group.active]?.frame)
                         remaining.subtract(group.members)
                         log("admitted tab container \(group.members) active \(group.active) on Space \(space)")
@@ -457,9 +486,12 @@ import PaperiCore
                       let frame = byID[placement.windowID]?.frame, frame.isValid,
                       abs(frame.width - exp.frame.width) > 2, let pid = pidForWindow[placement.windowID] else { continue }
                 expected[placement.windowID] = (frame, now)
+                let width = min(frame.width, maxColumnWidth(session.canvas))
+                // Wider than the cap: the window is written back to the capped width.
+                if width < frame.width - 2 { forceApply = true }
                 if (try? session.resize(windowID: placement.windowID, ownerPID: pid, spaceID: space,
-                                        width: frame.width, classification: Self.tiled, ticket: session.ticket)) == true {
-                    log("adopted width \(Int(frame.width)) for \(placement.windowID)")
+                                        width: width, classification: Self.tiled, ticket: session.ticket)) == true {
+                    log("adopted width \(Int(width)) for \(placement.windowID)")
                 }
             }
         }
@@ -467,6 +499,7 @@ import PaperiCore
         // 8. Effects.
         for space in activeSpaces { apply(space: space, byID: byID) }
         forceApply = false
+        rememberWidths()
         lastRefreshMS = (ProcessInfo.processInfo.systemUptime - started) * 1000
     }
 
@@ -477,10 +510,32 @@ import PaperiCore
     }
 
     private func admitSingleton(_ wid: UInt32, pid: pid_t, space: UInt64, byID: [UInt32: Survey]) {
-        guard let row = byID[wid], row.classification.eligibility == .tiled else { return }
-        if (try? coordinator.insertSingleton(windowID: wid, ownerPID: pid, spaceID: space, classification: row.classification)) == true {
+        guard let row = byID[wid], row.classification.eligibility == .tiled,
+              let canvas = coordinator.sessions[space]?.canvas else { return }
+        if (try? coordinator.insertSingleton(windowID: wid, ownerPID: pid, spaceID: space, classification: row.classification,
+                                             width: admissionWidth([wid], active: wid, byID: byID, canvas: canvas))) == true {
             remember(wid, pid: pid, frame: row.frame)
             log("admitted window \(wid) on Space \(space)")
+        }
+    }
+
+    /// Remembered width of any member, else the active window's own width,
+    /// capped so neighbouring edges and margins stay visible.
+    private func admissionWidth(_ members: [UInt32], active: UInt32, byID: [UInt32: Survey], canvas: Rect) -> Double? {
+        let own = ([active] + members).lazy.compactMap({ self.preferredWidth[$0] }).first
+            ?? byID[active]?.frame.flatMap { $0.isValid ? $0.width : nil }
+        return own.map { min($0, maxColumnWidth(canvas)) }
+    }
+
+    private func maxColumnWidth(_ canvas: Rect) -> Double {
+        Layout.maxColumnWidth(in: canvas, edgeMargin: options.gap)
+    }
+
+    private func rememberWidths() {
+        for session in coordinator.sessions.values {
+            for column in session.state.layout.columns {
+                for slot in column.slots { for member in slot.members { preferredWidth[member] = column.width } }
+            }
         }
     }
 
@@ -495,7 +550,7 @@ import PaperiCore
         }
         for wid in gone {
             references.removeValue(forKey: wid); pidForWindow.removeValue(forKey: wid)
-            expected.removeValue(forKey: wid)
+            expected.removeValue(forKey: wid); preferredWidth.removeValue(forKey: wid)
             if journal.removeValue(forKey: wid) != nil { persistJournal() }
         }
         log("removed destroyed members \(gone.sorted())")
@@ -525,7 +580,8 @@ import PaperiCore
     private func apply(space: UInt64, byID: [UInt32: Survey]) {
         guard let session = coordinator.sessions[space],
               let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { return }
-        if !forceApply, applied[space] == placements { return }
+        let forced = forceApply || ProcessInfo.processInfo.systemUptime < forceUntil
+        if !forced, applied[space] == placements { return }
         let bounds = displayBounds()
         let display = coordinator.display(forSpace: space)
         let own = display.flatMap { bounds[$0.displayUUID] } ?? CGDisplayBounds(CGMainDisplayID())
@@ -671,7 +727,7 @@ import PaperiCore
             guard let sign = rest.first, sign == "+" || sign == "-" else { return fail("usage: \(verb) +|-") }
             let fraction = Double(rest.dropFirst().first ?? "") ?? 0.1
             let delta = sign == "+" ? fraction : -fraction
-            if verb == "width" { return layoutCommand { layout, canvas in try layout.resizeWidth(by: delta, in: canvas) } }
+            if verb == "width" { return layoutCommand { layout, canvas in try layout.resizeWidth(by: delta, in: canvas, edgeMargin: self.options.gap) } }
             return layoutCommand { layout, canvas in try layout.resizeHeight(by: delta, in: canvas, gap: self.options.gap) }
         case "center":
             return layoutCommand(reveal: false) { layout, canvas in try layout.center(in: canvas, gap: self.options.gap) }
@@ -728,7 +784,7 @@ import PaperiCore
         do {
             let changed = try ctx.session.command(frontmostPID: ctx.pid, ticket: ctx.session.ticket) { try body(&$0, canvas) }
             if changed && shouldReveal { reveal(ctx.session) }
-            if changed { apply(space: ctx.space, byID: surveyByID()) }
+            if changed { apply(space: ctx.space, byID: surveyByID()); rememberWidths() }
             return ["ok": true, "changed": changed]
         } catch {
             return ["ok": false, "error": "\(error)"]

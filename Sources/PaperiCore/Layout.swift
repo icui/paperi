@@ -42,6 +42,14 @@ public struct Layout: Codable, Equatable, Sendable {
     public init(columns: [Column] = [], focused: String? = nil, offset: Double = 0) {
         self.columns = columns; self.focused = focused; self.offset = offset
     }
+    /// Widest a column may be: the canvas minus `edgeMargin` on both sides, so
+    /// with neighbours on each side their edges and the margins stay visible.
+    /// Falls back to the full canvas for margins that would leave under half.
+    public static func maxColumnWidth(in canvas: Rect, edgeMargin: Double) -> Double {
+        let capped = canvas.width - 2 * edgeMargin
+        return edgeMargin.isFinite && edgeMargin >= 0 && capped >= canvas.width / 2 ? capped : canvas.width
+    }
+
     public func index(of id: String) -> (column: Int, row: Int)? {
         for (c, column) in columns.enumerated() {
             if let r = column.slots.firstIndex(where: { $0.id == id }) { return (c, r) }
@@ -108,35 +116,47 @@ public struct Layout: Codable, Equatable, Sendable {
         columns[i.column].weights.remove(at: i.row)
         columns.insert(Column(slots: [slot], width: columns[i.column].width), at: i.column + 1)
     }
-    public mutating func center(in canvas: Rect, gap: Double = 8) throws {
+    public mutating func center(in canvas: Rect, gap: Double = 8, edgeMargin: Double? = nil) throws {
         try validate()
         guard canvas.isValid, gap.isFinite, gap >= 0 else { throw LayoutError.invalidGeometry }
         guard let focused, let i = index(of: focused) else { return }
-        let preceding = columns.prefix(i.column).reduce(0) { $0 + min($1.width, canvas.width) + gap }
-        offset = (canvas.width - min(columns[i.column].width, canvas.width)) / 2 - preceding
+        let maximum = Self.maxColumnWidth(in: canvas, edgeMargin: edgeMargin ?? gap)
+        let preceding = columns.prefix(i.column).reduce(0) { $0 + min($1.width, maximum) + gap }
+        offset = (canvas.width - min(columns[i.column].width, maximum)) / 2 - preceding
     }
     /// Scrolls the minimum distance needed to show the whole focused column
     /// (PaperWM-style "ensure visible"); returns whether the offset changed.
+    /// While further columns exist on a side, the focused column keeps
+    /// `edgeMargin` (default: `gap`) from that canvas edge so it never sits flush
+    /// against the neighbour's off-canvas sliver; a column too wide for both
+    /// margins favours the left one.
     @discardableResult
-    public mutating func reveal(in canvas: Rect, gap: Double = 8) throws -> Bool {
+    public mutating func reveal(in canvas: Rect, gap: Double = 8, edgeMargin: Double? = nil) throws -> Bool {
         try validate()
-        guard canvas.isValid, gap.isFinite, gap >= 0 else { throw LayoutError.invalidGeometry }
+        let margin = edgeMargin ?? gap
+        guard canvas.isValid, gap.isFinite, gap >= 0, margin.isFinite, margin >= 0 else { throw LayoutError.invalidGeometry }
         guard let focused, let i = index(of: focused) else { return false }
-        let preceding = columns.prefix(i.column).reduce(0) { $0 + min($1.width, canvas.width) + gap }
-        let width = min(columns[i.column].width, canvas.width)
+        let maximum = Self.maxColumnWidth(in: canvas, edgeMargin: margin)
+        let preceding = columns.prefix(i.column).reduce(0) { $0 + min($1.width, maximum) + gap }
+        let width = min(columns[i.column].width, maximum)
+        let room = canvas.width - width
+        let lowest = min(i.column > 0 ? margin : 0, room)
+        let highest = max(lowest, room - (i.column < columns.count - 1 ? margin : 0))
         let left = preceding + offset
         let previous = offset
-        if left < 0 { offset = -preceding }
-        else if left + width > canvas.width { offset = canvas.width - width - preceding }
+        if left < lowest { offset = lowest - preceding }
+        else if left > highest { offset = highest - preceding }
         return offset != previous
     }
-    public func placements(in canvas: Rect, gap: Double = 8, margin: Double = 1) throws -> [Placement] {
+    public func placements(in canvas: Rect, gap: Double = 8, margin: Double = 1,
+                           edgeMargin: Double? = nil) throws -> [Placement] {
         try validate()
         guard canvas.isValid, gap.isFinite, gap >= 0, margin.isFinite, margin >= 0,
               margin * 2 < canvas.width else { throw LayoutError.invalidGeometry }
+        let maximum = Self.maxColumnWidth(in: canvas, edgeMargin: edgeMargin ?? gap)
         var x = canvas.x + offset; var result: [Placement] = []
         for column in columns {
-            let width = min(column.width, canvas.width)
+            let width = min(column.width, maximum)
             let physicalX = max(canvas.x + margin - width, min(x, canvas.x + canvas.width - margin))
             // Reduce excessive gaps rather than creating zero/negative stacked heights.
             let verticalGap = min(gap, canvas.height / Double(column.slots.count * 2))
@@ -169,8 +189,9 @@ public enum Paging {
             if !ids.isEmpty { result.append(Section(slotIDs: ids, anchor: -Double(result.count) * viewportWidth)) }
             ids = []; used = 0
         }
+        let maximum = Layout.maxColumnWidth(in: Rect(x: 0, y: 0, width: viewportWidth, height: 1), edgeMargin: gap)
         for column in layout.columns {
-            let width = min(column.width, viewportWidth)
+            let width = min(column.width, maximum)
             let addition = width + (ids.isEmpty ? 0 : gap)
             if used + addition > viewportWidth && !ids.isEmpty { flush() }
             used += width + (ids.isEmpty ? 0 : gap)

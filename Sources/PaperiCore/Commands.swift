@@ -2,13 +2,15 @@ import Foundation
 
 extension Layout {
     /// Resize by a fraction of the usable canvas; positive values grow the column.
-    public mutating func resizeWidth(by fraction: Double, in canvas: Rect) throws {
+    /// The result never exceeds `Layout.maxColumnWidth` for `edgeMargin`.
+    public mutating func resizeWidth(by fraction: Double, in canvas: Rect, edgeMargin: Double = 8) throws {
         try validate()
         guard canvas.isValid, fraction.isFinite else { throw LayoutError.invalidGeometry }
         guard let focused, let i = index(of: focused) else { return }
         let delta = canvas.width * fraction
         guard delta.isFinite else { throw LayoutError.invalidGeometry }
-        columns[i.column].width = min(canvas.width, max(min(1, canvas.width), min(columns[i.column].width, canvas.width) + delta))
+        let maximum = Self.maxColumnWidth(in: canvas, edgeMargin: edgeMargin)
+        columns[i.column].width = min(maximum, max(min(1, maximum), min(columns[i.column].width, maximum) + delta))
     }
 
     /// Redistribute the remaining stack proportionally, retaining positive row heights.
@@ -33,14 +35,21 @@ extension Layout {
     }
 
     /// Place the left and focused columns across two equal halves, separated by one gap.
-    public mutating func split(in canvas: Rect, gap: Double = 8) throws {
+    /// Edges with further columns beyond them keep `edgeMargin` (default: `gap`),
+    /// matching `reveal`, so the next refresh does not shift the pair.
+    public mutating func split(in canvas: Rect, gap: Double = 8, edgeMargin: Double? = nil) throws {
         try validate()
-        guard canvas.isValid, gap.isFinite, gap >= 0, gap < canvas.width else { throw LayoutError.invalidGeometry }
+        let margin = edgeMargin ?? gap
+        let maximum = Self.maxColumnWidth(in: canvas, edgeMargin: margin)
+        guard canvas.isValid, gap.isFinite, gap >= 0, margin.isFinite, margin >= 0 else { throw LayoutError.invalidGeometry }
         guard let focused, let i = index(of: focused), i.column > 0 else { return }
-        let width = (canvas.width - gap) / 2
+        let leading = i.column > 1 ? margin : 0
+        let trailing = i.column < columns.count - 1 ? margin : 0
+        let width = (canvas.width - gap - leading - trailing) / 2
+        guard width > 0 else { throw LayoutError.invalidGeometry }
         columns[i.column - 1].width = width
         columns[i.column].width = width
-        offset = -columns.prefix(i.column - 1).reduce(0) { $0 + min($1.width, canvas.width) + gap }
+        offset = leading - columns.prefix(i.column - 1).reduce(0) { $0 + min($1.width, maximum) + gap }
     }
 }
 

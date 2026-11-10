@@ -23,8 +23,11 @@ struct CoreTests {
         var layout = Layout(columns: (1...3).map { Column(slots: [slot(UInt32($0))], width: 300) }, focused: "3")
         try layout.split(in: canvas)
         let frames = try layout.placements(in: canvas)
-        checkEqual(frames[1].frame, Rect(x: -1000, y: 20, width: 496, height: 800))
-        checkEqual(frames[2].frame, Rect(x: -496, y: 20, width: 496, height: 800))
+        // Column 1 remains to the left, so the pair keeps one margin there.
+        checkEqual(frames[1].frame, Rect(x: -992, y: 20, width: 492, height: 800))
+        checkEqual(frames[2].frame, Rect(x: -492, y: 20, width: 492, height: 800))
+        var revealed = layout
+        checkTrue(try !revealed.reveal(in: canvas))
         layout.focused = "1"
         let before = layout
         try layout.split(in: canvas)

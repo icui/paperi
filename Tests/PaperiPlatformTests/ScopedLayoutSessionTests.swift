@@ -130,4 +130,18 @@ import PaperiCore
         #expect(try !session.confirmTabs(anchor: 1, members: [1, 2], active: 2, ownerPID: 42,
                                         spaceID: 7, classification: eligible, ticket: ticket))
     }
+
+    @Test func admissionKeepsPreferredWidthClampedToCanvas() throws {
+        let session = ScopedLayoutSession(ownerPID: 42, canvas: canvas)
+        let ticket = session.ticket
+        try session.insert(windowID: 1, ownerPID: 42, spaceID: 7, classification: eligible, knownSingleton: true,
+                           width: 640, ticket: ticket)
+        try session.insert(windowID: 2, ownerPID: 42, spaceID: 7, classification: eligible, knownSingleton: true,
+                           width: 5000, ticket: ticket)
+        try session.insert(windowID: 3, ownerPID: 42, spaceID: 7, classification: eligible, knownSingleton: true, ticket: ticket)
+        try session.admitTabs(members: [4, 5], active: 4, ownerPID: 42, spaceID: 7, classification: eligible,
+                              ticket: ticket, width: 300)
+        let widths = Dictionary(uniqueKeysWithValues: session.state.layout.columns.map { ($0.slots[0].activeMember, $0.width) })
+        #expect(widths == [1: 640, 2: 1000, 3: 496, 4: 300])
+    }
 }

@@ -138,21 +138,22 @@ public struct DisplaySpaceTopology: Equatable, Sendable {
     }
 
     @discardableResult func insertSingleton(windowID: UInt32, ownerPID: pid_t, spaceID: UInt64,
-                                            classification: Classification) throws -> Bool {
+                                            classification: Classification, width: Double? = nil) throws -> Bool {
         guard running, spaceForWindow[windowID] == nil, let session = sessions[spaceID] else { return false }
         let inserted = try session.insert(windowID: windowID, ownerPID: ownerPID, spaceID: spaceID,
-                                          classification: classification, knownSingleton: true, ticket: session.ticket)
+                                          classification: classification, knownSingleton: true,
+                                          width: width, ticket: session.ticket)
         if session.slots[windowID] != nil { spaceForWindow[windowID] = spaceID }
         return inserted
     }
 
     @discardableResult func admitTabs(members: [UInt32], active: UInt32, ownerPID: pid_t, spaceID: UInt64,
                                       classification: Classification,
-                                      allowActiveOnly: Bool = false) throws -> Bool {
+                                      allowActiveOnly: Bool = false, width: Double? = nil) throws -> Bool {
         guard running, members.allSatisfy({ spaceForWindow[$0] == nil }), let session = sessions[spaceID] else { return false }
         let admitted = try session.admitTabs(members: members, active: active, ownerPID: ownerPID,
                                              spaceID: spaceID, classification: classification,
-                                             ticket: session.ticket, allowActiveOnly: allowActiveOnly)
+                                             ticket: session.ticket, allowActiveOnly: allowActiveOnly, width: width)
         if admitted { for member in members { spaceForWindow[member] = spaceID } }
         return admitted
     }
