@@ -1010,12 +1010,26 @@ import PaperiCore
         swipeMetrics["state"] = "cancelled"
     }
 
-    private func pointerContext() -> (session: ScopedLayoutSession, space: UInt64, pid: pid_t, window: UInt32)? {
+    static let fullScreenRefusal = "pointer is over a full-screen Space"
+
+    /// The display under the pointer, as SkyLight reports it.
+    private func pointerDisplay() -> DisplaySpaceTopology? {
         let mouseLoc = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLoc) }) else { return nil }
         let screenID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
         let uuid = CGDisplayCreateUUIDFromDisplayID(screenID).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? "Main"
-        guard let display = coordinator.displays.first(where: { $0.displayUUID == uuid }),
+        return coordinator.displays.first(where: { $0.displayUUID == uuid })
+    }
+
+    /// The display under the pointer is showing a Space without a strip
+    /// (full-screen apps and other non-desktop Spaces).
+    private func pointerOverUnmanagedSpace() -> Bool {
+        guard let display = pointerDisplay(), let space = display.activeSpaceID else { return false }
+        return !display.userSpaces.contains(space)
+    }
+
+    private func pointerContext() -> (session: ScopedLayoutSession, space: UInt64, pid: pid_t, window: UInt32)? {
+        guard let display = pointerDisplay(),
               let space = display.activeSpaceID,
               let session = coordinator.sessions[space],
               let focused = session.state.layout.focused,
@@ -1067,7 +1081,10 @@ import PaperiCore
             guard !gestureBlockedByAnimation else { return }
             // Capture while determining the axis, but keep the overlay hidden
             // until horizontal movement locks. This overlaps input with capture.
-            _ = beginSwipe(pendingLock: true)
+            let started = beginSwipe(pendingLock: true)
+            // Nothing to swipe on a full-screen Space; a retry on horizontal
+            // lock would refuse again (and refresh again).
+            if started["error"] as? String == Self.fullScreenRefusal { return }
             let cfg = SlotSwipe.Configuration(
                 travel: options.config.gesture.travel,
                 commitThreshold: options.config.gesture.commitThreshold,
@@ -1141,7 +1158,20 @@ import PaperiCore
             let conflicts = GestureConflict.checkLive(fingers: options.config.gesture.fingers)
             guard conflicts.isEmpty else { return fail("blocked by system gestures: \(conflicts.joined(separator: ", "))") }
         }
-        guard let ctx = pointerContext() ?? focusedContext() else { return fail("no managed window focused") }
+        // The swipe belongs to the display under the pointer. If that display
+        // shows a full-screen Space there is no strip, and falling back to the
+        // focused window could scroll another display's strip.
+        guard !pointerOverUnmanagedSpace() else { return fail(Self.fullScreenRefusal) }
+        let ctx: (session: ScopedLayoutSession, space: UInt64, pid: pid_t, window: UInt32)
+        if let pointer = pointerContext() {
+            ctx = pointer
+        } else {
+            // focusedContext refreshes first, so the Spaces may have changed
+            // (e.g. the app under the pointer has just entered full screen).
+            guard let focused = focusedContext() else { return fail("no managed window focused") }
+            guard !pointerOverUnmanagedSpace() else { return fail(Self.fullScreenRefusal) }
+            ctx = focused
+        }
         let session = ctx.session, space = ctx.space
         guard coordinator.display(forSpace: space)?.activeSpaceID == space, !session.state.interactionSuppressed,
               let current = try? session.state.layout.placements(in: session.canvas, gap: options.gap),
