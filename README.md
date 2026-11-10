@@ -205,3 +205,20 @@ Association reports expose quarantine separately from evidence status: `quaranti
 `ruby scripts/check-native-tabs.rb --unvisited [new-output.json]` exercises three native tabs, initially visiting only two. On this host, the unvisited control omits `AXValue`, so the collector withholds the candidate even though its physical window is known. After the third tab is selected, learning starts fresh; revisiting the earlier tabs can complete the unchanged candidate. This fixture takes about 29 seconds and checks that missing selection metadata never causes inferred or replayed bindings.
 
 Increment 18 narrows physical-owner conflict quarantine to the implicated groups: unrelated groups continue learning, including both native groups in the mixed content fixture. Shared or malformed AX identities still quarantine the whole observer. Reports distinguish `scopeQuarantined` and retained `quarantinedGroups`, with a `quarantined` flag on each candidate. Group quarantine survives topology changes, disappearance and destruction invalidation until a new observer scope. An `observed` report can include both blocked and usable candidates; blocked candidates have no bindings and cannot be complete. This supersedes the whole-scope physical-owner policy described above.
+
+Focus scrolling uses `focusScrollDuration` in config.json (seconds, default
+`0.22`; set `0` for immediate placement). Only keyboard focus scrolling is
+animated. New commands retarget the in-flight positions; mouse input and
+Space/display/lifecycle changes cancel the scheduler.
+
+`paperi msg status` includes `performance`: discovery/topology/layout phase
+milliseconds, cumulative AX geometry-write calls/time, last tick cost and
+count of ticks exceeding 16.7 ms. Focus timing fields distinguish first write,
+final write, and a bounded observed-frame confirmation (null if unconfirmed).
+Write submission is not proof of visible motion. Compare the same apps and
+focus sequence with duration zero and 0.22; report intentional duration
+separately. The timer targets 60 Hz; this is not a measured smoothness guarantee.
+Animation ticks reuse targets and issue position-only writes with a 20 ms AX
+messaging timeout; AX remains synchronous, so multiple slow apps can still
+exceed a tick budget. Live multi-app profiling and interruption soak remain
+required before making latency claims.

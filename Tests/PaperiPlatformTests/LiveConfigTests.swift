@@ -3,6 +3,16 @@ import Testing
 @testable import PaperiPlatform
 
 struct LiveConfigTests {
+    @Test func focusDuration() throws {
+        for duration in [0.0, 0.14, 1.0] {
+            let config = try JSONDecoder().decode(LiveConfig.self, from: Data("{\"focusScrollDuration\":\(duration)}".utf8))
+            #expect(config.focusScrollDuration == duration)
+        }
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"focusScrollDuration":-1}"#.utf8))
+        }
+    }
+
     @Test func defaultsManageRegularAppsExceptSystemUI() {
         let config = LiveConfig()
         #expect(config.manages(bundleID: "com.tinyspeck.slackmacgap", regular: true))

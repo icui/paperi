@@ -28,6 +28,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     /// Windows tiled even though they look like utility windows (no
     /// fullscreen button), e.g. System Settings.
     public var tile: [FloatRule]
+    /// Focus-scroll duration in seconds; zero disables animation.
+    public var focusScrollDuration: Double?
     public var gap: Double?
     public var outerGap: Double?
     /// Key spec → command (as accepted by `paperi msg`), merged over the
@@ -45,7 +47,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         self.hotkeys = [:]
     }
 
-    enum CodingKeys: String, CodingKey { case include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight }
+    enum CodingKeys: String, CodingKey { case include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight, focusScrollDuration }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         include = try c.decodeIfPresent([String].self, forKey: .include)
@@ -53,6 +55,10 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         singleton = try c.decodeIfPresent([String].self, forKey: .singleton) ?? []
         float = try c.decodeIfPresent([FloatRule].self, forKey: .float) ?? []
         tile = try c.decodeIfPresent([FloatRule].self, forKey: .tile) ?? []
+        focusScrollDuration = try c.decodeIfPresent(Double.self, forKey: .focusScrollDuration)
+        if let duration = focusScrollDuration, !duration.isFinite || duration < 0 || duration > 1 {
+            throw DecodingError.dataCorruptedError(forKey: .focusScrollDuration, in: c, debugDescription: "expected seconds from 0 to 1")
+        }
         gap = try c.decodeIfPresent(Double.self, forKey: .gap)
         outerGap = try c.decodeIfPresent(Double.self, forKey: .outerGap)
         hotkeys = try c.decodeIfPresent([String: String?].self, forKey: .hotkeys) ?? [:]
@@ -79,6 +85,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "float": [],
       "tile": [],
       "singleton": [],
+      "focusScrollDuration": 0.22,
       "gap": 8,
       "outerGap": 8,
       "swapHighlight": "#0A84FF4D",

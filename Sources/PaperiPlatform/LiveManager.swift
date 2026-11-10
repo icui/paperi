@@ -115,6 +115,9 @@ import PaperiCore
                                  emit: { [weak self] event in self?.receive(event) })
         recorder.start()
         let center = NSWorkspace.shared.notificationCenter
+        workspaceTokens.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cancelMotion(); self?.motionFrames.removeAll() }
+        })
         workspaceTokens.append(center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification,
                                                   object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.activeSpaceChanged() }
@@ -127,7 +130,7 @@ import PaperiCore
         }
         workspaceTokens.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.forceApply = true; self?.scheduleRefresh() }
+            MainActor.assumeIsolated { self?.cancelMotion(); self?.motionFrames.removeAll(); self?.forceApply = true; self?.scheduleRefresh() }
         })
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
@@ -182,6 +185,7 @@ import PaperiCore
             return restoreJournal(restore ?? options.restoreOnStop)
         }
         guard running else { return ["stopped": false] }
+        cancelMotion(); motionFrames.removeAll()
         running = false
         timer?.invalidate(); timer = nil; endDrag()
         for token in workspaceTokens {
@@ -239,7 +243,12 @@ import PaperiCore
     private func receive(_ event: [String: Any]) {
         guard running, let name = event["event"] as? String else { return }
         if name == kAXUIElementDestroyedNotification, let wid = event["windowID"] as? UInt32, wid > 0 {
+            cancelMotion(); motionFrames.removeAll()
             destroyedNotified.insert(wid)
+        }
+        if motionTimer != nil && [kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification,
+                                 kAXWindowCreatedNotification].contains(name) {
+            cancelMotion(); motionFrames.removeAll()
         }
         if name == kAXMovedNotification || name == kAXResizedNotification {
             // Our own writes echo back; refresh decides whether it was external.
@@ -249,6 +258,7 @@ import PaperiCore
     }
 
     private func activeSpaceChanged() {
+        cancelMotion(); motionFrames.removeAll()
         forceUntil = ProcessInfo.processInfo.systemUptime + 1.6
         scheduleRefresh()
         // The switch animation and app re-activation settle over ~1 s.
@@ -426,6 +436,8 @@ import PaperiCore
     /// topology → admissions → focus → observed resizes → effects.
     public func refresh() {
         guard running, !busy else { return }
+        if motionTimer != nil { return }
+        motionFrames.removeAll()
         // Side-by-side displays are unsupported (the app pauses moments later);
         // no pass may run in between and push a window onto the other display.
         guard DisplayArrangement.currentProblem() == nil else { return }
@@ -460,6 +472,7 @@ import PaperiCore
         if !gone.isEmpty { removeMembers(gone) }
         preferredWidth = preferredWidth.filter { levels[$0.key] != nil }
 
+        let discoveryStart = ProcessInfo.processInfo.systemUptime
         // 2. Survey allowlisted apps.
         var surveys: [pid_t: [Survey]] = [:]
         for app in appsToSurvey(apps) where !app.isHidden { surveys[app.processIdentifier] = survey(app, levels: levels) }
@@ -474,6 +487,10 @@ import PaperiCore
             for row in rows { references[row.windowID] = row.element; pidForWindow[row.windowID] = pid }
         }
         let byID = Dictionary(surveys.values.flatMap { $0 }.map { ($0.windowID, $0) }, uniquingKeysWith: { a, _ in a })
+
+        phaseMS["discovery"] = (ProcessInfo.processInfo.systemUptime - discoveryStart) * 1000
+        latestSurvey = byID
+        let topologyStart = ProcessInfo.processInfo.systemUptime
 
         // 3. Definitive state changes (minimized, fullscreen, floated by the
         // user or a rule) leave the strip. Transient metadata, e.g. a sheet
@@ -551,6 +568,8 @@ import PaperiCore
             }
         }
 
+        phaseMS["topology"] = (ProcessInfo.processInfo.systemUptime - topologyStart) * 1000
+        let layoutStart = ProcessInfo.processInfo.systemUptime
         // 6. Focus: only an allowlisted, managed representative enables commands.
         let front = NSWorkspace.shared.frontmostApplication
         var focusedWindow: UInt32?
@@ -634,6 +653,7 @@ import PaperiCore
             }
         }
 
+        phaseMS["layout"] = (ProcessInfo.processInfo.systemUptime - layoutStart) * 1000
         // 8. Effects, deferred to mouse up (no AX event may follow the release).
         if mouseDown {
             refreshOnMouseUp()
@@ -712,6 +732,131 @@ import PaperiCore
 
     // MARK: effects
 
+    private var phaseMS: [String: Double] = [:]
+    private var axWriteCalls = 0
+    private var axWriteMS = 0.0
+    private var latestSurvey: [UInt32: Survey] = [:]
+    private var motionBegan: Double?
+    private var motionFailed: Set<UInt32> = []
+    private var motionTicks = 0
+    private var motionSpace: UInt64?
+    private var motionTimer: Timer?
+    private var motionGeneration: UInt64 = 0
+    private var motionFrames: [UInt32: Rect] = [:]
+    private var commandStarted = 0.0
+    private var firstWriteMS: Double?
+    private var finalWriteMS: Double?
+    private var confirmedMS: Double?
+    private var tickMS = 0.0
+    private var missedTicks = 0
+
+    private func cancelMotion() {
+        motionGeneration &+= 1
+        motionTimer?.invalidate(); motionTimer = nil
+    }
+
+    /// One target calculation, position-only ticks, no discovery in the scheduler.
+    private func animateFocus(space: UInt64, byID: [UInt32: Survey]) {
+        let duration = options.config.focusScrollDuration ?? 0.22
+        guard NSEvent.pressedMouseButtons == 0 else { cancelMotion(); refreshOnMouseUp(); return }
+        guard duration > 0, let session = coordinator.sessions[space],
+              let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else {
+            apply(space: space, byID: byID)
+            if let session = coordinator.sessions[space],
+               let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) {
+                let targets = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
+                confirmFocus(targets: targets, generation: motionGeneration, attempts: 3)
+            }
+            return
+        }
+        let targets = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
+        var starts: [UInt32: Rect] = [:]
+        for placement in placements {
+            let wid = placement.windowID
+            guard let row = byID[wid], row.spaceID == space, row.classification.eligibility == .tiled,
+                  let frame = motionFrames[wid] ?? row.frame, let target = targets[wid] else {
+                cancelMotion(); apply(space: space, byID: byID); return
+            }
+            if !matches(frame, target) { starts[wid] = frame }
+        }
+        cancelMotion()
+        guard !starts.isEmpty else { return }
+        let generation = motionGeneration
+        motionBegan = nil; motionFailed.removeAll(); motionTicks = 0
+        let origins = starts
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.motionGeneration == generation else { return }
+                guard self.running, NSEvent.pressedMouseButtons == 0, AXIsProcessTrusted(),
+                      self.coordinator.display(forSpace: space)?.activeSpaceID == space else {
+                    self.cancelMotion(); self.motionFrames.removeAll(); self.scheduleRefresh(); return
+                }
+                let tick = ProcessInfo.processInfo.systemUptime
+                if self.motionBegan == nil { self.motionBegan = tick }
+                let progress = min(1, (tick - (self.motionBegan ?? tick)) / duration)
+                let eased = progress * progress * (3 - 2 * progress)
+                self.motionTicks += 1
+                for (wid, origin) in origins where !self.motionFailed.contains(wid) {
+                    guard NSEvent.pressedMouseButtons == 0 else {
+                        self.cancelMotion(); self.motionFrames.removeAll(); self.refreshOnMouseUp(); return
+                    }
+                    guard let target = targets[wid], let element = self.references[wid] else { continue }
+                    var frame = origin
+                    frame.x = origin.x + (target.x - origin.x) * eased
+                    frame.y = origin.y + (target.y - origin.y) * eased
+                    if let last = self.motionFrames[wid], last == frame { continue }
+                    var point = CGPoint(x: frame.x, y: frame.y)
+                    guard let value = AXValueCreate(.cgPoint, &point) else { continue }
+                    session.expect(windowID: wid, frame: frame, now: tick, ticket: session.ticket)
+                    self.expected[wid] = (frame, tick)
+                    let writeStart = ProcessInfo.processInfo.systemUptime
+                    AXUIElementSetMessagingTimeout(element, 0.02)
+                    let result = AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, value)
+                    AXUIElementSetMessagingTimeout(element, 0.2)
+                    self.axWriteCalls += 1
+                    self.axWriteMS += (ProcessInfo.processInfo.systemUptime - writeStart) * 1000
+                    if self.firstWriteMS == nil { self.firstWriteMS = (writeStart - self.commandStarted) * 1000 }
+                    if result != .success {
+                        self.motionFailed.insert(wid)
+                        continue
+                    }
+                    self.motionFrames[wid] = frame
+                }
+                self.tickMS = (ProcessInfo.processInfo.systemUptime - tick) * 1000
+                if self.tickMS > 1000 / 60 { self.missedTicks += 1 }
+                if progress >= 1 {
+                    self.finalWriteMS = (ProcessInfo.processInfo.systemUptime - self.commandStarted) * 1000
+                    self.cancelMotion(); self.motionFrames.removeAll()
+                    self.applied.removeValue(forKey: space)
+                    self.confirmFocus(targets: targets, generation: self.motionGeneration, attempts: 3)
+                    self.scheduleRefresh()
+                }
+            }
+        }
+        motionSpace = space
+        motionTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    /// Bounded observation, reported separately from the time of the final write.
+    private func confirmFocus(targets: [UInt32: Rect], generation: UInt64, attempts: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.running, self.motionGeneration == generation,
+                      NSEvent.pressedMouseButtons == 0 else { return }
+                let confirmed = targets.allSatisfy { wid, target in
+                    guard let element = self.references[wid], let frame = Diagnostics.frame(element) else { return false }
+                    return self.matches(frame, target)
+                }
+                if confirmed {
+                    self.confirmedMS = (ProcessInfo.processInfo.systemUptime - self.commandStarted) * 1000
+                } else if attempts > 1 {
+                    self.confirmFocus(targets: targets, generation: generation, attempts: attempts - 1)
+                }
+            }
+        }
+    }
+
     private var applied: [UInt64: [Placement]] = [:]
 
     private func apply(space: UInt64, byID: [UInt32: Survey]) {
@@ -784,7 +929,16 @@ import PaperiCore
         }
         return ok
     }
-    private func write(_ frame: Rect, to element: AXUIElement) -> Bool { Self.write(frame, to: element) }
+    private func write(_ frame: Rect, to element: AXUIElement) -> Bool {
+        let start = ProcessInfo.processInfo.systemUptime
+        let result = Self.write(frame, to: element)
+        if commandStarted > 0 {
+            if firstWriteMS == nil { firstWriteMS = (start - commandStarted) * 1000 }
+            finalWriteMS = (ProcessInfo.processInfo.systemUptime - commandStarted) * 1000
+        }
+        axWriteCalls += 3; axWriteMS += (ProcessInfo.processInfo.systemUptime - start) * 1000
+        return result
+    }
 
     private static func findWindow(_ wid: UInt32, pid: pid_t) -> AXUIElement? {
         let application = AXUIElementCreateApplication(pid)
@@ -827,6 +981,11 @@ import PaperiCore
     }
 
     private func focusedContext() -> (session: ScopedLayoutSession, space: UInt64, pid: pid_t, window: UInt32)? {
+        if motionTimer != nil, let space = motionSpace, let session = coordinator.sessions[space],
+           let focused = session.state.layout.focused, let loc = session.state.layout.index(of: focused) {
+            let wid = session.state.layout.columns[loc.column].slots[loc.row].activeMember
+            if let pid = pidForWindow[wid] { return (session, space, pid, wid) }
+        }
         refresh()
         guard let front = NSWorkspace.shared.frontmostApplication else { return nil }
         let pid = front.processIdentifier
@@ -865,6 +1024,7 @@ import PaperiCore
             switch s { case "left": .left; case "right": .right; case "up": .up; case "down": .down; default: nil }
         }
         func fail(_ message: String) -> [String: Any] { ["ok": false, "error": message] }
+        if verb != "focus" && verb != "status" { cancelMotion(); motionFrames.removeAll() }
         switch verb {
         case "status":
             return status()
@@ -873,6 +1033,8 @@ import PaperiCore
         case "stop":
             return ["ok": true, "stop": true]
         case "focus":
+            commandStarted = ProcessInfo.processInfo.systemUptime
+            firstWriteMS = nil; finalWriteMS = nil; confirmedMS = nil
             guard let dir = direction(rest.first) else { return fail("usage: focus left|right|up|down") }
             // Focus never leaves the strip or switches Spaces: at its end (or
             // with no managed window focused) the focused window shows a hint.
@@ -888,7 +1050,7 @@ import PaperiCore
             let wid = ctx.session.state.layout.columns[loc.column].slots[loc.row].activeMember
             try? ctx.session.focus(windowID: wid, ownerPID: pidForWindow[wid], classification: Self.tiled, ticket: ctx.session.ticket)
             reveal(ctx.session)
-            apply(space: ctx.space, byID: surveyByID())
+            animateFocus(space: ctx.space, byID: latestSurvey)
             return ["ok": raise(wid), "windowID": wid]
         case "swap", "move":
             guard let dir = direction(rest.first) else { return fail("usage: swap left|right|up|down") }
@@ -1036,6 +1198,13 @@ import PaperiCore
              }]
         }
         return ["ok": true, "paused": false, "apps": options.config.include?.sorted() ?? ["all regular apps"], "displays": displays, "sessions": sessions,
-                "floating": userFloating.sorted(), "journaled": journal.count, "lastRefreshMS": lastRefreshMS]
+                "floating": userFloating.sorted(), "journaled": journal.count, "lastRefreshMS": lastRefreshMS,
+                "performance": ["phaseMS": phaseMS, "axWriteCalls": axWriteCalls, "axWriteMS": axWriteMS,
+                    "commandToFirstWriteMS": firstWriteMS as Any? ?? NSNull(),
+                    "commandToFinalWriteMS": finalWriteMS as Any? ?? NSNull(),
+                    "commandToConfirmedFrameMS": confirmedMS as Any? ?? NSNull(),
+                    "animationTicks": motionTicks, "failedAnimationWindows": motionFailed.sorted(),
+                    "lastTickMS": tickMS, "overBudgetTicks": missedTicks,
+                    "animationActive": motionTimer != nil]]
     }
 }

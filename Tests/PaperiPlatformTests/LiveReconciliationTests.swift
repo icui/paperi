@@ -8,6 +8,20 @@ import PaperiCore
     var eligible: Classification { WindowPolicy.classify(WindowFacts(bundleID: "test", role: "AXWindow",
         subrole: "AXStandardWindow", isRoot: true, movable: true, resizable: true, level: 0)) }
 
+    @Test func focusTargetsIncludeOrdinaryWindowsAndTuckedEdges() throws {
+        let layout = Layout(columns: (1...5).map { id in
+            Column(slots: [Slot(id: "slot\(id)", members: [UInt32(id)], activeMember: UInt32(id))], width: 600)
+        })
+        let placements = try layout.placements(in: canvas, gap: 8)
+        let targets = LiveReconciliation.focusTargets(placements, canvas: canvas, screenInset: 8)
+        let tucked = LiveReconciliation.tuck(placements.map { ($0.windowID, $0.frame) }, canvas: canvas, screenInset: 8)
+        #expect(targets.count == placements.count)
+        #expect(targets[1] == placements[0].frame)
+        #expect(targets[2] == placements[1].frame)
+        for placement in placements { #expect(targets[placement.windowID] == (tucked[placement.windowID] ?? placement.frame)) }
+        #expect(!tucked.isEmpty)
+    }
+
     @Test func destroyedMembersLeaveContainersInPlace() {
         let slots = [Slot(id: "a", members: [1, 2, 3], activeMember: 2), Slot(id: "b", members: [4], activeMember: 4)]
         #expect(LiveReconciliation.partitions(removing: [2], from: slots) ==

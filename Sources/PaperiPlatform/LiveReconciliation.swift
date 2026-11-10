@@ -3,6 +3,13 @@ import PaperiCore
 
 /// Pure helpers for the live manager. No OS effects run here.
 enum LiveReconciliation {
+    /// Complete physical targets: ordinary placements plus off-screen adjustments.
+    static func focusTargets(_ placements: [Placement], canvas: Rect, screenInset: Double) -> [UInt32: Rect] {
+        let frames = placements.map { (window: $0.windowID, frame: $0.frame) }
+        return Dictionary(frames.map { ($0.window, $0.frame) }, uniquingKeysWith: { a, _ in a })
+            .merging(tuck(frames, canvas: canvas, screenInset: screenInset)) { _, tucked in tucked }
+    }
+
     /// Removes destroyed physical members from existing containers. Containers
     /// lose a member without moving; a destroyed active representative is
     /// replaced by the first survivor until fresh tab evidence selects the real
