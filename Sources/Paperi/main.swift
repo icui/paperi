@@ -30,7 +30,7 @@ var args = Array(CommandLine.arguments.dropFirst())
 if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["--menu"] }
 @MainActor func runLive(_ arguments: [String]) -> Never {
     var apps: Set<String> = [], singletons: Set<String> = []
-    var verbose = false, restore = true
+    var verbose = false, restore = true, hotkeys = true
     var i = 0
     while i < arguments.count {
         switch arguments[i] {
@@ -39,20 +39,28 @@ if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["--men
             apps.insert(arguments[i + 1]); singletons.insert(arguments[i + 1]); i += 1
         case "--verbose", "-v": verbose = true
         case "--no-restore": restore = false
+        case "--no-hotkeys": hotkeys = false
         default:
             FileHandle.standardError.write(Data("Unknown option \(arguments[i])\n".utf8)); exit(2)
         }
         i += 1
     }
     guard !apps.isEmpty else {
-        print("Usage: paperi run --app bundle.id [--app ...] [--singleton-app bundle.id ...] [--verbose] [--no-restore]")
+        print("Usage: paperi run --app bundle.id [--app ...] [--singleton-app bundle.id ...] [--verbose] [--no-restore] [--no-hotkeys]")
         exit(2)
     }
     var options = LiveManager.Options(bundleIDs: apps, singletonBundleIDs: singletons)
     options.verbose = verbose; options.restoreOnStop = restore
     let manager = LiveManager(options: options)
     var server: LiveCommandServer?
+    let keys = HotKeyCenter { command in
+        let reply = manager.handle(command)
+        if verbose || reply["ok"] as? Bool != true {
+            FileHandle.standardError.write(Data("[paperi] ⌥⌘ \(command.joined(separator: " ")) → \(reply.filter { $0.key != "missionControl" })\n".utf8))
+        }
+    }
     func shutdown(_ code: Int32) -> Never {
+        keys.unregister()
         server?.stop()
         Diagnostics.printJSON(manager.stop(), pretty: false)
         exit(code)
@@ -78,7 +86,9 @@ if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["--men
         source.setEventHandler { MainActor.assumeIsolated { shutdown(0) } }
         source.resume(); signalSources.append(source)
     }
-    Diagnostics.printJSON(["event": "paperiRunning", "apps": apps.sorted(), "socket": LiveCommandServer.defaultPath], pretty: false)
+    let hotkeyFailures = hotkeys ? keys.register() : [:]
+    Diagnostics.printJSON(["event": "paperiRunning", "apps": apps.sorted(), "socket": LiveCommandServer.defaultPath,
+                           "hotkeys": keys.registeredCount, "hotkeyFailures": hotkeyFailures], pretty: false)
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     withExtendedLifetime(signalSources) { app.run() }
@@ -230,8 +240,8 @@ case "benchmark-core":
         "checksum": checksum, "scope": "cached pure core only; excludes AX, rendering and input latency"])
 default:
     print("""
-    Paperi (opt-in live management; no global shortcuts)
-      paperi run --app ID [--app ID ...] [--singleton-app ID ...] [-v] [--no-restore]
+    Paperi (opt-in live management; Option–Command shortcuts from the PaperWM config)
+      paperi run --app ID [--app ID ...] [--singleton-app ID ...] [-v] [--no-restore] [--no-hotkeys]
                                         Manage windows of allowlisted apps on each display's active Space
       paperi msg COMMAND                 focus|swap left|right|up|down, width|height +|- [fraction],
                                         center, split, slurp, barf, float, space N, retile, status, stop

@@ -1,15 +1,15 @@
 # Implementation status
 
-Current state and resume instructions only. The chronological increment log (increments 1–63) and the original initial-host validation are in [HISTORY.md](HISTORY.md); those entries describe evidence at their original dates.
+Current state and resume instructions only. The chronological increment log (increments 1–64) and the original initial-host validation are in [HISTORY.md](HISTORY.md); those entries describe evidence at their original dates.
 
-## Current checkpoint: 2026-11-09 (increment 63)
+## Current checkpoint: 2026-11-09 (increment 64)
 
-Paperi now has an **opt-in live mode that manages real windows** of allowlisted applications on the active Space of every display, controlled from the command line. Global keyboard shortcuts are not registered yet: per user direction they follow a working implementation that demonstrates native tabs, Spaces and multi-display handling. Bind `paperi msg …` with any hotkey tool in the meantime.
+Paperi now has an **opt-in live mode that manages real windows** of allowlisted applications on the active Space of every display, controlled from the command line. While running it registers the Option–Command shortcuts copied from `~/.hammerspoon/init.lua` (J/K focus with Space fallback, arrows swap, F/C/S/L/H/U/N/I/O, 1–9 move to Space); each dispatches the same command as `paperi msg`.
 
 ```sh
 ./scripts/swift.sh build
 .build/debug/paperi run --app com.apple.TextEdit --app com.apple.finder -v   # foreground; Ctrl-C stops and restores
-.build/debug/paperi msg focus right        # from a hotkey tool while a managed window is focused
+.build/debug/paperi msg focus right        # same as ⌥⌘K
 .build/debug/paperi msg status
 .build/debug/paperi restore                # only after a crash: restores journaled frames
 ```
@@ -21,27 +21,27 @@ The responsible process (terminal/editor, or `dist/Paperi.app`) needs Accessibil
 | Capability | Real apps (live mode) | Disposable fixture / tests | Remaining limits |
 | --- | --- | --- | --- |
 | Admission, closure, minimise/hide, eligibility | TextEdit, Finder verified | Verified | Non-allowlisted apps untouched; unknown tab membership stays unmanaged |
-| Commands: focus, swap, width, height, center, split, slurp, barf, float | Verified via `paperi msg` | Verified | `focus` at a strip edge does not yet switch Space; no scroll-only commands |
+| Commands: focus, swap, width, height, center, split, slurp, barf, float | Verified via `paperi msg` | Verified | No scroll-only commands |
 | Native tabs: active-first admission, merge (lazy), switch, detach, close active/last | TextEdit, Finder verified | Verified | Chromium/Electron in-content tab strips need `--singleton-app` |
 | Space transfer (`space N`) with follow, tab containers | Verified Space 1 ↔ 378 (Mission Control) | Verified | Needs a unique window title; `expose-group-apps = 1` can cluster same-app untabbed windows |
 | User Mission Control/display drags | Container follows to the new Space (observed after our transfers) | Unit-tested | Manual drag not separately exercised |
 | Multi-display | Per-display strips, canvas updates, neighbour-aware parking of off-canvas columns | Unit-tested (negative origins, parking) | **No second physical display on this host**; cross-display `space N` is untested |
 | Stop/crash recovery | Stop restores admission frames; journal persisted | Verified | Windows the app recreated after a crash are not matched |
-| Global keyboard shortcuts | Not registered | — | Next after multi-display validation |
+| Global keyboard shortcuts (⌥⌘, from the PaperWM config) | Verified via synthesized keys: J/K incl. edge → adjacent Space, H, →, I, O, C | Binding table unit-tested | 1–9 share the verified `space N` path but were not pressed live; conflicting registrations (Hammerspoon) are reported, not overridden; PaperWM's auto-center on create/destroy is not copied |
 | Baseline, performance, soak | Not started | — | Release gates; refresh cost is reported as `lastRefreshMS` (~55 ms with 3 windows) |
 
 ### Next
 
 1. **Multi-display validation** on hardware with "Displays have separate Spaces" enabled: per-display strips, parking at a shared edge, cross-display `space N`, display unplug/replug.
 2. **Daily-app compatibility**: run against the user's daily apps (Zed, Slack, Beeper, browsers with `--singleton-app`) and record per-app limitations; exercise popups/sheets/Control Center while managing.
-3. **Global shortcuts** (Option–Command bindings from the plan) dispatching the same `LiveManager.handle` commands, plus `focus` edge → adjacent Space.
+3. Decide whether to copy the Hammerspoon create/destroy auto-centering (`PaperWM.windows.centerWindow()`), which the plan flags as a pain point to guard.
 4. Then baseline/performance (AX traffic per refresh, observer-driven incremental surveys), launch at login, and the eight-hour soak.
 
 ## Handoff — 2026-11-09
 
 ### Resume here
 
-- Live mode entry points: [LiveManager.swift](../Sources/PaperiPlatform/LiveManager.swift) (refresh pipeline: displays → destruction → survey → ineligible removal → Space follow → per-app tab topology/admission → focus/reveal → width adoption → effects), [LiveCommandServer.swift](../Sources/PaperiPlatform/LiveCommandServer.swift), [LiveReconciliation.swift](../Sources/PaperiPlatform/LiveReconciliation.swift), CLI in [main.swift](../Sources/Paperi/main.swift).
+- Live mode entry points: [LiveManager.swift](../Sources/PaperiPlatform/LiveManager.swift) (refresh pipeline: displays → destruction → survey → ineligible removal → Space follow → per-app tab topology/admission → focus/reveal → width adoption → effects), [LiveCommandServer.swift](../Sources/PaperiPlatform/LiveCommandServer.swift), [LiveReconciliation.swift](../Sources/PaperiPlatform/LiveReconciliation.swift), shortcuts in [HotKeys.swift](../Sources/PaperiPlatform/HotKeys.swift), CLI in [main.swift](../Sources/Paperi/main.swift).
 - A refresh runs on AX/workspace events (40 ms debounce) and every second. Only active Spaces are written; windows on inactive Spaces keep their session state until that Space is shown.
 - Closure is recognised from `AXUIElementDestroyed`, window-server absence or owner exit; enumeration absence alone is never closure (inactive native tabs are not enumerated).
 - Each app's tab reconciliation passes other apps' containers as identity partitions so one strip can mix apps.
@@ -75,6 +75,6 @@ The responsible process (terminal/editor, or `dist/Paperi.app`) needs Accessibil
   - `DisplaySpaceCoordinator` models per-display canvases (including negative-origin secondary monitors), 1-based user-Space numbering across displays, and atomic cross-Space/cross-display container transfers (`transferContainer`). Physical multi-monitor hardware with "Displays have separate Spaces" enabled has not yet been tested live on this single-display host.
 - **Broader Release Gates:**
   - Intermittent AX reference/role failures and restart rediscovery remain open (last full 10-mode integrated cycle passed 9/10).
-  - Global shortcuts are not registered yet; they follow multi-display validation of live mode (user direction 2026-11-09). Abrupt-exit crash recovery, OS/Control Center popup recovery, baseline/performance benchmarks, and daily-use soak remain release gates.
+  - Live mode registers the user's Option–Command shortcuts (`HotKeys.swift`). Abrupt-exit crash recovery, OS/Control Center popup recovery, baseline/performance benchmarks, and daily-use soak remain release gates.
 
 Commit validated milestones autonomously per the [commit policy](../plan.md#commit-checkpoints). Keep raw captures/scratch out of commits and preserve unrelated changes. Historical increments in [HISTORY.md](HISTORY.md) describe evidence at their original dates; this handoff and the current checkpoint are the resume instructions.

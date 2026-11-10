@@ -531,6 +531,12 @@ Course correction (2026-11-09, user direction): stop adding disposable-window pr
 - Live validation on this host (TextEdit + Finder, debug build): admission of real windows on the active Space; `focus`/`swap`/`width`/`height`/`center`/`split`/`slurp`/`barf`/`float` with confirmed frames; native-tab merge inferred without visiting background tabs, tab switch representative change, width command on the active tab, detach, close-active-tab, singleton close, minimise/unminimise; `space 2` and `space 1` Mission Control transfers of a singleton and a native-tab container with follow and re-tiling; cross-app focus/swap; stop restoring original frames and removing journal/socket.
 - 129 Swift regressions (35 core, 94 platform) pass in debug and release.
 
+## Increment 64: Option–Command shortcuts copied from the Hammerspoon configuration
+
+- `paperi run` registers 24 Carbon hot keys mirroring `~/.hammerspoon/init.lua` (`HotKeyBindings.defaults`, `HotKeyCenter`): J/K focus, arrows swap, F float, C center, S split, L/H width, U/N height, I/O slurp/barf, 1–9 move to Space. Each dispatches the `paperi msg` command vector. `--no-hotkeys` disables them; registration conflicts are reported as `hotkeyFailures`.
+- J/K follow `focusWindowByTwo`: one column with nearest-row fallback; at the strip edge or without a managed focused window they post Control–arrow when an adjacent Space exists on the active display.
+- Live validation with synthesized keystrokes on TextEdit: ⌥⌘J, H, →, I, O, C changed layout as expected; ⌥⌘K at the right edge and ⌥⌘J on a Space without managed windows switched Spaces; stop restored all frames. 130 Swift regressions pass.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

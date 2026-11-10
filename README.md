@@ -9,18 +9,22 @@ Standalone macOS scrolling window manager (PaperWM-style) in development.
 .build/debug/paperi run --app com.apple.TextEdit --app com.apple.finder -v
 ```
 
-Manages windows of the allowlisted apps on each display's active Space as one horizontally scrolling strip, including native macOS tab containers and Mission Control Space transfers. Control it with `paperi msg` (bind these with any hotkey tool; Paperi registers no global shortcuts yet):
+Manages windows of the allowlisted apps on each display's active Space as one horizontally scrolling strip, including native macOS tab containers and Mission Control Space transfers. It registers the Option–Command shortcuts from the PaperWM Hammerspoon config (`--no-hotkeys` disables them); every shortcut runs the same command as `paperi msg`:
 
-| Command | Effect |
-| --- | --- |
-| `focus left\|right\|up\|down` | Focus the adjacent column / stacked window, scrolling it into view |
-| `swap left\|right\|up\|down` | Swap columns or stacked rows |
-| `width +\|- [fraction]`, `height +\|- [fraction]` | Resize by 10% (default) of the canvas |
-| `center`, `split` | Center the focused column; split it with its left neighbour |
-| `slurp`, `barf` | Stack into the left column / unstack into its own column |
-| `float` | Toggle the focused container out of / back into the strip |
-| `space N` | Move the focused container to user Space N and follow it |
-| `retile`, `status`, `stop` | Reapply layout; JSON state; stop and restore original frames |
+| Keys (⌥⌘) | Command | Effect |
+| --- | --- | --- |
+| J / K | `focus left\|right` | Focus the adjacent column (nearest row), scrolling it into view; at the strip edge or with no managed window, switch to the adjacent Space (Control–arrow) |
+| — | `focus up\|down` | Focus the stacked window above/below |
+| Arrows | `swap left\|right\|up\|down` | Swap columns or stacked rows |
+| L / H | `width +\|- [fraction]` | Width ±10% of the canvas |
+| U / N | `height +\|- [fraction]` | Height ±10%, redistributing the stack |
+| C / S | `center`, `split` | Center the focused column; split it with its left neighbour |
+| I / O | `slurp`, `barf` | Stack into the left column / unstack into its own column |
+| F | `float` | Toggle the focused container out of / back into the strip |
+| 1–9 | `space N` | Move the focused container to Space N and follow it |
+| — | `retile`, `status`, `stop` | Reapply layout; JSON state; stop and restore original frames |
+
+Quit Hammerspoon (or stop PaperWM) first: a combination already registered by another process is reported in `hotkeyFailures` and left to that process.
 
 `--singleton-app ID` manages an app whose tabs are in-content (Chromium/Electron) as plain windows. Ctrl-C or `paperi msg stop` restores admission frames; after a crash, `paperi restore` uses the persisted journal. The responsible terminal/editor (or `dist/Paperi.app`) needs Accessibility access. See [docs/STATUS.md](docs/STATUS.md) for verified scope and limits.
 
@@ -34,7 +38,7 @@ Click one of its two document windows, then use **Narrower/Wider/Stack/Unstack/N
 
 Standalone macOS scrolling window manager in development. See [plan.md](plan.md) for the intended behavior and release gates, and [docs/STATUS.md](docs/STATUS.md) for current capability status and handoff details.
 
-The current implementation provides a pure Swift layout core (including resize, split, stacked-column slurp/barf, and floating transitions), scoped per-Space/per-display session management (`ScopedLayoutSession`, `DisplaySpaceCoordinator`), active-first and strict native-tab discovery and lifecycle reconciliation (`NativeTabMembership`, `NativeTabTopology`), Mission Control cross-Space container transfers (`SpaceTransfer`), opt-in disposable and real-app probes (Finder and Terminal), regression tests, read-only native diagnostics, and an inactive menu bar shell. Live mode manages only explicitly allowlisted apps; **global keyboard shortcuts are not registered yet.**
+The current implementation provides a pure Swift layout core (including resize, split, stacked-column slurp/barf, and floating transitions), scoped per-Space/per-display session management (`ScopedLayoutSession`, `DisplaySpaceCoordinator`), active-first and strict native-tab discovery and lifecycle reconciliation (`NativeTabMembership`, `NativeTabTopology`), Mission Control cross-Space container transfers (`SpaceTransfer`), opt-in disposable and real-app probes (Finder and Terminal), regression tests, read-only native diagnostics, and an inactive menu bar shell. Live mode manages only explicitly allowlisted apps and registers the user's Option–Command shortcuts while running.
 
 `./scripts/swift.sh build` followed by `./scripts/swift.sh run --skip-build paperi probe-placement` runs an opt-in AX effect test on a newly spawned disposable fixture only. It applies a pure-core frame using size → position → size, confirms the observed frame within two points, restores and confirms the original frame, then terminates the fixture. Accessibility trust is required. It accepts no PID/window arguments and never targets existing user windows. Its scope is ordinary single-window placement, without focus changes, hotkeys or Space movement; it is not an enabled manager.
 

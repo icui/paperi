@@ -543,9 +543,15 @@ import PaperiCore
             return ["ok": true, "stop": true]
         case "focus":
             guard let dir = direction(rest.first) else { return fail("usage: focus left|right|up|down") }
-            guard let ctx = focusedContext() else { return fail("no managed focused window") }
+            // As in the user's Hammerspoon focusWindowByTwo: with no managed
+            // focused window, or at the strip edge, J/K switch to the adjacent Space.
+            guard let ctx = focusedContext() else {
+                return dir == .left || dir == .right ? switchSpace(dir) : fail("no managed focused window")
+            }
             guard let target = ctx.session.state.layout.neighbor(dir),
-                  let loc = ctx.session.state.layout.index(of: target) else { return ["ok": true, "changed": false, "edge": true] }
+                  let loc = ctx.session.state.layout.index(of: target) else {
+                return dir == .left || dir == .right ? switchSpace(dir) : ["ok": true, "changed": false, "edge": true]
+            }
             let wid = ctx.session.state.layout.columns[loc.column].slots[loc.row].activeMember
             try? ctx.session.focus(windowID: wid, ownerPID: pidForWindow[wid], classification: Self.tiled, ticket: ctx.session.ticket)
             reveal(ctx.session)
@@ -576,6 +582,26 @@ import PaperiCore
         default:
             return fail("unknown command \(verb)")
         }
+    }
+
+    /// Posts the system "Move left/right a space" shortcut (Control–arrow) when
+    /// an adjacent Space exists on the display showing the active Space.
+    private func switchSpace(_ direction: Direction) -> [String: Any] {
+        let active = paperi_active_space()
+        guard let display = coordinator.displays.first(where: { $0.spaces.contains { $0.id == active } }),
+              let index = display.spaces.firstIndex(where: { $0.id == active }) else {
+            return ["ok": false, "error": "active Space unknown"]
+        }
+        let next = index + (direction == .left ? -1 : 1)
+        guard display.spaces.indices.contains(next) else { return ["ok": true, "changed": false, "edge": true] }
+        let key: CGKeyCode = direction == .left ? 123 : 124
+        let source = CGEventSource(stateID: .hidSystemState)
+        for down in [true, false] {
+            let event = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down)
+            event?.flags = [.maskControl, .maskSecondaryFn, .maskNumericPad]
+            event?.post(tap: .cghidEventTap)
+        }
+        return ["ok": true, "switchedSpace": true, "from": active, "toward": display.spaces[next].id]
     }
 
     private func surveyByID() -> [UInt32: Survey] {
