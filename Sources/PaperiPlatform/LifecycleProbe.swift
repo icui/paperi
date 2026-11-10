@@ -66,7 +66,8 @@ extension Diagnostics {
         // CG display bounds use the AX top-left coordinate domain.
         let bounds = CGDisplayBounds(CGMainDisplayID())
         let canvas = Rect(x: bounds.minX + 40, y: bounds.minY + 100,
-                          width: min(900, bounds.width - 80), height: min(360, bounds.height - 180))
+                          width: min(900, bounds.width - 80),
+                          height: preview ? min(560, bounds.height - 140) : min(360, bounds.height - 180))
         guard canvas.isValid else { report["reason"] = "No usable fixture canvas"; return report }
         let session = ScopedLayoutSession(ownerPID: pid, canvas: canvas,
             ownership: preview ? .frontmostApplication : .applicationLocalFixture)
@@ -209,12 +210,16 @@ extension Diagnostics {
                 "nativeSourcesRemoved": teardown["sourcesStillInstalled"] as? Int == 0,
                 "managementRevoked": !session.accepts(ticket), "noFailures": failures.isEmpty]
             if automatedPreview {
-                checks["nativeInputSequence"] = previewCommands.compactMap { $0["action"] as? String } == ["grow", "shrink", "stop"]
-                checks["keyEquivalentsDispatched"] = previewCommands.filter { $0["source"] as? String == "keyEquivalent" }.count == 2
+                checks["nativeInputSequence"] = previewCommands.compactMap { $0["action"] as? String } == ["grow", "shrink", "slurp", "barf", "stop"]
+                checks["keyEquivalentsDispatched"] = previewCommands.filter { $0["source"] as? String == "keyEquivalent" }.count == 4
                 checks["buttonStopDispatched"] = previewCommands.last?["source"] as? String == "button" && reason == "stopControl"
-                checks["frontmostCommandsApplied"] = previewCommands.count == 3 && previewCommands.prefix(2).allSatisfy {
+                checks["frontmostCommandsApplied"] = previewCommands.count == 5 && previewCommands.prefix(4).allSatisfy {
                     $0["accepted"] as? Bool == true && $0["confirmed"] as? Bool == true && ($0["writeCount"] as? Int ?? 0) > 0
                 }
+                let tabReconciles = timeline.filter { $0["event"] as? String == "previewTabReconcile" }
+                checks["lazyTabMergeAndDetachReconciled"] = tabReconciles.count >= 2 &&
+                    tabReconciles.contains { $0["slotCount"] as? Int == 1 && $0["confirmed"] as? Bool == true } &&
+                    tabReconciles.contains { $0["slotCount"] as? Int == 2 && $0["confirmed"] as? Bool == true }
                 checks["twoLiveFramesRestored"] = stopped["restoredCount"] as? Int == 2
             }
             var result = report
@@ -225,7 +230,7 @@ extension Diagnostics {
             return result
         }
         var consumed = 0
-        let deadline = ProcessInfo.processInfo.systemUptime + (preview ? (automatedPreview ? 12 : 60) : (interaction ? 18 : 15))
+        let deadline = ProcessInfo.processInfo.systemUptime + (preview ? (automatedPreview ? 16 : 60) : (interaction ? 18 : 15))
         while child.isRunning && ProcessInfo.processInfo.systemUptime < deadline {
             recorder.reconcileNow()
             while consumed < queued.count {
@@ -296,6 +301,43 @@ extension Diagnostics {
                 } catch { failures.append("Reducer rejected lifecycle event") }
             }
             if preview {
+                if session.slots.count >= 1, let sid = session.spaceID {
+                    for r in attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? [] {
+                        let wid = paperi_window_id(r)
+                        if wid > 0 {
+                            AXUIElementSetMessagingTimeout(r, 0.15)
+                            if nativeIdentityValid(r, wid) { references[wid] = r }
+                        }
+                    }
+                    let evidence = recorder.tabEvidence(processID: pid)
+                    if let appReport = (evidence["applications"] as? [[String: Any]])?.first,
+                       let partitions = NativeTabTopology.inspect(
+                           appReport,
+                           managed: Set(session.slots.keys),
+                           destroyed: Set(destroyed),
+                           additions: Set(created).subtracting(destroyed),
+                           allowLazyUnvisited: true
+                       ),
+                       !partitions.isEmpty {
+                        let currentSlots = session.state.layout.columns.flatMap(\.slots)
+                        let currentSummary = Set(currentSlots.map { "\($0.members.sorted()):\($0.activeMember)" })
+                        let nextSummary = Set(partitions.map { "\($0.members.sorted()):\($0.active)" })
+                        if currentSummary != nextSummary,
+                           let activeWid = partitions.first?.active,
+                           let activeRef = references[activeWid],
+                           identityValid(activeRef, activeWid) {
+                            let admitted = Set(partitions.flatMap(\.members)).subtracting(session.slots.keys)
+                            if (try? session.reconcileTabs(partitions, destroyed: Set(destroyed), ownerPID: pid,
+                                                           spaceID: sid, classification: classification(activeRef, activeWid),
+                                                           ticket: ticket, admitted: admitted)) == true {
+                                let effects = apply()
+                                timeline.append(["event": "previewTabReconcile", "windowID": activeWid,
+                                    "slotCount": session.state.layout.columns.reduce(0) { $0 + $1.slots.count },
+                                    "writeCount": effects.writes, "confirmed": effects.confirmed])
+                            }
+                        }
+                    }
+                }
                 let rows = ((try? String(contentsOf: log, encoding: .utf8))?.split(separator: "\n") ?? [])
                     .compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
                 for row in rows {
@@ -328,7 +370,16 @@ extension Diagnostics {
                                    let idx = disp.userSpaces.firstIndex(of: currentSpace) {
                                     let dest = disp.userSpaces[(idx + 1) % disp.userSpaces.count]
                                     let res = SpaceTransfer.moveWindowViaMissionControl(windowID: command.windowID, expectedTitle: title, toSpace: dest)
-                                    intent = res["transferred"] as? Bool == true
+                                    if res["transferred"] as? Bool == true {
+                                        for r in attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? [] {
+                                            let wid = paperi_window_id(r)
+                                            if wid > 0 {
+                                                AXUIElementSetMessagingTimeout(r, 0.15)
+                                                if nativeIdentityValid(r, wid) { references[wid] = r }
+                                            }
+                                        }
+                                        intent = session.reassignSpace(dest, ticket: ticket)
+                                    } else { intent = false }
                                 } else { intent = false }
                             case .stop:
                                 intent = false

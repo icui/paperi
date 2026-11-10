@@ -206,5 +206,21 @@ struct NativeTabTopologyTests {
         #expect(try session.reconcileTabs(inferredMerge!, destroyed: [], ownerPID: 42, spaceID: 7,
                                           classification: eligible, ticket: ticket))
         #expect(session.state.layout.columns.count == 1 && session.slots[103] == slotID)
+
+        // When AppKit omits AXValue (-25200) on an unvisited tab button, lazySelectedControl still resolves the single true tab.
+        var missingUnvisitedValue = initialApp
+        var nodes = missingUnvisitedValue["nodes"] as! [[String: Any]]
+        nodes[3].removeValue(forKey: "AXValue"); nodes[3]["AXValueError"] = Int32(-25200)
+        nodes[4].removeValue(forKey: "AXValue"); nodes[4]["AXValueError"] = Int32(-25200)
+        missingUnvisitedValue["nodes"] = nodes
+        let emptyReport = SelectionAssociations().observe(scope: "test", groups: [
+            .init(group: 1, controls: [11, 12, 13], selected: nil, window: 101)
+        ])
+        missingUnvisitedValue["selectionAssociations"] = emptyReport.json
+        #expect(NativeTabMembership.inspect(missingUnvisitedValue, requireComplete: false) == [
+            .init(scope: "test", group: 1, members: [101], active: 101)
+        ])
+        #expect(NativeTabTopology.inspect(missingUnvisitedValue, managed: [101, 102, 103], destroyed: [],
+                                          allowLazyUnvisited: true) == [.init(members: [101, 102, 103], active: 101)])
     }
 }

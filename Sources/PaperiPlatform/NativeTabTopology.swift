@@ -47,7 +47,8 @@ enum NativeTabTopology {
                 let unresolvedControls: [Int]
             }
             let partialGroups: [PartialGroup] = groups.compactMap { group in
-                guard let selected = group.selected, group.controls.count > 1,
+                guard let selected = TabSelectionEvidence.lazySelectedControl(for: group, in: nodes),
+                      group.controls.count > 1,
                       allowed.contains(group.window), !grouped.contains(group.window),
                       let index = nodes.firstIndex(where: { $0["axIdentity"] as? Int == group.group }),
                       roots.contains(where: { root in
@@ -58,13 +59,16 @@ enum NativeTabTopology {
                       }),
                       let candidate = candidates.first(where: { $0["group"] as? Int == group.group }),
                       candidate["quarantined"] as? Bool == false,
-                      let rawBindings = candidate["bindings"] as? [[String: Any]], !rawBindings.isEmpty else { return nil }
+                      let rawBindings = candidate["bindings"] as? [[String: Any]] else { return nil }
                 var byControl: [Int: UInt32] = [:]
                 for binding in rawBindings {
                     guard let control = binding["control"] as? Int, group.controls.contains(control),
                           let wid = binding["windowID"] as? UInt32, wid > 0, allowed.contains(wid),
                           byControl[control] == nil, !Set(byControl.values).contains(wid) else { return nil }
                     byControl[control] = wid
+                }
+                if byControl[selected] == nil, !Set(byControl.values).contains(group.window) {
+                    byControl[selected] = group.window
                 }
                 guard byControl[selected] == group.window else { return nil }
                 return PartialGroup(group: group, byControl: byControl,

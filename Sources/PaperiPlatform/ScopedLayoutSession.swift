@@ -171,7 +171,12 @@ import PaperiCore
         var next = LifecycleState(layout: layout)
         if state.osFocusedWindow != nil || state.interactionSuppressed {
             let focusPolicy = state.interactionSuppressed ? WindowPolicy.classify(WindowFacts(bundleID: "unknown")) : classification
-            try next.reduce(.focus(windowID: state.osFocusedWindow, classification: focusPolicy))
+            let effectiveFocus = state.osFocusedWindow.flatMap { wid -> UInt32? in
+                guard !state.interactionSuppressed, let slotID = nextSlots[wid],
+                      let loc = next.layout.index(of: slotID) else { return wid }
+                return next.layout.columns[loc.column].slots[loc.row].activeMember
+            }
+            try next.reduce(.focus(windowID: effectiveFocus, classification: focusPolicy))
         }
         try next.validate()
         let changed = next.layout != state.layout
@@ -220,6 +225,13 @@ import PaperiCore
     @discardableResult func resizeFocused(by fraction: Double, frontmostPID: pid_t?, ticket: UUID) throws -> Bool {
         guard accepts(ticket), ownership == .applicationLocalFixture || frontmostPID == ownerPID else { return false }
         return try state.reduce(.resizeFocusedWidth(by: fraction, canvas: canvas))
+    }
+
+    @discardableResult func reassignSpace(_ newSpaceID: UInt64, ticket: UUID) -> Bool {
+        guard accepts(ticket), newSpaceID > 0, !slots.isEmpty else { return false }
+        self.spaceID = newSpaceID
+        echoes = FrameEchoes()
+        return true
     }
 
     @discardableResult func expect(windowID: UInt32, frame: Rect, now: Double, ticket: UUID) -> UInt64? {

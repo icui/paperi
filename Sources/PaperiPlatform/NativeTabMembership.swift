@@ -27,7 +27,8 @@ struct NativeTabMembership: Equatable {
         let capture = TabSelectionEvidence.inspect(nodes: nodes, roots: roots + observed, complete: true)
         guard let groups = capture.groups else { return [] }
         return groups.compactMap { group in
-            guard let selected = group.selected,
+            let resolvedSelected = requireComplete ? group.selected : TabSelectionEvidence.lazySelectedControl(for: group, in: nodes)
+            guard let selected = resolvedSelected,
                   group.controls.count > 1,
                   let index = nodes.firstIndex(where: { $0["axIdentity"] as? Int == group.group }),
                   // Native AppKit window tabs are direct children. Nested
@@ -42,7 +43,7 @@ struct NativeTabMembership: Equatable {
                   !requireComplete || (candidate["complete"] as? Bool == true),
                   candidate["quarantined"] as? Bool == false,
                   let bindings = candidate["bindings"] as? [[String: Any]],
-                  requireComplete ? (bindings.count == group.controls.count && bindings.count > 1) : !bindings.isEmpty else { return nil }
+                  !requireComplete || (bindings.count == group.controls.count && bindings.count > 1) else { return nil }
             var byControl: [Int: UInt32] = [:]
             for binding in bindings {
                 guard let control = binding["control"] as? Int, group.controls.contains(control),
@@ -50,8 +51,12 @@ struct NativeTabMembership: Equatable {
                       byControl[control] == nil else { return nil }
                 byControl[control] = window
             }
+            if !requireComplete, byControl[selected] == nil, !Set(byControl.values).contains(group.window) {
+                byControl[selected] = group.window
+            }
             let members = group.controls.compactMap { byControl[$0] }
-            guard Set(members).count == members.count,
+            guard !members.isEmpty,
+                  Set(members).count == members.count,
                   members.count == byControl.count,
                   byControl[selected] == group.window else { return nil }
             return Self(scope: scope, group: group.group, members: members, active: group.window)

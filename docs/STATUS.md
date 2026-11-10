@@ -1,10 +1,10 @@
 # Implementation status
 
-Current state and resume instructions only. The chronological increment log (increments 1–61) and the original initial-host validation are in [HISTORY.md](HISTORY.md); those entries describe evidence at their original dates.
+Current state and resume instructions only. The chronological increment log (increments 1–62) and the original initial-host validation are in [HISTORY.md](HISTORY.md); those entries describe evidence at their original dates.
 
 ## Current checkpoint: 2026-11-09
 
-Includes increment 61. Paperi is a diagnostic/prototype application: general user-window management is disabled, no global shortcuts are registered, and menu/snapshot/record stay inactive/read-only as applicable. Route: [ordinary-window path followed early by one native-tab app](../plan.md#agreed-implementation-order--2026-11-08), informed by the [pinned-source audit](REFERENCE-AUDIT.md).
+Includes increment 62. Paperi is a diagnostic/prototype application: general user-window management is disabled, no global shortcuts are registered, and menu/snapshot/record stay inactive/read-only as applicable. Route: [ordinary-window path followed early by one native-tab app](../plan.md#agreed-implementation-order--2026-11-08), informed by the [pinned-source audit](REFERENCE-AUDIT.md).
 
 ### Capability matrix
 
@@ -12,12 +12,12 @@ Includes increment 61. Paperi is a diagnostic/prototype application: general use
 | --- | --- | --- | --- |
 | Native create/close → reducer → confirmed AX effects | Verified, debug/release | Terminal verified (`check-terminal-tabs.rb --session`) | Owned test windows only |
 | Observed resize, width commands, focus suppression | Verified | Terminal measured cell-grid resize verified (`--resize`) | Per-app focus; panel focus suppresses commands without replay |
-| Interactive preview (`paperi preview-fixture`) | Verified, 60-second run (`probe-preview-input` passes 11/11) | — | Local AppKit controls/key equivalents (Narrower/Wider/Stack/Unstack/Next Space/Stop) only |
+| Interactive preview (`paperi preview-fixture`) | Verified (`probe-preview-input` passes 12/12: lazy tab merge/switch/detach, width grow/shrink, stack/unstack, stop/restore) | — | Local AppKit controls/key equivalents (Narrower/Wider/Stack/Unstack/Next Space/Stop) only |
 | Scoped session: frontmost ownership, stable slots, stop-ticket invalidation | Verified | Terminal session uses its guards | App/Space scoped; unknown membership is rejected |
 | Controlled stop and geometry restoration | Verified | Terminal position and width restored | Not crash or abrupt-exit recovery |
-| Native-tab membership & tab-bar-free singleton detection (external AX) | Verified (`requireComplete: true/false`) | Terminal and Finder verified (`check-finder-documents.rb --new-tab`, 7/7 checks); Preview untested | Active-first mode (`requireComplete: false`) admits and tiles the active tab immediately; strict mode (`requireComplete: true`) still requires visiting all tabs |
+| Native-tab membership & tab-bar-free singleton detection (external AX) | Verified (`requireComplete: true/false`, including `-25200` unvisited `AXValue`) | Terminal and Finder verified (`check-finder-documents.rb --new-tab`, 7/7 checks); Preview untested | Active-first mode (`requireComplete: false`) admits and tiles the active tab immediately; strict mode (`requireComplete: true`) still requires visiting all tabs |
 | Native-tab lifecycle: switch, detach, re-merge, new member, active/last close | Verified, debug/release (`allowLazyUnvisited: true/false`) | Terminal verified in sustained shared session (`--session`, 12/12 checks) | `allowLazyUnvisited: true` reconciles newly clicked background tabs in place and infers known merged windows without clicking inactive tabs |
-| Stacked-column native reconciliation & slurp/barf | Verified (`ScopedLayoutSession.reconcileTabs`, `NativeTabTopologyTests`) | Not attempted | Preserves column index, row order, width and stack weights across tab switch/detach/merge/growth/close |
+| Stacked-column native reconciliation & slurp/barf | Verified live (`paperi probe-preview-input`) and in unit tests (`ScopedLayoutSession.reconcileTabs`, `NativeTabTopologyTests`) | Not attempted | Preserves column index, row order, width and stack weights across tab switch/detach/merge/growth/close |
 | Popups/transients | App utility panel and sheet | OS, Control Center, cross-display untested | — |
 | Cross-Space container transfer | Verified end-to-end in debug/release (`paperi probe-space-session`, 12/12 checks; `PaperiSpaceProbe --backend mission-control`) | Not attempted | Direct SkyLight compatibility path fails; Mission Control app-grouping (`expose-group-apps = 1`) clusters multiple untabbed windows of one app on crowded Spaces |
 | Multi-display & multi-Space coordinator | Verified live across user Spaces (`paperi probe-space-session`) and in unit tests (`DisplaySpaceCoordinatorTests`, including negative-origin secondary monitor and 1-based Space numbering) | Single-display Spaces enumerated live | Physical multi-monitor live hardware not connected on this host ("Displays have separate Spaces" disabled) |
@@ -26,6 +26,10 @@ Includes increment 61. Paperi is a diagnostic/prototype application: general use
 
 ### Tests and evidence
 
+- Increment 62:
+  - Wired lazy native-tab reconciliation (`allowLazyUnvisited: true`), stacked-column `slurp`/`barf`, and post-transfer Space reassignment (`ScopedLayoutSession.reassignSpace`) into `paperi preview-fixture` (`LifecycleProbe.swift`, `Tools/AXFixture/main.swift`).
+  - Added `TabSelectionEvidence.lazySelectedControl(for:in:)` (`SelectionAssociations.swift`) so when macOS AppKit returns `AXError.failure (-25200)` for an unvisited background tab's `AXValue` while the active tab button reports `AXValue == true`, active-first admission and lazy topology reconciliation still resolve the active tab without clicking the background tab.
+  - Live `paperi probe-preview-input` (`captures/preview-input-increment62-pass.json`) passes all 12/12 checks (lazy tab merge before visiting the background tab, tab switch A→B→A, tab detach back to 2 columns, width `grow`/`shrink`, stacked-column `slurp`/`barf` with 6 confirmed AX writes each, and full frame restoration on stop). All 122 Swift regressions pass in debug and release.
 - Increment 61:
   - Added active-first tab admission (`NativeTabMembership.inspect(_:requireComplete: false)` and `ScopedLayoutSession.admitTabs(_:allowActiveOnly: true)` / `DisplaySpaceCoordinator.admitTabs(_:allowActiveOnly: true)`) and lazy unvisited tab reconciliation (`NativeTabTopology.inspect(_:allowLazyUnvisited: true)` and `DisplaySpaceCoordinator.reconcileTabs`), allowing tabbed windows with unvisited background tabs to be tiled immediately, switching representative in place when a background tab is clicked, and inferring already-managed windows merged into an unvisited tab. All 122 Swift regressions (32 core, 90 platform) pass in debug and release.
 - Increment 60:

@@ -47,8 +47,8 @@ import AppKit
                 "commandWindowID": window.windowNumber, "previewToken": token, "sequence": self.previewSequence])
         }
         let label = NSTextField(wrappingLabelWithString: "Disposable preview only\nClick a document to focus it.\n⌥⌘H / ⌥⌘L resize • ⌥⌘I / ⌥⌘O stack/unstack • ⌥⌘N next Space • Esc stops\nSupports native tabs (Window → Merge All Windows), stacked columns and cross-Space transfer.\nStop restores all surviving windows before closing.")
-        let row1 = NSStackView(); row1.orientation = .horizontal; row1.spacing = 8
-        let row2 = NSStackView(); row2.orientation = .horizontal; row2.spacing = 8
+        let row1 = NSStackView(); row1.orientation = .horizontal; row1.spacing = 8; row1.setAccessibilityRole(.group)
+        let row2 = NSStackView(); row2.orientation = .horizontal; row2.spacing = 8; row2.setAccessibilityRole(.group)
         for (idx, item) in [("Narrower", "shrink"), ("Wider", "grow"), ("Stack", "slurp"),
                             ("Unstack", "barf"), ("Next Space", "nextSpace"), ("Stop & Restore", "stop")].enumerated() {
             let button = PreviewButton(title: item.0, target: nil, action: nil)
@@ -57,7 +57,7 @@ import AppKit
             (idx < 3 ? row1 : row2).addArrangedSubview(button)
             if item.1 == "stop" { window.stopButton = button }
         }
-        let stack = NSStackView(views: [label, row1, row2]); stack.orientation = .vertical
+        let stack = NSStackView(views: [label, row1, row2]); stack.orientation = .vertical; stack.setAccessibilityRole(.group)
         stack.alignment = .leading; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
         window.contentView?.addSubview(stack)
         if let content = window.contentView {
@@ -127,17 +127,36 @@ import AppKit
             if preview {
                 if CommandLine.arguments.contains("--preview-input-test") {
                     after(5) { NSApp.activate(); self.tabWindows.first?.makeKeyAndOrderFront(nil) }
-                    for (second, key) in [(6.0, "l"), (7.0, "h")] {
+                    after(5.4) {
+                        guard self.tabWindows.count == 2 else { return }
+                        self.tabWindows[0].addTabbedWindow(self.tabWindows[1], ordered: .above)
+                    }
+                    after(6.0) {
+                        guard self.tabWindows.count == 2 else { return }
+                        self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[1]
+                    }
+                    after(6.6) {
+                        guard self.tabWindows.count == 2 else { return }
+                        self.tabWindows[0].tabGroup?.selectedWindow = self.tabWindows[0]
+                    }
+                    after(7.4) {
+                        guard self.tabWindows.count == 2 else { return }
+                        self.tabWindows[0].tabGroup?.removeWindow(self.tabWindows[1])
+                        self.tabWindows[1].orderFrontRegardless()
+                        self.tabWindows[1].makeKeyAndOrderFront(nil)
+                    }
+                    for (second, key, code) in [(8.5, "l", UInt16(37)), (9.4, "h", UInt16(4)),
+                                                (10.3, "i", UInt16(34)), (11.2, "o", UInt16(31))] {
                         after(second) {
-                            guard let window = self.tabWindows.first as? PreviewWindow,
+                            guard let window = self.tabWindows.last as? PreviewWindow,
                                   let event = NSEvent.keyEvent(with: .keyDown, location: .zero,
                                     modifierFlags: [.command, .option], timestamp: ProcessInfo.processInfo.systemUptime,
                                     windowNumber: window.windowNumber, context: nil, characters: key,
-                                    charactersIgnoringModifiers: key, isARepeat: false, keyCode: key == "l" ? 37 : 4) else { return }
+                                    charactersIgnoringModifiers: key, isARepeat: false, keyCode: code) else { return }
                             _ = window.performKeyEquivalent(with: event)
                         }
                     }
-                    after(8) { (self.tabWindows.first as? PreviewWindow)?.stopButton?.performClick(nil) }
+                    after(12.2) { (self.tabWindows.last as? PreviewWindow)?.stopButton?.performClick(nil) }
                 }
                 after(65) { NSApp.terminate(nil) }
             } else {

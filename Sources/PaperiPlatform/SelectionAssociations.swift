@@ -176,6 +176,22 @@ enum TabSelectionEvidence {
         inspect(nodes: nodes, roots: roots, complete: complete).groups
     }
 
+    static func lazySelectedControl(for group: TabSelection, in nodes: [[String: Any]]) -> Int? {
+        if let selected = group.selected { return selected }
+        guard let groupNode = nodes.first(where: { $0["axIdentity"] as? Int == group.group }),
+              let tabs = (groupNode["AXTabs"] as? [String: Any])?["nodes"] as? [Int],
+              tabs.count == group.controls.count else { return nil }
+        var trueControls: [Int] = []
+        for idx in tabs {
+            guard nodes.indices.contains(idx),
+                  let token = nodes[idx]["axIdentity"] as? Int else { return nil }
+            if (nodes[idx]["AXValue"] as? Bool) == true {
+                trueControls.append(token)
+            }
+        }
+        return trueControls.count == 1 ? trueControls[0] : nil
+    }
+
     /// Explains the first structural rejection and every unavailable selection.
     /// Node indices refer only to this capture, never to durable AX identities.
     static func inspect(nodes: [[String: Any]], roots: [Int], complete: Bool) -> Capture {
