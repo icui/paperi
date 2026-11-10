@@ -26,7 +26,7 @@ Manages windows of the allowlisted apps on each display's active Space as one ho
 
 Quit Hammerspoon (or stop PaperWM) first: a combination already registered by another process is reported in `hotkeyFailures` and left to that process.
 
-`--singleton-app ID` manages an app whose tabs are in-content (Chromium/Electron) as plain windows. Ctrl-C or `paperi msg stop` restores admission frames; after a crash, `paperi restore` uses the persisted journal. The responsible terminal/editor (or `dist/Paperi.app`) needs Accessibility access. See [docs/STATUS.md](docs/STATUS.md) for verified scope and limits.
+Run `paperi check-apps ID …` (read-only) to see what live mode would decide for each window. Windows without a tab bar are managed as plain windows automatically (verified: Slack, Beeper, Zed, System Settings). Only if a window shows a tab bar that is drawn by the app rather than macOS is it reported as `withheld`; `--singleton-app ID` then forces plain-window handling. Ctrl-C or `paperi msg stop` restores admission frames; after a crash, `paperi restore` uses the persisted journal. The responsible terminal/editor (or `dist/Paperi.app`) needs Accessibility access. See [docs/STATUS.md](docs/STATUS.md) for verified scope and limits.
 
 ## Disposable preview
 

@@ -696,6 +696,48 @@ import PaperiCore
         return report
     }
 
+    /// Read-only: what live mode would decide for each current-Space window of
+    /// the given apps (eligibility, singleton proof, native tab groups).
+    public static func checkApps(_ bundleIDs: [String]) -> [String: Any] {
+        let recorder = EventRecorder(workspaceCenter: NotificationCenter(),
+                                     runningApplications: { NSWorkspace.shared.runningApplications },
+                                     bundleIDs: Set(bundleIDs), observeWorkspaceEvents: false, emit: { _ in })
+        recorder.start(); defer { recorder.stop() }
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.3))
+        let probe = LiveManager(options: Options(bundleIDs: Set(bundleIDs)))
+        var levels: [UInt32: Int] = [:]
+        for row in CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? [] {
+            if let id = row[kCGWindowNumber as String] as? UInt32 { levels[id] = row[kCGWindowLayer as String] as? Int ?? 0 }
+        }
+        var apps: [[String: Any]] = []
+        for app in NSWorkspace.shared.runningApplications where app.bundleIdentifier.map(bundleIDs.contains) == true {
+            let evidence = (recorder.tabEvidence(processID: app.processIdentifier)["applications"] as? [[String: Any]])?.first ?? [:]
+            let singletons = Set(NativeTabMembership.inspectSingletons(evidence))
+            let groups = NativeTabMembership.inspect(evidence, requireComplete: false)
+            var tabGroupChildren: [UInt32: Bool] = [:]
+            if let nodes = evidence["nodes"] as? [[String: Any]], let roots = evidence["roots"] as? [Int] {
+                for root in roots where nodes.indices.contains(root) {
+                    guard let wid = nodes[root]["windowID"] as? UInt32,
+                          let children = (nodes[root]["AXChildren"] as? [String: Any])?["nodes"] as? [Int] else { continue }
+                    tabGroupChildren[wid] = children.contains { nodes.indices.contains($0) && nodes[$0]["AXRole"] as? String == "AXTabGroup" }
+                }
+            }
+            let windows = probe.survey(app, levels: levels).map { row -> [String: Any] in
+                let group = groups.first { $0.members.contains(row.windowID) }
+                let decision: String
+                if row.classification.eligibility != .tiled { decision = "skipped: \(row.classification.reason)" }
+                else if let group { decision = "tab container \(group.members)" }
+                else if singletons.contains(row.windowID) { decision = "managed as window" }
+                else { decision = "withheld: tab membership unknown (use --singleton-app if it has no native tabs)" }
+                return ["windowID": row.windowID, "title": Diagnostics.attribute(row.element, kAXTitleAttribute) as? String ?? "",
+                        "decision": decision, "directAXTabGroup": tabGroupChildren[row.windowID] as Any? ?? NSNull()]
+            }
+            apps.append(["bundleID": app.bundleIdentifier ?? "", "windowsError": evidence["windowsError"] ?? NSNull(),
+                         "truncated": evidence["truncated"] ?? NSNull(), "windows": windows])
+        }
+        return ["apps": apps, "note": "Current Space only; read-only"]
+    }
+
     public func status() -> [String: Any] {
         let displays = coordinator.displays.map { d -> [String: Any] in
             ["uuid": d.displayUUID, "canvas": [d.canvas.x, d.canvas.y, d.canvas.width, d.canvas.height],

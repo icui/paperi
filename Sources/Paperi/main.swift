@@ -107,6 +107,10 @@ case "msg":
     } catch {
         FileHandle.standardError.write(Data("paperi msg: \(error)\n".utf8)); exit(1)
     }
+case "check-apps":
+    guard args.count > 1 else { print("Usage: paperi check-apps bundle.id [...]"); exit(2) }
+    guard AXIsProcessTrusted() else { print("Accessibility access is required."); exit(1) }
+    Diagnostics.printJSON(LiveManager.checkApps(Array(args.dropFirst())))
 case "restore":
     guard AXIsProcessTrusted() else { print("Accessibility access is required."); exit(1) }
     Diagnostics.printJSON(LiveManager.restore())
@@ -245,6 +249,7 @@ default:
                                         Manage windows of allowlisted apps on each display's active Space
       paperi msg COMMAND                 focus|swap left|right|up|down, width|height +|- [fraction],
                                         center, split, slurp, barf, float, space N, retile, status, stop
+      paperi check-apps ID [...]         Read-only: what live mode would decide for each window
       paperi restore                     Restore frames journaled by a run that did not stop cleanly
       paperi snapshot [--include-titles]  Read-only JSON snapshot
       paperi tab-evidence identifier     Bounded read-only AX tab structure for one app
