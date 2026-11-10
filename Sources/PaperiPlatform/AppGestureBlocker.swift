@@ -6,9 +6,16 @@ import PaperiBridge
 /// gesture's fingers are down, so scrolling, pinching, rotating and page
 /// swipes in the focused app do not run alongside a strip swipe.
 ///
-/// A touch sequence is claimed once `fingers` contacts are down and stays
-/// claimed until every finger has lifted, so lifting fingers one at a time
-/// does not leak a two-finger scroll at the end of a swipe.
+/// A touch sequence is claimed once exactly `fingers` contacts are down and
+/// stays claimed until every finger has lifted, so lifting fingers one at a
+/// time does not leak a two-finger scroll at the end of a swipe.
+///
+/// A sequence that ever has more than `fingers` contacts belongs to the
+/// system (four-finger Spaces/Mission Control swipes, four- and five-finger
+/// pinches, delivered to the Dock as these same gesture events). It is
+/// released at once and left alone until every finger lifts. Fingers land a
+/// few milliseconds apart, so such a gesture briefly passes through exactly
+/// `fingers` contacts and is claimed for those frames.
 ///
 /// macOS still emits ordinary phased scroll events while three fingers move,
 /// and apps can also drive gestures from raw touch frames, so both are
@@ -42,6 +49,8 @@ struct AppGestureFilter: Equatable {
 
     let fingers: Int
     private(set) var claimed = false
+    /// More fingers than the swipe uses were down in this sequence.
+    private(set) var systemSequence = false
     /// Momentum from a scroll that was cut off by a claimed sequence.
     private(set) var swallowMomentum = false
     /// The app has seen a scroll begin without its end.
@@ -55,11 +64,15 @@ struct AppGestureFilter: Equatable {
     mutating func shouldDrop(_ input: Input) -> Bool {
         switch input {
         case .fingers(let down):
-            if down >= fingers {
-                if !claimed { swallowMomentum = true }
-                claimed = true
-            } else if down == 0 {
+            if down == 0 {
                 claimed = false
+                systemSequence = false
+            } else if down > fingers {
+                claimed = false
+                systemSequence = true
+            } else if down == fingers, !claimed, !systemSequence {
+                claimed = true
+                swallowMomentum = true
             }
             return false
 

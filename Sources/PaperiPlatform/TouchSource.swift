@@ -108,6 +108,10 @@ public final class EventTapTouchSource: TouchSource {
         // They do not mean the tracked fingers lifted.
         if phases.isEmpty { return nil }
         if phases.contains(.cancelled) { return .cancel }
+        // An extra finger makes this a system gesture (e.g. a four-finger
+        // Spaces swipe passing through three contacts): drop the swipe
+        // without a release decision.
+        if phases.count > fingers { return .cancel }
         if phases.count != fingers || phases.contains(.ended) { return .end(time: time) }
         return nil
     }
