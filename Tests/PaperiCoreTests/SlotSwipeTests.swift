@@ -1,0 +1,116 @@
+import Testing
+@testable import PaperiCore
+
+struct SlotSwipeTests {
+    @Test func rubberBandResistanceIsContinuousAndBounded() {
+        #expect(SlotSwipe.rubberBand(0) == 0)
+        #expect(SlotSwipe.rubberBand(0.5) == 0.5)
+        #expect(SlotSwipe.rubberBand(1.0) == 1.0)
+        #expect(SlotSwipe.rubberBand(-0.5) == -0.5)
+        #expect(SlotSwipe.rubberBand(-1.0) == -1.0)
+
+        let beyond1 = SlotSwipe.rubberBand(1.5)
+        let beyond2 = SlotSwipe.rubberBand(2.0)
+        #expect(beyond1 > 1.0 && beyond1 < 1.5)
+        #expect(beyond2 > beyond1 && beyond2 < 1.3)
+
+        let negBeyond1 = SlotSwipe.rubberBand(-1.5)
+        #expect(negBeyond1 == -beyond1)
+    }
+
+    @Test func verticalDominanceCancelsGesture() {
+        var swipe = SlotSwipe(config: .init(lockThreshold: 0.02))
+        swipe.begin(at: 0.0)
+        let action = swipe.move(dx: 0.005, dy: 0.025, at: 0.01)
+        #expect(action == .cancelled)
+        #expect(swipe.state == .cancelled)
+    }
+
+    @Test func smallMovementRemainsDetecting() {
+        var swipe = SlotSwipe(config: .init(lockThreshold: 0.02))
+        swipe.begin(at: 0.0)
+        let action = swipe.move(dx: 0.005, dy: 0.001, at: 0.01)
+        #expect(action == nil)
+        if case .detecting(let accX, let accY, _) = swipe.state {
+            #expect(accX == 0.005 && accY == 0.001)
+        } else {
+            Issue.record("Expected detecting state")
+        }
+    }
+
+    @Test func horizontalDominanceLocksAndStarts() {
+        var swipe = SlotSwipe(config: .init(travel: 0.2, lockThreshold: 0.02))
+        swipe.begin(at: 0.0)
+        // dx < 0 means moving finger left -> right neighbour comes in (positive progress)
+        let action = swipe.move(dx: -0.025, dy: 0.002, at: 0.01)
+        #expect(action == .started)
+        if case .active(let raw, let clamped, _, _) = swipe.state {
+            #expect(raw > 0)
+            #expect(clamped > 0)
+            #expect(abs(raw - (0.025 / 0.2)) < 0.001)
+        } else {
+            Issue.record("Expected active state")
+        }
+    }
+
+    @Test func invertConfigurationReversesSign() {
+        var normal = SlotSwipe(config: .init(travel: 0.2, lockThreshold: 0.01, invert: false))
+        var inverted = SlotSwipe(config: .init(travel: 0.2, lockThreshold: 0.01, invert: true))
+        normal.begin(at: 0.0)
+        inverted.begin(at: 0.0)
+        _ = normal.move(dx: -0.05, dy: 0, at: 0.01)
+        _ = inverted.move(dx: -0.05, dy: 0, at: 0.01)
+        if case .active(let rawN, _, _, _) = normal.state,
+           case .active(let rawI, _, _, _) = inverted.state {
+            #expect(rawN > 0)
+            #expect(rawI < 0)
+            #expect(rawN == -rawI)
+        } else {
+            Issue.record("Expected active states")
+        }
+    }
+
+    @Test func midGestureReversalCrossesZero() {
+        var swipe = SlotSwipe(config: .init(travel: 0.1, lockThreshold: 0.01))
+        swipe.begin(at: 0.0)
+        _ = swipe.move(dx: -0.03, dy: 0, at: 0.01) // progress +0.3
+        _ = swipe.move(dx: -0.03, dy: 0, at: 0.02) // progress +0.6
+        if case .active(let p1, _, _, _) = swipe.state { #expect(p1 > 0.5) }
+
+        // Reverse: move finger right
+        _ = swipe.move(dx: 0.06, dy: 0, at: 0.03) // progress ~ 0.0
+        _ = swipe.move(dx: 0.05, dy: 0, at: 0.04) // progress ~ -0.5
+        if case .active(let p2, _, _, _) = swipe.state { #expect(p2 < -0.4) }
+    }
+
+    @Test func commitDecisionOnThreshold() {
+        var swipe = SlotSwipe(config: .init(travel: 0.1, commitThreshold: 0.5, flickVelocity: 10.0, lockThreshold: 0.01))
+        swipe.begin(at: 0.0)
+        _ = swipe.move(dx: -0.06, dy: 0, at: 0.05) // progress = 0.6 >= 0.5
+        let decision = swipe.end(at: 0.1)
+        #expect(decision == .commit(.right))
+
+        var swipeLeft = SlotSwipe(config: .init(travel: 0.1, commitThreshold: 0.5, flickVelocity: 10.0, lockThreshold: 0.01))
+        swipeLeft.begin(at: 0.0)
+        _ = swipeLeft.move(dx: 0.06, dy: 0, at: 0.05) // progress = -0.6
+        let decisionLeft = swipeLeft.end(at: 0.1)
+        #expect(decisionLeft == .commit(.left))
+    }
+
+    @Test func snapBackDecisionBelowThreshold() {
+        var swipe = SlotSwipe(config: .init(travel: 0.1, commitThreshold: 0.5, flickVelocity: 10.0, lockThreshold: 0.01))
+        swipe.begin(at: 0.0)
+        _ = swipe.move(dx: -0.03, dy: 0, at: 0.05) // progress = 0.3 < 0.5
+        let decision = swipe.end(at: 0.1)
+        #expect(decision == .snapBack)
+    }
+
+    @Test func flickCommitsEvenBelowDistanceThreshold() {
+        var swipe = SlotSwipe(config: .init(travel: 0.2, commitThreshold: 0.5, flickVelocity: 1.5, lockThreshold: 0.01))
+        swipe.begin(at: 0.0)
+        // Move small distance (0.04 -> progress 0.2 < 0.5), but very fast (10 ms)
+        _ = swipe.move(dx: -0.04, dy: 0, at: 0.01)
+        let decision = swipe.end(at: 0.01)
+        #expect(decision == .commit(.right))
+    }
+}

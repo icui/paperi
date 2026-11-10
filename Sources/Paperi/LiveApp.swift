@@ -25,6 +25,7 @@ import PaperiPlatform
     private var resumeWhenStacked = true
     private var arrangementCheck: DispatchWorkItem?
     private var warning: NSPopover?
+    private var gestureWarningShown = false
 
     static func main(_ arguments: [String]) -> Never {
         let app = LiveApp()
@@ -115,6 +116,7 @@ import PaperiPlatform
         }
         updateTitle()
         if let unsupported { showWarning(unsupported) }
+        checkGestureSettings()
         Diagnostics.printJSON(["event": "paperiRunning",
                                "apps": manager.options.config.include?.sorted() ?? ["all regular apps"],
                                "socket": LiveCommandServer.defaultPath, "hotkeys": hotkeyReport.registered,
@@ -209,6 +211,55 @@ import PaperiPlatform
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:\(pane)")!)
     }
 
+    private func checkGestureSettings() {
+        guard manager.options.config.gesture.enabled else { return }
+        let conflicts = GestureConflict.checkLive(fingers: manager.options.config.gesture.fingers)
+        if !conflicts.isEmpty {
+            if !gestureWarningShown {
+                gestureWarningShown = true
+                showGestureWarning("Three-finger gestures are enabled in macOS System Settings, which conflicts with Paperi's trackpad swipe.\n\nDisable three-finger gestures in Trackpad Settings to use Paperi's swipe gesture.")
+            }
+        } else {
+            gestureWarningShown = false
+        }
+    }
+
+    private func showGestureWarning(_ text: String) {
+        guard let button = item?.button else { return }
+        warning?.close()
+        let width: CGFloat = 300
+        let title = NSTextField(wrappingLabelWithString: "Three-finger swipe disabled")
+        title.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        let body = NSTextField(wrappingLabelWithString: text)
+        for label in [title, body] {
+            label.preferredMaxLayoutWidth = width
+            label.widthAnchor.constraint(equalToConstant: width).isActive = true
+        }
+        let open = NSButton(title: "Open Trackpad Settings", target: self, action: #selector(openTrackpadSettings))
+        open.bezelStyle = .rounded; open.keyEquivalent = "\r"
+        let dismiss = NSButton(title: "Dismiss", target: self, action: #selector(dismissWarning))
+        dismiss.bezelStyle = .rounded
+        let buttons = NSStackView(views: [dismiss, open])
+        let stack = NSStackView(views: [title, body, buttons])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
+        let controller = NSViewController()
+        controller.view = stack
+        stack.layoutSubtreeIfNeeded()
+        controller.preferredContentSize = stack.fittingSize
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.behavior = .applicationDefined
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        warning = popover
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak popover] in popover?.close() }
+    }
+
+    @objc private func openTrackpadSettings() {
+        warning?.close()
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Trackpad-Settings.extension")!)
+    }
+
     private func log(_ message: String) {
         FileHandle.standardError.write(Data("[paperi] \(message)\n".utf8))
     }
@@ -243,6 +294,8 @@ import PaperiPlatform
         do { config = try loadConfig() } catch { return ["ok": false, "error": "invalid config: \(error)"] }
         var reply = manager.reload(config)
         registerHotkeys()
+        gestureWarningShown = false
+        checkGestureSettings()
         reply["hotkeys"] = hotkeyReport.registered
         reply["hotkeyConfigErrors"] = hotkeyReport.errors
         return reply
@@ -296,6 +349,12 @@ import PaperiPlatform
             let why = menu.addItem(withTitle: "Update display settings to resume", action: nil, keyEquivalent: "")
             why.toolTip = reason
             add(menu, "Open Display Settings…", #selector(openDisplaySettings))
+        }
+        let gestureConflicts = GestureConflict.checkLive(fingers: manager.options.config.gesture.fingers)
+        if manager.options.config.gesture.enabled && !gestureConflicts.isEmpty {
+            let item = menu.addItem(withTitle: "Three-finger swipe disabled: system conflict", action: #selector(openTrackpadSettings), keyEquivalent: "")
+            item.toolTip = gestureConflicts.joined(separator: "\n")
+            add(menu, "Open Trackpad Settings…", #selector(openTrackpadSettings))
         }
         menu.addItem(.separator())
         if arrangementPause == nil { add(menu, manager.paused ? "Resume" : "Pause", #selector(togglePause)) }
@@ -390,6 +449,10 @@ import PaperiPlatform
         } else {
             value(menu, "Shortcuts: off (--no-hotkeys)", copy: nil, tip: nil)
         }
+        let gestureStatus = manager.options.config.gesture.enabled
+            ? "\(manager.options.config.gesture.fingers) fingers (\(manager.options.config.gesture.travel) travel)"
+            : "off"
+        value(menu, "Trackpad swipe: \(gestureStatus)", copy: nil, tip: "Horizontal slot swipe")
         value(menu, "Restore windows on stop: \(manager.options.restoreOnStop ? "on" : "off (--no-restore)")", copy: nil, tip: nil)
         value(menu, "Verbose logging: \(verbose ? "on (--verbose)" : "off")", copy: nil, tip: nil)
         menu.addItem(.separator())

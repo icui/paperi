@@ -17,6 +17,25 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public init(app: String, titleContains: String? = nil) { self.app = app; self.titleContains = titleContains }
     }
 
+    public struct GestureConfig: Codable, Equatable, Sendable {
+        public var enabled: Bool
+        public var fingers: Int
+        public var travel: Double
+        public var commitThreshold: Double
+        public var flickVelocity: Double
+        public var invert: Bool
+
+        public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.25,
+                    commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false) {
+            self.enabled = enabled
+            self.fingers = fingers
+            self.travel = travel
+            self.commitThreshold = commitThreshold
+            self.flickVelocity = flickVelocity
+            self.invert = invert
+        }
+    }
+
     /// When set, only these bundle IDs are managed (the `--app` flag).
     public var include: [String]?
     /// Bundle IDs never managed, in addition to `defaultExclude`.
@@ -43,15 +62,22 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public var edgeHintColor: HexColor { edgeHint.flatMap(HexColor.init) ?? HexColor(Self.defaultEdgeHint)! }
     public static let defaultSwapHighlight = "#0A84FF4D"
     public var swapHighlightColor: HexColor { swapHighlight.flatMap(HexColor.init) ?? HexColor(Self.defaultSwapHighlight)! }
+    /// Trackpad swipe gesture configuration.
+    public var gesture: GestureConfig
 
     public init(include: [String]? = nil, exclude: [String] = [], singleton: [String] = [],
-                float: [FloatRule] = [], tile: [FloatRule] = [], gap: Double? = nil, outerGap: Double? = nil) {
+                float: [FloatRule] = [], tile: [FloatRule] = [], gap: Double? = nil, outerGap: Double? = nil,
+                gesture: GestureConfig? = nil) {
         self.include = include; self.exclude = exclude; self.singleton = singleton
         self.float = float; self.tile = tile; self.gap = gap; self.outerGap = outerGap
         self.hotkeys = [:]
+        self.gesture = gesture ?? GestureConfig()
     }
 
-    enum CodingKeys: String, CodingKey { case include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight, edgeHint, focusScrollDuration }
+    enum CodingKeys: String, CodingKey {
+        case include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight, edgeHint, focusScrollDuration, gesture
+    }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         include = try c.decodeIfPresent([String].self, forKey: .include)
@@ -76,6 +102,23 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             throw DecodingError.dataCorruptedError(forKey: .swapHighlight, in: c,
                 debugDescription: "expected #RRGGBB or #RRGGBBAA, got \(swapHighlight)")
         }
+        if let g = try c.decodeIfPresent(GestureConfig.self, forKey: .gesture) {
+            if g.fingers != 3 && g.fingers != 4 {
+                throw DecodingError.dataCorruptedError(forKey: .gesture, in: c, debugDescription: "expected 3 or 4 fingers")
+            }
+            if !g.travel.isFinite || g.travel <= 0 || g.travel > 1 {
+                throw DecodingError.dataCorruptedError(forKey: .gesture, in: c, debugDescription: "expected travel in (0, 1]")
+            }
+            if !g.commitThreshold.isFinite || g.commitThreshold <= 0 || g.commitThreshold > 1 {
+                throw DecodingError.dataCorruptedError(forKey: .gesture, in: c, debugDescription: "expected commitThreshold in (0, 1]")
+            }
+            if !g.flickVelocity.isFinite || g.flickVelocity <= 0 {
+                throw DecodingError.dataCorruptedError(forKey: .gesture, in: c, debugDescription: "expected positive flickVelocity")
+            }
+            gesture = g
+        } else {
+            gesture = GestureConfig()
+        }
     }
 
     /// System UI and agents whose windows must never be tiled, plus Paperi.
@@ -99,6 +142,14 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "outerGap": 8,
       "swapHighlight": "#0A84FF4D",
       "edgeHint": "#0A84FF",
+      "gesture": {
+        "enabled": true,
+        "fingers": 3,
+        "travel": 0.25,
+        "commitThreshold": 0.5,
+        "flickVelocity": 1.5,
+        "invert": false
+      },
       "hotkeys": {
         "alt-cmd-j": "focus left",
         "alt-cmd-k": "focus right"

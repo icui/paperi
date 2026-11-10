@@ -133,8 +133,12 @@ import PaperiCore
             MainActor.assumeIsolated { self?.cancelMotion(); self?.motionFrames.removeAll(); self?.forceApply = true; self?.scheduleRefresh() }
         })
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
+            MainActor.assumeIsolated {
+                self?.checkGestureSettings()
+                self?.refresh()
+            }
         }
+        updateTouchSource()
         refresh()
     }
 
@@ -172,6 +176,7 @@ import PaperiCore
         options.config = config
         if wasPaused { paused = true; return ["ok": true, "paused": true] }
         do { try start(resuming: true) } catch { return ["ok": false, "error": "\(error)"] }
+        updateTouchSource()
         return ["ok": true]
     }
 
@@ -186,6 +191,8 @@ import PaperiCore
         }
         guard running else { return ["stopped": false] }
         cancelMotion(); motionFrames.removeAll()
+        touchSource?.stop(); touchSource = nil
+        slotSwipe?.cancel(); slotSwipe = nil
         running = false
         timer?.invalidate(); timer = nil; endDrag()
         for token in workspaceTokens {
@@ -968,6 +975,9 @@ import PaperiCore
     private var swipeSimulation: Timer?
     private var swipeMetrics: [String: Any] = [:]
     private var swipeBegan = 0.0
+    private var touchSource: TouchSource?
+    private var slotSwipe: SlotSwipe?
+    private var lastGestureConflicts: [String]?
     /// Travel past the strip's ends, in points, at full progress.
     private static let swipeEdgeResistance = 40.0
 
@@ -977,15 +987,121 @@ import PaperiCore
         swipeGuard?.invalidate(); swipeGuard = nil
         swipeSimulation?.invalidate(); swipeSimulation = nil
         swipeTask?.cancel(); swipeTask = nil
+        slotSwipe?.cancel(); slotSwipe = nil
         guard let state = swipe else { return }
         state.overlay.hide()
         swipe = nil
         swipeMetrics["state"] = "cancelled"
     }
 
+    private func pointerContext() -> (session: ScopedLayoutSession, space: UInt64, pid: pid_t, window: UInt32)? {
+        let mouseLoc = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLoc) }) else { return nil }
+        let screenID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+        let uuid = CGDisplayCreateUUIDFromDisplayID(screenID).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? "Main"
+        guard let display = coordinator.displays.first(where: { $0.displayUUID == uuid }),
+              let space = display.activeSpaceID,
+              let session = coordinator.sessions[space],
+              let focused = session.state.layout.focused,
+              let loc = session.state.layout.index(of: focused) else { return nil }
+        let wid = session.state.layout.columns[loc.column].slots[loc.row].activeMember
+        guard let pid = pidForWindow[wid] else { return nil }
+        return (session, space, pid, wid)
+    }
+
+    func updateTouchSource() {
+        touchSource?.stop()
+        touchSource = nil
+        guard running, !paused, options.config.gesture.enabled else { return }
+        let conflicts = GestureConflict.checkLive(fingers: options.config.gesture.fingers)
+        guard conflicts.isEmpty else {
+            if options.verbose { log("trackpad swipe disabled due to conflicts: \(conflicts.joined(separator: ", "))") }
+            return
+        }
+        let source = EventTapTouchSource(fingers: options.config.gesture.fingers, verbose: options.verbose)
+        source.onEvent = { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.handleTouchEvent(event)
+            }
+        }
+        source.start()
+        touchSource = source
+    }
+
+    func checkGestureSettings() {
+        let conflicts = GestureConflict.checkLive(fingers: options.config.gesture.fingers)
+        if conflicts != lastGestureConflicts {
+            lastGestureConflicts = conflicts
+            updateTouchSource()
+        }
+    }
+
+    private func handleTouchEvent(_ event: TouchEvent) {
+        guard running, !paused, DisplayArrangement.currentProblem() == nil else {
+            cancelSwipe()
+            slotSwipe?.cancel()
+            slotSwipe = nil
+            return
+        }
+        switch event {
+        case .begin(let time):
+            let cfg = SlotSwipe.Configuration(
+                travel: options.config.gesture.travel,
+                commitThreshold: options.config.gesture.commitThreshold,
+                flickVelocity: options.config.gesture.flickVelocity,
+                invert: options.config.gesture.invert
+            )
+            var swipeReducer = SlotSwipe(config: cfg)
+            swipeReducer.begin(at: time)
+            slotSwipe = swipeReducer
+
+        case .move(let dx, let dy, let time):
+            guard var swipeReducer = slotSwipe else { return }
+            if let action = swipeReducer.move(dx: dx, dy: dy, at: time) {
+                switch action {
+                case .started:
+                    let res = beginSwipe()
+                    if res["ok"] as? Bool != true {
+                        swipeReducer.cancel()
+                        slotSwipe = nil
+                        return
+                    }
+                    if case .active(_, let progress, _, _) = swipeReducer.state {
+                        updateSwipe(progress)
+                    }
+                case .updated(let progress):
+                    updateSwipe(progress)
+                case .cancelled:
+                    cancelSwipe()
+                    slotSwipe = nil
+                    return
+                case .finished:
+                    break
+                }
+            }
+            slotSwipe = swipeReducer
+
+        case .end(let time):
+            guard var swipeReducer = slotSwipe else { return }
+            let decision = swipeReducer.end(at: time)
+            slotSwipe = nil
+            switch decision {
+            case .commit:
+                endSwipe(commit: true)
+            case .snapBack:
+                endSwipe(commit: false)
+            }
+
+        case .cancel:
+            cancelSwipe()
+            slotSwipe?.cancel()
+            slotSwipe = nil
+        }
+    }
+
     /// Captures the strip of the focused window's Space and shows it frozen
     /// in place. Updates and a release may arrive before the capture finishes.
-    @discardableResult func beginSwipe() -> [String: Any] {
+    @discardableResult func beginSwipe(isSimulation: Bool = false) -> [String: Any] {
         cancelMotion(); motionFrames.removeAll()
         func fail(_ reason: String) -> [String: Any] {
             swipeMetrics = ["state": "refused", "reason": reason]
@@ -993,7 +1109,12 @@ import PaperiCore
         }
         guard running, AXIsProcessTrusted(), NSEvent.pressedMouseButtons == 0, drag == nil else { return fail("mouse interaction") }
         guard DisplayArrangement.currentProblem() == nil else { return fail("display arrangement") }
-        guard let ctx = focusedContext() else { return fail("no managed window focused") }
+        if !isSimulation {
+            guard options.config.gesture.enabled else { return fail("gesture disabled") }
+            let conflicts = GestureConflict.checkLive(fingers: options.config.gesture.fingers)
+            guard conflicts.isEmpty else { return fail("blocked by system gestures: \(conflicts.joined(separator: ", "))") }
+        }
+        guard let ctx = pointerContext() ?? focusedContext() else { return fail("no managed window focused") }
         let session = ctx.session, space = ctx.space
         guard coordinator.display(forSpace: space)?.activeSpaceID == space, !session.state.interactionSuppressed,
               let current = try? session.state.layout.placements(in: session.canvas, gap: options.gap),
@@ -1070,7 +1191,7 @@ import PaperiCore
     /// Latest finger progress; images move immediately (no queue, no AX).
     func updateSwipe(_ progress: Double) {
         guard var state = swipe, state.released == nil, progress.isFinite else { return }
-        state.progress = min(1, max(-1, progress))
+        state.progress = min(1.3, max(-1.3, progress))
         swipe = state
         if state.ready { state.overlay.place(swipeFrames(state)) }
     }
@@ -1082,7 +1203,14 @@ import PaperiCore
             let shift = -Self.swipeEdgeResistance * state.progress
             return state.starts.mapValues { var frame = $0; frame.x += shift; return frame }
         }
-        return LiveReconciliation.interpolate(state.starts, ends, progress: abs(state.progress))
+        let absP = abs(state.progress)
+        if absP <= 1.0 {
+            return LiveReconciliation.interpolate(state.starts, ends, progress: absP)
+        } else {
+            let base = LiveReconciliation.interpolate(state.starts, ends, progress: 1.0)
+            let extraShift = (direction == .left ? 1.0 : -1.0) * (absP - 1.0) * Self.swipeEdgeResistance
+            return base.mapValues { var frame = $0; frame.x += extraShift; return frame }
+        }
     }
 
     /// Release. A commit gives the result of `focus left/right` towards the
@@ -1172,7 +1300,7 @@ import PaperiCore
     /// Fingers move `travel` (fraction of one slot) over 0.25 s, then lift;
     /// at least half a slot commits.
     private func simulateSwipe(_ direction: Direction, travel: Double) -> [String: Any] {
-        let reply = beginSwipe()
+        let reply = beginSwipe(isSimulation: true)
         guard reply["ok"] as? Bool == true else { return reply }
         let sign = direction == .left ? -1.0 : 1.0
         let started = ProcessInfo.processInfo.systemUptime
@@ -1349,7 +1477,13 @@ import PaperiCore
         case "pause": return pause()
         case "resume": return resume()
         case "stop": return ["ok": true, "stop": true]
-        case "status" where paused: return ["ok": true, "paused": true]
+        case "status" where paused:
+            let gestureConflicts = GestureConflict.checkLive(fingers: options.config.gesture.fingers)
+            let gestureStatus: [String: Any] = [
+                "enabled": false,
+                "blockedBy": gestureConflicts
+            ]
+            return ["ok": true, "paused": true, "gesture": gestureStatus]
         default: break
         }
         guard running else { return ["ok": false, "error": paused ? "paused (paperi msg resume)" : "not running"] }
@@ -1536,8 +1670,15 @@ import PaperiCore
                  }]
              }]
         }
+        let gestureConflicts = GestureConflict.checkLive(fingers: options.config.gesture.fingers)
+        let gestureEnabled = options.config.gesture.enabled && gestureConflicts.isEmpty
+        let gestureStatus: [String: Any] = [
+            "enabled": gestureEnabled,
+            "blockedBy": gestureConflicts
+        ]
         return ["ok": true, "paused": false, "apps": options.config.include?.sorted() ?? ["all regular apps"], "displays": displays, "sessions": sessions,
                 "floating": userFloating.sorted(), "journaled": journal.count, "lastRefreshMS": lastRefreshMS,
+                "gesture": gestureStatus,
                 "performance": ["phaseMS": phaseMS, "axWriteCalls": axWriteCalls, "axWriteMS": axWriteMS,
                     "commandToFirstWriteMS": firstWriteMS as Any? ?? NSNull(),
                     "commandToFinalWriteMS": finalWriteMS as Any? ?? NSNull(),

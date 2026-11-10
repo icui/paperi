@@ -31,6 +31,38 @@ struct LiveConfigTests {
         }
     }
 
+    @Test func gestureConfiguration() throws {
+        let defaults = try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8))
+        #expect(defaults.gesture.enabled == true)
+        #expect(defaults.gesture.fingers == 3)
+        #expect(defaults.gesture.travel == 0.25)
+        #expect(defaults.gesture.commitThreshold == 0.5)
+        #expect(defaults.gesture.flickVelocity == 1.5)
+        #expect(defaults.gesture.invert == false)
+
+        let json = #"{"gesture":{"enabled":false,"fingers":4,"travel":0.3,"commitThreshold":0.6,"flickVelocity":2.0,"invert":true}}"#
+        let custom = try JSONDecoder().decode(LiveConfig.self, from: Data(json.utf8))
+        #expect(custom.gesture.enabled == false)
+        #expect(custom.gesture.fingers == 4)
+        #expect(custom.gesture.travel == 0.3)
+        #expect(custom.gesture.commitThreshold == 0.6)
+        #expect(custom.gesture.flickVelocity == 2.0)
+        #expect(custom.gesture.invert == true)
+
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"fingers":2}}"#.utf8))
+        }
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"travel":0}}"#.utf8))
+        }
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"commitThreshold":-0.5}}"#.utf8))
+        }
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"flickVelocity":0}}"#.utf8))
+        }
+    }
+
     @Test func defaultsManageRegularAppsExceptSystemUI() {
         let config = LiveConfig()
         #expect(config.manages(bundleID: "com.tinyspeck.slackmacgap", regular: true))
