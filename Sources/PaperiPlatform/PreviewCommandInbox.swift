@@ -3,7 +3,7 @@ import Foundation
 /// Commands come only from the freshly launched preview and its known windows.
 /// A per-run token and monotonic sequence reject stale/replayed log records.
 struct PreviewCommandInbox {
-    enum Action: String { case grow, shrink, slurp, barf, nextSpace, stop }
+    enum Action: String { case grow, shrink, slurp, barf, stop }
     struct Command { let action: Action; let windowID: UInt32; let source: String }
     let pid: pid_t
     let token: String

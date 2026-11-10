@@ -23,7 +23,7 @@ public enum HotKeyBindings {
         ("alt-cmd-l", "width +"), ("alt-cmd-h", "width -"),
         ("alt-cmd-u", "height +"), ("alt-cmd-n", "height -"),
         ("alt-cmd-i", "slurp"), ("alt-cmd-o", "barf"),
-    ] + (1...9).map { ("alt-cmd-\($0)", "space \($0)") }
+    ]
 
     public static var defaults: [Binding] { resolve(overrides: [:]).bindings }
 
@@ -125,8 +125,6 @@ public enum LiveCommand {
             guard (1...2).contains(rest.count), rest[0] == "+" || rest[0] == "-" else { return "usage: \(verb) +|- [fraction]" }
             if rest.count == 2 { guard let f = Double(rest[1]), f > 0, f <= 1 else { return "fraction must be in (0, 1]" } }
             return nil
-        case "space":
-            return rest.count == 1 && Int(rest[0]).map { $0 >= 1 } == true ? nil : "usage: space N"
         default:
             return "unknown command \(verb)"
         }

@@ -58,11 +58,6 @@ case "mission-control-move":
     let report = Diagnostics.missionControlMove(windowID: wid, toSpace: space)
     Diagnostics.printJSON(report)
     exit(report["transferred"] as? Bool == true ? 0 : 1)
-case "probe-space-session":
-    guard args.count == 1 else { print("Usage: paperi probe-space-session"); exit(2) }
-    let report = Diagnostics.probeSpaceSession()
-    Diagnostics.printJSON(report)
-    exit(report["result"] as? String == "passed" ? 0 : (report["result"] as? String == "unsupported" ? 2 : 1))
 case "probe-terminal-session":
     guard args.count == 2 else { print("Usage: paperi probe-terminal-session testTag"); exit(2) }
     let report = Diagnostics.probeTerminalSession(tag: args[1])
@@ -192,7 +187,7 @@ default:
       paperi run [--app ID ...] [--singleton-app ID ...] [-v] [--no-restore] [--no-hotkeys]
                                         Manage all regular apps (or only --app ones) on each display's active Space
       paperi msg COMMAND                 focus|swap left|right|up|down, width|height +|- [fraction],
-                                        center, split, slurp, barf, float, space N, retile, status,
+                                        center, split, slurp, barf, float, retile, status,
                                         pause, resume, reload, stop
       paperi check-apps [ID ...]         Read-only: what live mode would decide for each on-screen window
       paperi login on|off|status         Start live mode at login (LaunchAgent; prefers ~/Applications/Paperi.app)
@@ -213,7 +208,6 @@ default:
       paperi probe-resize                Adopt a fixture-originated resize while tracking expected AX echoes
       paperi probe-interaction           Exercise focused resize commands, panel suppression and recovery on a new fixture
       paperi probe-stop                  Stop with two live fixture windows, restore original frames and reject stale work
-      paperi probe-space-session         Move a disposable container across Spaces via Mission Control + DisplaySpaceCoordinator
       paperi mission-control-move WID SPACE Drag a real window onto a Space in Mission Control (any display)
       paperi preview-fixture             Interactive disposable preview; local controls, Stop & Restore, 60-second limit
       paperi probe-preview-input         Test AppKit key-equivalent/button input on the disposable preview

@@ -131,12 +131,6 @@ public struct DisplaySpaceTopology: Equatable, Sendable {
         displays.first { $0.spaces.contains { $0.id == spaceID } }
     }
 
-    func numberedUserSpace(_ number: Int) -> UInt64? {
-        guard number >= 1 else { return nil }
-        let ordered = displays.flatMap(\.userSpaces)
-        return ordered.indices.contains(number - 1) ? ordered[number - 1] : nil
-    }
-
     @discardableResult func insertSingleton(windowID: UInt32, ownerPID: pid_t, spaceID: UInt64,
                                             classification: Classification, width: Double? = nil) throws -> Bool {
         guard running, spaceForWindow[windowID] == nil, let session = sessions[spaceID] else { return false }

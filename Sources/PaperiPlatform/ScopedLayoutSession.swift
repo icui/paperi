@@ -278,13 +278,6 @@ import PaperiCore
         return try state.reduce(.resizeFocusedWidth(by: fraction, canvas: canvas))
     }
 
-    @discardableResult func reassignSpace(_ newSpaceID: UInt64, ticket: UUID) -> Bool {
-        guard accepts(ticket), newSpaceID > 0, !slots.isEmpty else { return false }
-        self.spaceID = newSpaceID
-        echoes = FrameEchoes()
-        return true
-    }
-
     @discardableResult func expect(windowID: UInt32, frame: Rect, now: Double, ticket: UUID) -> UInt64? {
         guard accepts(ticket), slots[windowID] != nil else { return nil }
         return echoes.expect(windowID: windowID, frame: frame, now: now)

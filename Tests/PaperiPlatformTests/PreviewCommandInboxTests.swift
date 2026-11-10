@@ -16,8 +16,9 @@ struct PreviewCommandInboxTests {
         #expect(inbox.consume(slurp, knownWindows: [1])?.action == .slurp)
         var barf = row(4); barf["command"] = "barf"; barf["source"] = "button"
         #expect(inbox.consume(barf, knownWindows: [1])?.action == .barf)
+        // Space transfers were removed from the preview; the command is unknown now.
         var nextSpace = row(5); nextSpace["command"] = "nextSpace"; nextSpace["source"] = "button"
-        #expect(inbox.consume(nextSpace, knownWindows: [1])?.action == .nextSpace)
+        #expect(inbox.consume(nextSpace, knownWindows: [1]) == nil)
     }
     @Test func foreignStaleUnknownAndMalformedInputsDoNotAdvanceInbox() {
         var inbox = PreviewCommandInbox(pid: 42, token: "current")

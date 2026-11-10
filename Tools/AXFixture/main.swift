@@ -11,7 +11,7 @@ import AppKit
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
         if modifiers == [.command, .option], let key = event.charactersIgnoringModifiers?.lowercased(),
-           let action = ["h": "shrink", "l": "grow", "i": "slurp", "o": "barf", "n": "nextSpace"][key] {
+           let action = ["h": "shrink", "l": "grow", "i": "slurp", "o": "barf"][key] {
             request?(action, "keyEquivalent"); return true
         }
         return super.performKeyEquivalent(with: event)
@@ -46,11 +46,11 @@ import AppKit
             self.log("previewCommand", extra: ["command": action, "source": source,
                 "commandWindowID": window.windowNumber, "previewToken": token, "sequence": self.previewSequence])
         }
-        let label = NSTextField(wrappingLabelWithString: "Disposable preview only\nClick a document to focus it.\n⌥⌘H / ⌥⌘L resize • ⌥⌘I / ⌥⌘O stack/unstack • ⌥⌘N next Space • Esc stops\nSupports native tabs (Window → Merge All Windows), stacked columns and cross-Space transfer.\nStop restores all surviving windows before closing.")
+        let label = NSTextField(wrappingLabelWithString: "Disposable preview only\nClick a document to focus it.\n⌥⌘H / ⌥⌘L resize • ⌥⌘I / ⌥⌘O stack/unstack • Esc stops\nSupports native tabs (Window → Merge All Windows), and stacked columns.\nStop restores all surviving windows before closing.")
         let row1 = NSStackView(); row1.orientation = .horizontal; row1.spacing = 8; row1.setAccessibilityRole(.group)
         let row2 = NSStackView(); row2.orientation = .horizontal; row2.spacing = 8; row2.setAccessibilityRole(.group)
         for (idx, item) in [("Narrower", "shrink"), ("Wider", "grow"), ("Stack", "slurp"),
-                            ("Unstack", "barf"), ("Next Space", "nextSpace"), ("Stop & Restore", "stop")].enumerated() {
+                            ("Unstack", "barf"), ("Stop & Restore", "stop")].enumerated() {
             let button = PreviewButton(title: item.0, target: nil, action: nil)
             button.target = button; button.action = #selector(PreviewButton.trigger)
             button.invoke = { [weak window] in window?.request?(item.1, "button") }

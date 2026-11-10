@@ -889,9 +889,6 @@ import PaperiCore
             return layoutCommand { layout, _ in layout.barf() }
         case "float":
             return toggleFloat()
-        case "space":
-            guard let n = rest.first.flatMap(Int.init) else { return fail("usage: space N") }
-            return moveToSpace(n)
         default:
             return fail("unknown command \(verb)")
         }
@@ -959,54 +956,6 @@ import PaperiCore
         userFloating.formUnion(members)
         refresh()
         return ["ok": !members.isEmpty, "floating": true, "members": members]
-    }
-
-    private func moveToSpace(_ number: Int) -> [String: Any] {
-        guard let ctx = focusedContext() else { return ["ok": false, "error": "no managed focused window"] }
-        guard let destination = coordinator.numberedUserSpace(number) else { return ["ok": false, "error": "no user Space \(number)"] }
-        guard destination != ctx.space else { return ["ok": true, "changed": false] }
-        guard let element = references[ctx.window],
-              let title = Diagnostics.attribute(element, kAXTitleAttribute) as? String, !title.isEmpty else {
-            return ["ok": false, "error": "Mission Control transfer needs a titled window"]
-        }
-        guard let destinationDisplay = coordinator.display(forSpace: destination),
-              let sourceDisplay = coordinator.display(forSpace: ctx.space) else { return ["ok": false, "error": "unknown display"] }
-        var report: [String: Any] = ["ok": false, "windowID": ctx.window, "from": ctx.space, "to": destination]
-        if destinationDisplay.displayUUID != sourceDisplay.displayUUID {
-            // Cross-display: place the window on the destination display's
-            // canvas; the window server moves it to that display's active Space.
-            let canvas = destinationDisplay.canvas
-            let width = min(canvas.width, Diagnostics.frame(element)?.width ?? canvas.width / 2)
-            _ = write(Rect(x: canvas.x + (canvas.width - width) / 2, y: canvas.y, width: width, height: canvas.height), to: element)
-            var landed: UInt64?
-            for _ in 0..<20 {
-                RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
-                landed = Self.windowSpace(ctx.window)
-                if landed == destinationDisplay.activeSpaceID { break }
-            }
-            report["displayMove"] = landed.map { $0 as Any } ?? NSNull()
-            if landed != destination {
-                guard landed == destinationDisplay.activeSpaceID else {
-                    report["error"] = "window did not reach destination display"; return report
-                }
-                _ = try? coordinator.transferContainer(containing: ctx.window, to: landed!, classification: Self.tiled)
-            }
-        }
-        if Self.windowSpace(ctx.window) != destination {
-            let origin = displayBounds()[destinationDisplay.displayUUID]?.origin ?? .zero
-            let result = SpaceTransfer.moveWindowViaMissionControl(windowID: ctx.window, expectedTitle: title,
-                                                                   toSpace: destination, screenOrigin: origin)
-            report["missionControl"] = result
-            guard result["transferred"] as? Bool == true else {
-                report["error"] = result["failure"] ?? "Mission Control transfer unconfirmed"; return report
-            }
-        }
-        _ = try? coordinator.transferContainer(containing: ctx.window, to: destination, classification: Self.tiled)
-        forceApply = true
-        refresh()
-        _ = raise(ctx.window)
-        report["ok"] = coordinator.spaceForWindow[ctx.window] == destination
-        return report
     }
 
     /// Read-only: what live mode would decide for each current-Space window of

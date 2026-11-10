@@ -3,7 +3,7 @@ import PaperiCore
 @testable import PaperiPlatform
 
 struct DisplaySpaceCoordinatorTests {
-    @MainActor @Test func multiDisplayCoordinatorSeparatesSpacesNumbersThemAndTransfersTabContainersAtomically() throws {
+    @MainActor @Test func multiDisplayCoordinatorSeparatesSpacesAndTransfersTabContainersAtomically() throws {
         let primary = DisplaySpaceTopology(displayUUID: "D1", canvas: Rect(x: 0, y: 25, width: 1440, height: 875),
             spaces: [.init(id: 1, isUserSpace: true), .init(id: 374, isUserSpace: false), .init(id: 378, isUserSpace: true)],
             activeSpaceID: 1)
@@ -13,11 +13,6 @@ struct DisplaySpaceCoordinatorTests {
         let coordinator = DisplaySpaceCoordinator(ownerPID: 42, displays: [primary, external],
                                                   ownership: .applicationLocalFixture)
         #expect(coordinator.sessions.keys.sorted() == [1, 378, 501, 502])
-        #expect(coordinator.numberedUserSpace(1) == 1)
-        #expect(coordinator.numberedUserSpace(2) == 378)
-        #expect(coordinator.numberedUserSpace(3) == 501)
-        #expect(coordinator.numberedUserSpace(4) == 502)
-        #expect(coordinator.numberedUserSpace(5) == nil)
         #expect(coordinator.display(forSpace: 501)?.displayUUID == "D2")
 
         let eligible = WindowPolicy.classify(WindowFacts(bundleID: "test", role: "AXWindow", subrole: "AXStandardWindow",

@@ -30,7 +30,7 @@ Manages the windows of every regular (Dock-visible) app on each display's active
 | C / S | `center`, `split` | Center the focused column; split it with its left neighbour |
 | I / O | `slurp`, `barf` | Stack into the left column / unstack into its own column |
 | F | `float` | Toggle the focused container out of / back into the strip |
-| 1–9 | `space N` | Move the focused container to Space N and follow it |
+| — | Mission Control | Move windows between Spaces and displays by dragging them in Mission Control; the container (with its tabs and width) follows to the destination strip |
 | — | `retile`, `status`, `pause`, `resume`, `reload`, `stop` | Reapply layout; JSON state; pause/resume management (windows stay put); reload config; stop and restore original frames |
 
 Quit Hammerspoon (or stop PaperWM) first: a combination already registered by another process is reported in `hotkeyFailures` and left to that process.
@@ -56,11 +56,11 @@ Quit Hammerspoon (or stop PaperWM) first: a combination already registered by an
 ./scripts/swift.sh run --skip-build paperi preview-fixture
 ```
 
-Click one of its two document windows, then use **Narrower/Wider/Stack/Unstack/Next Space** or local **Option–Command–H/L/I/O/N**. **Stop & Restore** or **Escape** restores saved frames and closes the preview; it also stops automatically after 60 seconds. Accessibility trust is required.
+Click one of its two document windows, then use **Narrower/Wider/Stack/Unstack** or local **Option–Command–H/L/I/O**. **Stop & Restore** or **Escape** restores saved frames and closes the preview; it also stops automatically after 60 seconds. Accessibility trust is required.
 
 Standalone macOS scrolling window manager in development. See [plan.md](plan.md) for the intended behavior and release gates, and [docs/STATUS.md](docs/STATUS.md) for current capability status and handoff details.
 
-The current implementation provides a pure Swift layout core (including resize, split, stacked-column slurp/barf, and floating transitions), scoped per-Space/per-display session management (`ScopedLayoutSession`, `DisplaySpaceCoordinator`), active-first and strict native-tab discovery and lifecycle reconciliation (`NativeTabMembership`, `NativeTabTopology`), Mission Control cross-Space container transfers (`SpaceTransfer`), opt-in disposable and real-app probes (Finder and Terminal), regression tests, read-only native diagnostics, and an inactive menu bar shell. Live mode manages all regular apps (configurable) and registers the user's Option–Command shortcuts while running.
+The current implementation provides a pure Swift layout core (including resize, split, stacked-column slurp/barf, and floating transitions), scoped per-Space/per-display session management (`ScopedLayoutSession`, `DisplaySpaceCoordinator`), active-first and strict native-tab discovery and lifecycle reconciliation (`NativeTabMembership`, `NativeTabTopology`), following of user Mission Control moves across Spaces and displays, opt-in disposable and real-app probes (Finder and Terminal), regression tests, read-only native diagnostics, and an inactive menu bar shell. Live mode manages all regular apps (configurable) and registers the user's Option–Command shortcuts while running.
 
 `./scripts/swift.sh build` followed by `./scripts/swift.sh run --skip-build paperi probe-placement` runs an opt-in AX effect test on a newly spawned disposable fixture only. It applies a pure-core frame using size → position → size, confirms the observed frame within two points, restores and confirms the original frame, then terminates the fixture. Accessibility trust is required. It accepts no PID/window arguments and never targets existing user windows. Its scope is ordinary single-window placement, without focus changes, hotkeys or Space movement; it is not an enabled manager.
 
@@ -94,7 +94,7 @@ Use `--session` (`paperi probe-terminal-session <tag>`) to run a sustained share
 
 See the [pinned-source comparison](docs/REFERENCE-AUDIT.md) for the current implementation direction. A separate `PaperiSpaceProbe` executable tests only its own disposable window's Space membership round trip. It needs a normal-desktop source and a second existing user Space on the same display. Default `--backend skylight` tests the private SkyLight path without Space activation; `--backend mission-control` adapts PaperWM's Mission Control drag/follow sequence and switches to the destination Space and back; `--backend drag-switch` requires the system Move-left/right-a-space shortcuts (`79`/`81`) to be enabled and an adjacent user Space. Run `./scripts/swift.sh run PaperiSpaceProbe -- --backend mission-control` in a GUI session. Exit 0 confirms the round trip, 1 reports transfer failure, and 2 reports unsupported prerequisites. Adapted source notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-`./scripts/swift.sh run --skip-build paperi probe-space-session` runs the end-to-end multi-Space session integration probe using `DisplaySpaceCoordinator` and `SpaceTransfer.moveWindowViaMissionControl`. It launches a disposable two-tab native container, learns its membership externally via `NativeTabMembership`, admits it into the source Space's `ScopedLayoutSession`, transfers the container to a second user Space via Mission Control and `DisplaySpaceCoordinator.transferContainer`, confirms resized AX placement on the destination Space, transfers it back to the source Space and confirms AX placement while preserving the logical slot ID and both tab members, and restores the original frame on stop via `FrameRestorationJournal`.
+`paperi mission-control-move WID SPACE` is a test aid: it drags a real window onto a Space thumbnail in Mission Control (on whichever display hosts that Space), as a user would, so a running live mode can be checked following the move. Live mode itself never moves windows between Spaces.
 
 ## Development
 

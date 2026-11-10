@@ -38,7 +38,7 @@ All shortcuts below use **Option–Command**. Only the explicit user mappings ar
 | L / H | Increase/decrease width by 10% of the usable layout canvas. |
 | U / N | Increase/decrease height by 10% of the usable layout canvas, redistributing stacked windows through tiling. |
 | I / O | Slurp a window into a column / barf it out into a separate column. |
-| 1–9 | Move the focused window to the numbered Space, follow it, and tile it there. Verify numbering against PaperWM's Mission Control ordering across displays. |
+| 1–9 | Dropped (2026-11-10): windows are moved between Spaces/displays with Mission Control, and Paperi follows. No public or working private API moves windows between Spaces on macOS 26, so a command would have to script Mission Control. |
 
 Important details from the configuration:
 
@@ -51,7 +51,7 @@ Important details from the configuration:
 - Inherited defaults include 8-point gaps, a 1-point screen margin, and normal visible titled standard windows with fullscreen windows excluded. Trackpad swipes, modifier dragging/lifting, and modifier scrolling are disabled. The inherited mouse-centering behavior around Space switching should also be characterized.
 - Preserve horizontal virtual positions and edge clamping: macOS does not provide a general compositor API for freely placing other applications' windows arbitrarily offscreen. PaperWM's scrolling model keeps real windows constrained near the screen edges.
 
-First release scope: these bindings, per-Space columns and stacked rows, native macOS tab groups, deterministic multi-display ownership, transient/popup isolation, floating windows, external focus changes, create/close/minimize/hide/fullscreen lifecycle, manual move/resize handling, display changes, and native Space navigation/transfers. Direct trackpad scrolling is an explicit stretch goal below. Extensive preferences UI, scripting, and the rest of Hammerspoon are deferred.
+First release scope: these bindings, per-Space columns and stacked rows, native macOS tab groups, deterministic multi-display ownership, transient/popup isolation, floating windows, external focus changes, create/close/minimize/hide/fullscreen lifecycle, manual move/resize handling, display changes, native Space navigation, and following user Mission Control transfers. Direct trackpad scrolling is an explicit stretch goal below. Extensive preferences UI, scripting, and the rest of Hammerspoon are deferred.
 
 ## Stretch goal: direct three- or four-finger trackpad scrolling
 
@@ -102,7 +102,7 @@ Acceptance: the agreed native-tab apps keep exactly one layout slot per visible 
 
 Use stable display UUIDs and runtime Space IDs, with an active Space and last managed focus per display. Numeric display/Space positions are presentation labels, not persistent identities. Rebuild topology after rearrangement, reconnect, wake, and Mission Control changes; do not persist Space IDs across login as if they were stable.
 
-Proposed command policy: resolve a managed focused window or transient owner first; otherwise use the last managed display context, then the pointer display for a genuinely empty context. Do not derive the target from the primary display or the popup's location. J/K stays in that display's layout and navigates that display's adjacent native Spaces at an edge. It never implicitly jumps to a different monitor. Keep numbered moves 1–9 mapped to the current Mission Control ordering for compatibility, resolve the destination ID at command time, and permit explicit labels later. Verify and document behavior when automatic Space rearrangement changes numbering.
+Proposed command policy: resolve a managed focused window or transient owner first; otherwise use the last managed display context, then the pointer display for a genuinely empty context. Do not derive the target from the primary display or the popup's location. J/K stays in that display's layout and navigates that display's adjacent native Spaces at an edge. It never implicitly jumps to a different monitor. Numbered Space moves were dropped; windows move between Spaces through Mission Control.
 
 Each display uses its own usable frame, scale conversion, Dock/menu bar insets, layout anchor, and scroll position. A window crossing displays is removed from its old layout and inserted once into the confirmed destination. Hot-unplug reconciles with the windows' actual OS destinations rather than assuming macOS will restore former ownership; reconnect must not duplicate windows or unexpectedly pull them back.
 
