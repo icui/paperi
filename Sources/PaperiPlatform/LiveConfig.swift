@@ -29,14 +29,18 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public var tile: [FloatRule]
     public var gap: Double?
     public var outerGap: Double?
+    /// Key spec → command (as accepted by `paperi msg`), merged over the
+    /// built-in PaperWM bindings; `null` removes a default binding.
+    public var hotkeys: [String: String?]
 
     public init(include: [String]? = nil, exclude: [String] = [], singleton: [String] = [],
                 float: [FloatRule] = [], tile: [FloatRule] = [], gap: Double? = nil, outerGap: Double? = nil) {
         self.include = include; self.exclude = exclude; self.singleton = singleton
         self.float = float; self.tile = tile; self.gap = gap; self.outerGap = outerGap
+        self.hotkeys = [:]
     }
 
-    enum CodingKeys: String, CodingKey { case include, exclude, singleton, float, tile, gap, outerGap }
+    enum CodingKeys: String, CodingKey { case include, exclude, singleton, float, tile, gap, outerGap, hotkeys }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         include = try c.decodeIfPresent([String].self, forKey: .include)
@@ -46,6 +50,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         tile = try c.decodeIfPresent([FloatRule].self, forKey: .tile) ?? []
         gap = try c.decodeIfPresent(Double.self, forKey: .gap)
         outerGap = try c.decodeIfPresent(Double.self, forKey: .outerGap)
+        hotkeys = try c.decodeIfPresent([String: String?].self, forKey: .hotkeys) ?? [:]
     }
 
     /// System UI and agents whose windows must never be tiled, plus Paperi.
@@ -56,6 +61,23 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         "com.apple.SecurityAgent", "com.apple.universalcontrol", "com.apple.TextInputMenuAgent",
         "dev.paperi.app",
     ]
+
+    /// Starter file written by the menu's "Open Config…" when none exists.
+    public static let template = """
+    {
+      "exclude": [],
+      "float": [],
+      "tile": [],
+      "singleton": [],
+      "gap": 8,
+      "outerGap": 8,
+      "hotkeys": {
+        "alt-cmd-j": "focus left",
+        "alt-cmd-k": "focus right"
+      }
+    }
+
+    """
 
     public static var defaultURL: URL { LiveManager.supportDirectory.appendingPathComponent("config.json") }
 

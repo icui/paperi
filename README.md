@@ -2,14 +2,23 @@
 
 Standalone macOS scrolling window manager (PaperWM-style) in development.
 
-## Live mode (opt-in)
+## Install for daily use
+
+```sh
+./scripts/install.sh                  # release build → ~/Applications/Paperi.app
+open ~/Applications/Paperi.app        # grant Accessibility when prompted
+```
+
+The ▥ menu bar item shows status and offers Pause/Resume, Retile, Reload Config, Open Config…, Start at Login and Stop & Restore Windows. The installed app keeps its Accessibility grant while you rebuild the repository; reinstalling with the default ad hoc signature needs a fresh grant (set `PAPERI_SIGN_IDENTITY` to avoid that). `paperi login on|off|status` manages the LaunchAgent (prefers the installed app; log in `~/Library/Logs/Paperi.log`). Quit Hammerspoon/PaperWM first; rollback is Stop & Restore, `paperi login off`, then start Hammerspoon again.
+
+## Live mode
 
 ```sh
 ./scripts/swift.sh build
 .build/debug/paperi run -v            # all regular apps; or limit with --app ID ...
 ```
 
-Manages the windows of every regular (Dock-visible) app on each display's active Space as one horizontally scrolling strip, including native macOS tab containers and Mission Control Space transfers. Only real document windows are tiled: menus, popovers, sheets, dialogs, panels, Control Center and Spotlight are never touched, and windows without a fullscreen button (Open/Save panels, Finder Get Info, System Settings) float. It registers the Option–Command shortcuts from the PaperWM Hammerspoon config (`--no-hotkeys` disables them); every shortcut runs the same command as `paperi msg`:
+Manages the windows of every regular (Dock-visible) app on each display's active Space as one horizontally scrolling strip, including native macOS tab containers and Mission Control Space transfers. Only real document windows are tiled: menus, popovers, sheets, dialogs, panels, Control Center and Spotlight are never touched, and windows without a fullscreen button (Open/Save panels, Finder Get Info, System Settings) float. It registers the Option–Command shortcuts from the PaperWM Hammerspoon config by default (configurable below; `--no-hotkeys` disables them); every shortcut runs the same command as `paperi msg`:
 
 | Keys (⌥⌘) | Command | Effect |
 | --- | --- | --- |
@@ -22,7 +31,7 @@ Manages the windows of every regular (Dock-visible) app on each display's active
 | I / O | `slurp`, `barf` | Stack into the left column / unstack into its own column |
 | F | `float` | Toggle the focused container out of / back into the strip |
 | 1–9 | `space N` | Move the focused container to Space N and follow it |
-| — | `retile`, `status`, `stop` | Reapply layout; JSON state; stop and restore original frames |
+| — | `retile`, `status`, `pause`, `resume`, `reload`, `stop` | Reapply layout; JSON state; pause/resume management (windows stay put); reload config; stop and restore original frames |
 
 Quit Hammerspoon (or stop PaperWM) first: a combination already registered by another process is reported in `hotkeyFailures` and left to that process.
 
@@ -34,11 +43,12 @@ Quit Hammerspoon (or stop PaperWM) first: a combination already registered by an
   "float": [{"app": "com.apple.finder", "titleContains": "Copy"}],
   "tile": [{"app": "com.apple.systempreferences"}],
   "singleton": ["com.google.Chrome"],
-  "include": null, "gap": 8, "outerGap": 8
+  "include": null, "gap": 8, "outerGap": 8,
+  "hotkeys": { "ctrl-alt-l": "width + 0.2", "alt-cmd-1": null }
 }
 ```
 
-`exclude` skips apps, `float` keeps matching windows out of the strip, `tile` overrides the no-fullscreen-button rule, `singleton` (or `--singleton-app`) treats an app's in-content tab bar as a plain window, and `include` (or `--app`) limits management to listed apps. System UI agents are always excluded. Ctrl-C or `paperi msg stop` restores admission frames; after a crash, `paperi restore` uses the persisted journal. The responsible terminal/editor (or `dist/Paperi.app`) needs Accessibility access. See [docs/STATUS.md](docs/STATUS.md) for verified scope and limits.
+`exclude` skips apps, `float` keeps matching windows out of the strip, `tile` overrides the no-fullscreen-button rule, `singleton` (or `--singleton-app`) treats an app's in-content tab bar as a plain window, `include` (or `--app`) limits management to listed apps, and `hotkeys` maps key specs (`ctrl`/`alt`/`shift`/`cmd` plus a letter, digit, arrow, `f1`–`f20`, `space`, `return`, `tab`, `escape`, punctuation names) to `paperi msg` commands, merged over the defaults; `null` removes a default. Invalid entries are reported at startup and in `status` rather than ignored. Reload with the menu or `paperi msg reload`. System UI agents are always excluded. Ctrl-C or `paperi msg stop` restores admission frames; after a crash, `paperi restore` uses the persisted journal. The responsible terminal/editor (or `dist/Paperi.app`) needs Accessibility access. See [docs/STATUS.md](docs/STATUS.md) for verified scope and limits.
 
 ## Disposable preview
 

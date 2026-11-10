@@ -544,6 +544,12 @@ Course correction (2026-11-09, user direction): stop adding disposable-window pr
 - Fix: only minimise/fullscreen/explicit float removes a managed window; transient capability loss (a sheet making its parent non-movable) keeps the slot and suppresses writes. Previously a Save sheet evicted its document window.
 - Live popup matrix with all apps managed (Terminal, Finder, Zed, Slack, Beeper, TextEdit): Control Center, Wi‑Fi menu, Finder context menu, menu bar menu, Spotlight, Finder Get Info, TextEdit Open dialog and Save sheet moved no managed window; suppression cleared automatically after dismissal and commands worked. Refresh 58–99 ms with 6 managed windows. 133 Swift regressions pass.
 
+## Increment 66: configurable shortcuts, menu bar item and login agent
+
+- `config.json` `hotkeys` maps key specs to `paperi msg` commands over the PaperWM defaults (`null` removes one). `HotKeySpec` parses and normalises specs; `LiveCommand.validate` is shared by CLI, socket and hot keys. Invalid entries are reported at startup, in `status` and on menu reload.
+- `paperi run` (`LiveApp`) adds a ▥ menu bar item (status, Pause/Resume, Retile, Reload Config, Open Config…, Start at Login, Stop & Restore) and waits for Accessibility instead of exiting. `LiveManager.pause/resume/reload` keep the original-frame journal. Launching Paperi.app with no arguments starts live mode. `paperi login on|off|status` writes a KeepAlive LaunchAgent; `scripts/install.sh` installs `~/Applications/Paperi.app` so the Accessibility grant survives repository rebuilds.
+- Live validation (TextEdit-only scope): custom ⌃⌥L `width + 0.2` (708 → 993 pt), removed ⌥⌘U ignored, invalid command reported; pause left a manually moved window alone and rejected commands; resume re-tiled; reload applied a 30 pt gap; menu Pause/Resume/Stop & Restore worked; final restore returned both windows to their pre-Paperi frames. 137 Swift regressions pass.
+
 ## Validation on the initial host
 
 ### Revalidation after increment 5 (2026-11-06 local time)

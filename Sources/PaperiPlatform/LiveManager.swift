@@ -39,7 +39,8 @@ import PaperiCore
         let frame: Rect?
     }
 
-    let options: Options
+    public private(set) var options: Options
+    public private(set) var paused = false
     private(set) var coordinator: DisplaySpaceCoordinator
     private var recorder: EventRecorder!
     private var references: [UInt32: AXUIElement] = [:]
@@ -69,7 +70,9 @@ import PaperiCore
 
     // MARK: lifecycle
 
-    public func start() throws {
+    /// `resuming` keeps the in-memory/persisted journal from a pause or
+    /// reload instead of treating it as a crash leftover.
+    public func start(resuming: Bool = false) throws {
         guard AXIsProcessTrusted() else {
             // Shows the system prompt naming the responsible app (terminal/editor or Paperi.app).
             let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
@@ -77,8 +80,10 @@ import PaperiCore
             throw LiveError.accessibility
         }
         guard !running else { return }
-        try restoreStaleJournal()
-        running = true
+        if !resuming { try restoreStaleJournal() }
+        running = true; paused = false
+        references.removeAll(); pidForWindow.removeAll(); expected.removeAll(); applied.removeAll()
+        destroyedNotified.removeAll(); slowUntil.removeAll(); forceApply = true
         coordinator = DisplaySpaceCoordinator(ownerPIDs: [], displays: topologies())
         recorder = EventRecorder(workspaceCenter: NSWorkspace.shared.notificationCenter,
                                  runningApplications: { NSWorkspace.shared.runningApplications },
@@ -103,8 +108,40 @@ import PaperiCore
         refresh()
     }
 
+    /// Leaves windows where they are; `resume` re-admits them and a later
+    /// stop still restores their original (pre-Paperi) frames.
+    @discardableResult public func pause() -> [String: Any] {
+        guard running else { return ["ok": paused, "paused": paused] }
+        stop(restore: false, keepJournal: true)
+        paused = true
+        return ["ok": true, "paused": true]
+    }
+
+    @discardableResult public func resume() -> [String: Any] {
+        guard paused else { return ["ok": running, "paused": false] }
+        do { try start(resuming: true) } catch { return ["ok": false, "error": "\(error)"] }
+        return ["ok": true, "paused": false]
+    }
+
+    /// Applies a new configuration without restoring or losing original frames.
+    @discardableResult public func reload(_ config: LiveConfig) -> [String: Any] {
+        let wasPaused = paused
+        if running { stop(restore: false, keepJournal: true) }
+        options.config = config
+        if wasPaused { paused = true; return ["ok": true, "paused": true] }
+        do { try start(resuming: true) } catch { return ["ok": false, "error": "\(error)"] }
+        return ["ok": true]
+    }
+
+    public var managedWindowCount: Int { coordinator.spaceForWindow.count }
+
     /// Stops management, restores admission geometry and removes the journal.
-    @discardableResult public func stop() -> [String: Any] {
+    @discardableResult public func stop(restore: Bool? = nil, keepJournal: Bool = false) -> [String: Any] {
+        if paused && !keepJournal {
+            // Paused: nothing is running, but the journal still holds originals.
+            paused = false
+            return restoreJournal(restore ?? options.restoreOnStop)
+        }
         guard running else { return ["stopped": false] }
         running = false
         timer?.invalidate(); timer = nil
@@ -115,8 +152,16 @@ import PaperiCore
         workspaceTokens.removeAll()
         coordinator.stop()
         let teardown = recorder.stop()
+        if keepJournal { return ["stopped": true, "sourcesStillInstalled": teardown["sourcesStillInstalled"] ?? 0] }
+        var result = restoreJournal(restore ?? options.restoreOnStop)
+        result["stopped"] = true
+        result["sourcesStillInstalled"] = teardown["sourcesStillInstalled"] ?? 0
+        return result
+    }
+
+    private func restoreJournal(_ restore: Bool) -> [String: Any] {
         var restored = 0, failed = 0
-        if options.restoreOnStop {
+        if restore {
             for (wid, entry) in journal {
                 let element = references[wid] ?? findWindow(wid, pid: entry.pid)
                 if let element, write(entry.frame, to: element) { restored += 1 } else { failed += 1 }
@@ -124,8 +169,7 @@ import PaperiCore
         }
         journal.removeAll()
         try? FileManager.default.removeItem(at: options.journalURL)
-        return ["stopped": true, "restored": restored, "restoreFailed": failed,
-                "sourcesStillInstalled": teardown["sourcesStillInstalled"] ?? 0]
+        return ["restored": restored, "restoreFailed": failed]
     }
 
     /// Restores frames left by a previous run that did not stop cleanly.
@@ -582,7 +626,15 @@ import PaperiCore
 
     /// Executes one CLI command and returns a JSON-serialisable reply.
     public func handle(_ args: [String]) -> [String: Any] {
-        guard running else { return ["ok": false, "error": "not running"] }
+        if let problem = LiveCommand.validate(args) { return ["ok": false, "error": problem] }
+        switch args.first {
+        case "pause": return pause()
+        case "resume": return resume()
+        case "stop": return ["ok": true, "stop": true]
+        case "status" where paused: return ["ok": true, "paused": true]
+        default: break
+        }
+        guard running else { return ["ok": false, "error": paused ? "paused (paperi msg resume)" : "not running"] }
         guard let verb = args.first else { return ["ok": false, "error": "empty command"] }
         let rest = Array(args.dropFirst())
         func direction(_ s: String?) -> Direction? {
@@ -817,7 +869,7 @@ import PaperiCore
                  }]
              }]
         }
-        return ["ok": true, "apps": options.config.include?.sorted() ?? ["all regular apps"], "displays": displays, "sessions": sessions,
+        return ["ok": true, "paused": false, "apps": options.config.include?.sorted() ?? ["all regular apps"], "displays": displays, "sessions": sessions,
                 "floating": userFloating.sorted(), "journaled": journal.count, "lastRefreshMS": lastRefreshMS]
     }
 }

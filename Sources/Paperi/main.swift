@@ -27,79 +27,11 @@ import PaperiPlatform
 }
 
 var args = Array(CommandLine.arguments.dropFirst())
-if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["--menu"] }
-@MainActor func runLive(_ arguments: [String]) -> Never {
-    var include: [String] = [], singletons: [String] = []
-    var verbose = false, restore = true, hotkeys = true
-    var i = 0
-    while i < arguments.count {
-        switch arguments[i] {
-        case "--app" where i + 1 < arguments.count: include.append(arguments[i + 1]); i += 1
-        case "--singleton-app" where i + 1 < arguments.count: singletons.append(arguments[i + 1]); i += 1
-        case "--verbose", "-v": verbose = true
-        case "--no-restore": restore = false
-        case "--no-hotkeys": hotkeys = false
-        default:
-            print("Usage: paperi run [--app bundle.id ...] [--singleton-app bundle.id ...] [--verbose] [--no-restore] [--no-hotkeys]")
-            exit(2)
-        }
-        i += 1
-    }
-    var config: LiveConfig
-    do { config = try LiveConfig.load() }
-    catch { FileHandle.standardError.write(Data("paperi run: invalid \(LiveConfig.defaultURL.path): \(error)\n".utf8)); exit(2) }
-    if !include.isEmpty { config.include = (config.include ?? []) + include }
-    config.singleton += singletons
-    let apps = config.include?.sorted() ?? ["all regular apps"]
-    var options = LiveManager.Options(config: config)
-    options.verbose = verbose; options.restoreOnStop = restore
-    let manager = LiveManager(options: options)
-    var server: LiveCommandServer?
-    let keys = HotKeyCenter { command in
-        let reply = manager.handle(command)
-        if verbose || reply["ok"] as? Bool != true {
-            FileHandle.standardError.write(Data("[paperi] ⌥⌘ \(command.joined(separator: " ")) → \(reply.filter { $0.key != "missionControl" })\n".utf8))
-        }
-    }
-    func shutdown(_ code: Int32) -> Never {
-        keys.unregister()
-        server?.stop()
-        Diagnostics.printJSON(manager.stop(), pretty: false)
-        exit(code)
-    }
-    server = LiveCommandServer { request in
-        let reply = manager.handle(request)
-        if reply["stop"] as? Bool == true {
-            DispatchQueue.main.async { MainActor.assumeIsolated { shutdown(0) } }
-        }
-        return reply
-    }
-    do {
-        try server?.start()
-        try manager.start()
-    } catch {
-        FileHandle.standardError.write(Data("paperi run: \(error)\n".utf8))
-        server?.stop(); exit(1)
-    }
-    var signalSources: [DispatchSourceSignal] = []
-    for sig in [SIGINT, SIGTERM, SIGHUP] {
-        signal(sig, SIG_IGN)
-        let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
-        source.setEventHandler { MainActor.assumeIsolated { shutdown(0) } }
-        source.resume(); signalSources.append(source)
-    }
-    let hotkeyFailures = hotkeys ? keys.register() : [:]
-    Diagnostics.printJSON(["event": "paperiRunning", "apps": apps.sorted(), "socket": LiveCommandServer.defaultPath,
-                           "hotkeys": keys.registeredCount, "hotkeyFailures": hotkeyFailures], pretty: false)
-    let app = NSApplication.shared
-    app.setActivationPolicy(.accessory)
-    withExtendedLifetime(signalSources) { app.run() }
-    shutdown(0)
-}
-
+// Launching Paperi.app (Finder, login item) starts live mode.
+if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["run"] }
 switch args.first {
 case "run":
-    runLive(Array(args.dropFirst()))
+    LiveApp.main(Array(args.dropFirst()))
 case "msg":
     do {
         let reply = try LiveCommandServer.send(Array(args.dropFirst()))
@@ -112,6 +44,10 @@ case "msg":
 case "check-apps":
     guard AXIsProcessTrusted() else { print("Accessibility access is required."); exit(1) }
     Diagnostics.printJSON(LiveManager.checkApps(Array(args.dropFirst()), config: (try? LiveConfig.load()) ?? LiveConfig()))
+case "login":
+    let report = LoginAgent.command(Array(args.dropFirst()))
+    Diagnostics.printJSON(report)
+    exit(report["ok"] as? Bool == true ? 0 : 1)
 case "restore":
     guard AXIsProcessTrusted() else { print("Accessibility access is required."); exit(1) }
     Diagnostics.printJSON(LiveManager.restore())
@@ -249,8 +185,10 @@ default:
       paperi run [--app ID ...] [--singleton-app ID ...] [-v] [--no-restore] [--no-hotkeys]
                                         Manage all regular apps (or only --app ones) on each display's active Space
       paperi msg COMMAND                 focus|swap left|right|up|down, width|height +|- [fraction],
-                                        center, split, slurp, barf, float, space N, retile, status, stop
+                                        center, split, slurp, barf, float, space N, retile, status,
+                                        pause, resume, reload, stop
       paperi check-apps [ID ...]         Read-only: what live mode would decide for each on-screen window
+      paperi login on|off|status         Start live mode at login (LaunchAgent; prefers ~/Applications/Paperi.app)
       paperi restore                     Restore frames journaled by a run that did not stop cleanly
       paperi snapshot [--include-titles]  Read-only JSON snapshot
       paperi tab-evidence identifier     Bounded read-only AX tab structure for one app
