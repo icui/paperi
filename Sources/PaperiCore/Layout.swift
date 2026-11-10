@@ -148,40 +148,42 @@ public struct Layout: Codable, Equatable, Sendable {
         else if left > highest { offset = highest - preceding }
         return offset != previous
     }
-    /// Drop targets while dragging the column at `column`: the on-canvas part of
-    /// each horizontal neighbour (full canvas height), widened to at least
-    /// `reach` at a canvas edge so a neighbour showing only a sliver can still
-    /// be hovered. `step` is -1 for the left neighbour and +1 for the right.
-    public func swapTargets(column: Int, in canvas: Rect, gap: Double = 8, margin: Double = 1,
+    /// Drop targets while dragging the window in slot `id`: every slot of the
+    /// left and right neighbouring columns and the other rows of its own
+    /// column. A region spans the on-canvas part of the slot's column (widened
+    /// to at least `reach` at a canvas edge, so a neighbour showing only a
+    /// sliver can still be hovered) and the slot's rows.
+    public func swapTargets(slotID id: String, in canvas: Rect, gap: Double = 8, margin: Double = 1,
                             edgeMargin: Double? = nil, reach: Double = 24) throws -> [SwapTarget] {
-        guard columns.indices.contains(column), canvas.isValid else { throw LayoutError.invalidGeometry }
-        let maximum = Self.maxColumnWidth(in: canvas, edgeMargin: edgeMargin ?? gap)
+        guard let source = index(of: id) else { throw LayoutError.invalidMembership }
+        let frames = Dictionary(uniqueKeysWithValues: try placements(in: canvas, gap: gap, margin: margin, edgeMargin: edgeMargin)
+            .map { ($0.slotID, $0.frame) })
         let right = canvas.x + canvas.width
-        var x = canvas.x + offset
-        var spans: [(Double, Double)] = []
-        for other in columns {
-            let width = min(other.width, maximum)
-            let physicalX = max(canvas.x + margin - width, min(x, right - margin))
-            spans.append((max(physicalX, canvas.x), min(physicalX + width, right)))
-            x += width + gap
-        }
         var result: [SwapTarget] = []
-        for step in [-1, 1] where columns.indices.contains(column + step) {
-            var (lo, hi) = spans[column + step]
-            if lo <= canvas.x { hi = max(hi, canvas.x + reach) }
-            if hi >= right { lo = min(lo, right - reach) }
-            guard hi > lo else { continue }
-            result.append(SwapTarget(step: step, column: column + step,
-                                     region: Rect(x: lo, y: canvas.y, width: hi - lo, height: canvas.height)))
+        for c in [source.column - 1, source.column, source.column + 1] where columns.indices.contains(c) {
+            for slot in columns[c].slots where slot.id != id {
+                guard let frame = frames[slot.id] else { continue }
+                var lo = max(frame.x, canvas.x), hi = min(frame.x + frame.width, right)
+                if lo <= canvas.x { hi = max(hi, canvas.x + reach) }
+                if hi >= right { lo = min(lo, right - reach) }
+                guard hi > lo else { continue }
+                result.append(SwapTarget(slotID: slot.id, region: Rect(x: lo, y: frame.y, width: hi - lo, height: frame.height)))
+            }
         }
         return result
     }
-    /// Moves the column containing `id` to `index` (clamped); returns whether the order changed.
-    @discardableResult public mutating func moveColumn(containing id: String, to index: Int) -> Bool {
-        guard let from = self.index(of: id)?.column else { return false }
-        let to = max(0, min(index, columns.count - 1))
-        guard to != from else { return false }
-        columns.insert(columns.remove(at: from), at: to)
+    /// Swaps two slots (drag-to-swap). Two single-window columns swap as
+    /// columns, so widths travel with their windows as with `swap left/right`;
+    /// otherwise the windows exchange positions and take each other's size.
+    @discardableResult public mutating func swapSlots(_ a: String, _ b: String) -> Bool {
+        guard a != b, let i = index(of: a), let j = index(of: b) else { return false }
+        if i.column != j.column, columns[i.column].slots.count == 1, columns[j.column].slots.count == 1 {
+            columns.swapAt(i.column, j.column)
+        } else {
+            let slot = columns[i.column].slots[i.row]
+            columns[i.column].slots[i.row] = columns[j.column].slots[j.row]
+            columns[j.column].slots[j.row] = slot
+        }
         return true
     }
     public func placements(in canvas: Rect, gap: Double = 8, margin: Double = 1,
@@ -212,8 +214,7 @@ public struct Layout: Codable, Equatable, Sendable {
 }
 
 public struct SwapTarget: Equatable, Sendable {
-    public var step: Int
-    public var column: Int
+    public var slotID: String
     /// Screen area (top-left origin) that arms the swap and is highlighted.
     public var region: Rect
     public func contains(x: Double, y: Double) -> Bool {

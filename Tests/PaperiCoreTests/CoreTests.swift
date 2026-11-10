@@ -60,35 +60,52 @@ struct CoreTests {
     }
     @Test func testSwapTargetsCoverVisibleNeighboursAndReachableSlivers() throws {
         let canvas = Rect(x: 0, y: 0, width: 1000, height: 800)
-        let targets = try dragStrip().swapTargets(column: 1, in: canvas)   // columns at 0, 308, 616
-        checkEqual(targets.map(\.step), [-1, 1])
+        let targets = try dragStrip().swapTargets(slotID: "2", in: canvas)   // columns at 0, 308, 616
+        checkEqual(targets.map(\.slotID), ["1", "3"])
         checkEqual(targets[0].region, Rect(x: 0, y: 0, width: 300, height: 800))
         checkEqual(targets[1].region, Rect(x: 616, y: 0, width: 300, height: 800))
         checkTrue(targets[0].contains(x: 299, y: 400) && !targets[0].contains(x: 300, y: 400))
-        checkEqual(try dragStrip().swapTargets(column: 0, in: canvas).map(\.step), [1])
+        checkEqual(try dragStrip().swapTargets(slotID: "1", in: canvas).map(\.slotID), ["2"])
         // Column 1 shows 5 px at the left edge, column 3 a 1 px sliver at the right:
         // both widen to the 24 px edge zone.
         let scrolled = Layout(columns: [Column(slots: [slot(1)], width: 300), Column(slots: [slot(2)], width: 984),
                                         Column(slots: [slot(3)], width: 300)], focused: "2", offset: -295)
-        let edges = try scrolled.swapTargets(column: 1, in: canvas)
+        let edges = try scrolled.swapTargets(slotID: "2", in: canvas)
         checkEqual(edges[0].region, Rect(x: 0, y: 0, width: 24, height: 800))
         checkEqual(edges[1].region, Rect(x: 976, y: 0, width: 24, height: 800))
+    }
+    @Test func testSwapTargetsIncludeStackedRows() throws {
+        let canvas = Rect(x: 0, y: 0, width: 1000, height: 808)
+        // [1] [2 over 3] [4 over 5]: rows 400 high with an 8 px gap.
+        let layout = Layout(columns: [Column(slots: [slot(1)], width: 300), Column(slots: [slot(2), slot(3)], width: 300),
+                                      Column(slots: [slot(4), slot(5)], width: 300)], focused: "2")
+        let targets = try layout.swapTargets(slotID: "2", in: canvas)
+        checkEqual(targets.map(\.slotID), ["1", "3", "4", "5"])
+        checkEqual(targets[1].region, Rect(x: 308, y: 408, width: 300, height: 400))
+        checkEqual(targets[3].region, Rect(x: 616, y: 408, width: 300, height: 400))
+        checkTrue(targets[2].contains(x: 700, y: 100) && !targets[2].contains(x: 700, y: 500))
+    }
+    @Test func testSwapSlotsMovesSingleColumnsWholeAndExchangesStackedRows() throws {
+        var layout = Layout(columns: [Column(slots: [slot(1)], width: 300), Column(slots: [slot(2)], width: 500),
+                                      Column(slots: [slot(3), slot(4)], width: 400, weights: [2, 1])], focused: "2")
+        checkTrue(layout.swapSlots("2", "1"))   // single-window columns: widths travel
+        checkEqual(layout.columns.map { $0.slots.map(\.id) }, [["2"], ["1"], ["3", "4"]])
+        checkEqual(layout.columns.map(\.width), [500, 300, 400])
+        checkTrue(layout.swapSlots("1", "4"))   // into a stack: positions (and sizes) are exchanged
+        checkEqual(layout.columns.map { $0.slots.map(\.id) }, [["2"], ["4"], ["3", "1"]])
+        checkEqual(layout.columns.map(\.width), [500, 300, 400])
+        checkEqual(layout.columns[2].weights, [2, 1])
+        checkTrue(layout.swapSlots("3", "1"))   // within a stack
+        checkEqual(layout.columns[2].slots.map(\.id), ["1", "3"])
+        checkEqual(layout.focused, "2")
+        checkTrue(!layout.swapSlots("2", "2") && !layout.swapSlots("2", "9"))
+        try layout.validate()
     }
     @Test func testHexColorParsesRGBAndRGBA() {
         checkEqual(HexColor("#0A84FF4D"), HexColor("0a84ff4d"))
         checkEqual(HexColor("#FF0000")?.alpha, 1)
         checkEqual(HexColor("#00000080")?.alpha ?? 0, 128.0 / 255, accuracy: 0.0001)
         checkTrue(HexColor("blue") == nil && HexColor("#12345") == nil)
-    }
-    @Test func testMoveColumnReordersAndKeepsFocus() throws {
-        var layout = dragStrip()
-        checkTrue(layout.moveColumn(containing: "2", to: 0))
-        checkEqual(layout.columns.map { $0.slots[0].id }, ["2", "1", "3"])
-        checkEqual(layout.focused, "2")
-        checkTrue(!layout.moveColumn(containing: "2", to: 0))
-        checkTrue(layout.moveColumn(containing: "2", to: 99))
-        checkEqual(layout.columns.map { $0.slots[0].id }, ["1", "3", "2"])
-        try layout.validate()
     }
     func slot(_ id: UInt32) -> Slot { Slot(id: "\(id)", members: [id], activeMember: id) }
     @Test func testControlCenterNeverFloatsOrTiles() {

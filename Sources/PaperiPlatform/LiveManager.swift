@@ -51,8 +51,8 @@ import PaperiCore
     private var expected: [UInt32: (frame: Rect, at: Double)] = [:]
     /// Managed window the user is dragging (moved while the left button is
     /// down). It is not written until mouse up, so it follows the pointer.
-    /// While the pointer is over a neighbouring column that column is
-    /// highlighted (`hovered`), and releasing there swaps the two.
+    /// While the pointer is over a neighbouring window (adjacent column or
+    /// same stack) it is highlighted (`hovered`); releasing there swaps them.
     private struct Drag { let windowID: UInt32; let space: UInt64; let targets: [SwapTarget]; var hovered: SwapTarget? }
     private var drag: Drag?
     private var dragging: UInt32? { drag?.windowID }
@@ -256,24 +256,22 @@ import PaperiCore
         guard hit != current.hovered else { return }
         current.hovered = hit; drag = current
         if let hit, let session = coordinator.sessions[current.space],
-           session.state.layout.columns.indices.contains(hit.column) {
-            let top = session.state.layout.columns[hit.column].slots.first?.activeMember
-            highlight.show(hit.region, color: options.config.swapHighlightColor, above: top)
+           let loc = session.state.layout.index(of: hit.slotID) {
+            let target = session.state.layout.columns[loc.column].slots[loc.row].activeMember
+            highlight.show(hit.region, color: options.config.swapHighlightColor, above: target)
         } else {
             highlight.hide()
         }
     }
 
-    /// Swaps with the hovered neighbour, if any, and forces a placement pass.
+    /// Swaps with the hovered window, if any, and forces a placement pass.
     private func finishDrag() {
         guard let current = drag else { endDrag(); return }
         endDrag()
         forceApply = true
-        guard let target = current.hovered, let session = coordinator.sessions[current.space],
-              let slot = session.slots[current.windowID],
-              let column = session.state.layout.index(of: slot)?.column else { return }
-        if session.moveColumn(windowID: current.windowID, to: column + target.step, ticket: session.ticket) {
-            log("swapped column of \(current.windowID) with column \(column + target.step) after drag")
+        guard let target = current.hovered, let session = coordinator.sessions[current.space] else { return }
+        if session.swapSlots(windowID: current.windowID, with: target.slotID, ticket: session.ticket) {
+            log("swapped \(current.windowID) with slot \(target.slotID) after drag")
         }
     }
 
@@ -566,8 +564,7 @@ import PaperiCore
                     displaced[wid] = frame
                     applied.removeValue(forKey: space)
                     guard mouseDown, drag == nil,
-                          let column = session.state.layout.index(of: placement.slotID)?.column,
-                          let targets = try? session.state.layout.swapTargets(column: column, in: session.canvas,
+                          let targets = try? session.state.layout.swapTargets(slotID: placement.slotID, in: session.canvas,
                                                                              gap: options.gap) else { continue }
                     drag = Drag(windowID: wid, space: space, targets: targets, hovered: nil)
                     dragTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
