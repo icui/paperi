@@ -30,7 +30,7 @@ Manages the windows of every regular (Dock-visible) app on each display's active
 | C / S | `center`, `split` | Center the focused column; split it with its left neighbour |
 | I / O | `slurp`, `barf` | Stack into the left column / unstack into its own column |
 | F | `float` | Toggle the focused container out of / back into the strip |
-| — | Mission Control | Move windows between Spaces and displays by dragging them in Mission Control; the container (with its tabs and width) follows to the destination strip and, once Mission Control closes, is focused if it landed on a shown Space. Moving a window to an unmanaged display releases it untouched; moving one onto the managed display tiles it |
+| — | Mission Control | Move windows between Spaces and displays by dragging them in Mission Control; the container (with its tabs and width) follows to the destination strip and, once Mission Control closes, is focused if it landed on a shown Space |
 | — | `retile`, `status`, `pause`, `resume`, `reload`, `stop` | Reapply layout; JSON state; pause/resume management (windows stay put); reload config; stop and restore original frames |
 
 Quit Hammerspoon (or stop PaperWM) first: a combination already registered by another process is reported in `hotkeyFailures` and left to that process.
@@ -43,12 +43,12 @@ Quit Hammerspoon (or stop PaperWM) first: a combination already registered by an
   "float": [{"app": "com.apple.finder", "titleContains": "Copy"}],
   "tile": [{"app": "com.apple.systempreferences"}],
   "singleton": ["com.google.Chrome"],
-  "include": null, "display": "main", "gap": 8, "outerGap": 8, "swapHighlight": "#0A84FF4D",
+  "include": null, "gap": 8, "outerGap": 8, "swapHighlight": "#0A84FF4D",
   "hotkeys": { "ctrl-alt-l": "width + 0.2", "alt-cmd-1": null }
 }
 ```
 
-`exclude` skips apps, `float` keeps matching windows out of the strip, `tile` overrides the no-fullscreen-button rule, `singleton` (or `--singleton-app`) treats an app's in-content tab bar as a plain window, `include` (or `--app`) limits management to listed apps, `display` picks the one display that is managed (`"main"`, the display with the menu bar, by default; `"all"`; or a display UUID or part of its name such as `"InnoView"`; an unmatched name falls back to the main display, flagged in `status`) while windows on other displays are left alone, and `hotkeys` maps key specs (`ctrl`/`alt`/`shift`/`cmd` plus a letter, digit, arrow, `f1`–`f20`, `space`, `return`, `tab`, `escape`, punctuation names) to `paperi msg` commands, merged over the defaults; `null` removes a default. `swapHighlight` (`#RRGGBB` or `#RRGGBBAA`) colours the mask over the window a dragged window will swap with when released (any window in the adjacent columns or its own stack). Invalid entries are reported at startup and in `status` rather than ignored. Reload with the menu or `paperi msg reload`. System UI agents are always excluded. Ctrl-C or `paperi msg stop` restores admission frames; after a crash, `paperi restore` uses the persisted journal. The responsible terminal/editor (or `dist/Paperi.app`) needs Accessibility access. See [docs/STATUS.md](docs/STATUS.md) for verified scope and limits.
+`exclude` skips apps, `float` keeps matching windows out of the strip, `tile` overrides the no-fullscreen-button rule, `singleton` (or `--singleton-app`) treats an app's in-content tab bar as a plain window, `include` (or `--app`) limits management to listed apps, and `hotkeys` maps key specs (`ctrl`/`alt`/`shift`/`cmd` plus a letter, digit, arrow, `f1`–`f20`, `space`, `return`, `tab`, `escape`, punctuation names) to `paperi msg` commands, merged over the defaults; `null` removes a default. `swapHighlight` (`#RRGGBB` or `#RRGGBBAA`) colours the mask over the window a dragged window will swap with when released (any window in the adjacent columns or its own stack). Invalid entries are reported at startup and in `status` rather than ignored. Reload with the menu or `paperi msg reload`. System UI agents are always excluded. Ctrl-C or `paperi msg stop` restores admission frames; after a crash, `paperi restore` uses the persisted journal. The responsible terminal/editor (or `dist/Paperi.app`) needs Accessibility access. See [docs/STATUS.md](docs/STATUS.md) for verified scope and limits.
 
 ## Disposable preview
 
