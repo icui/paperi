@@ -30,7 +30,7 @@ All shortcuts below use **Option–Command**. Only the explicit user mappings ar
 
 | Keys | Required behavior |
 | --- | --- |
-| J / K | Focus the adjacent left/right column using the custom row lookup; switch to the adjacent Space when there is no target. |
+| J / K | Focus the adjacent left/right column using the custom row lookup; at the end of the strip, flash a gentle edge hint instead (no Space switching; changed 2026-11-10). |
 | Arrow keys | Swap left/right columns or swap rows up/down within a column, matching PaperWM semantics. |
 | F | Toggle the focused window between tiled and floating. |
 | C | Horizontally center the focused window and retile its Space. |
@@ -43,7 +43,7 @@ All shortcuts below use **Option–Command**. Only the explicit user mappings ar
 Important details from the configuration:
 
 - Despite the `focusWindowByTwo` name and comments, J/K pass **-1/+1**, so they move one column. The lookup tries the current row down toward row 1 in the destination column. Its second offset is identical to the first with these actual bindings. Do not implement a two-column jump.
-- Empty Spaces and fullscreen focused windows invoke adjacent-Space navigation. Navigation stops at the ends; it does not wrap. The current fallback also treats every unmanaged popup as a reason to switch Spaces; replace that with the transient-focus policy below. Replace the `hs.screen.mainScreen()` heuristic with explicit command/display ownership.
+- J/K never switch Spaces (changed 2026-11-10): at the end of the strip, on an empty Space or with an unmanaged window focused, they show an edge hint on the focused window. Replace the `hs.screen.mainScreen()` heuristic with explicit command/display ownership.
 - A focus request gets one delayed retry after `hs.window.animationDuration`. Preserve reliable focus, but cancel a stale retry if a newer user command has selected another window.
 - A separate unfiltered Hammerspoon window watcher calls `centerWindow()` on window creation and destruction. It centers whichever window is focused at callback time, not necessarily the event's window. Replace this with centering after an eligible managed-window insertion/removal in the affected layout. Popup events must never center the popup or an unrelated application window.
 - SketchyBar calls and the Space watcher are commented out. There is no active SketchyBar integration to port.
@@ -102,7 +102,7 @@ Acceptance: the agreed native-tab apps keep exactly one layout slot per visible 
 
 Use stable display UUIDs and runtime Space IDs, with an active Space and last managed focus per display. Numeric display/Space positions are presentation labels, not persistent identities. Rebuild topology after rearrangement, reconnect, wake, and Mission Control changes; do not persist Space IDs across login as if they were stable.
 
-Proposed command policy: resolve a managed focused window or transient owner first; otherwise use the last managed display context, then the pointer display for a genuinely empty context. Do not derive the target from the primary display or the popup's location. J/K stays in that display's layout and navigates that display's adjacent native Spaces at an edge. It never implicitly jumps to a different monitor. Numbered Space moves were dropped; windows move between Spaces through Mission Control.
+Proposed command policy: resolve a managed focused window or transient owner first; otherwise use the last managed display context, then the pointer display for a genuinely empty context. Do not derive the target from the primary display or the popup's location. J/K stays in that display's layout and shows an edge hint at its ends. It never implicitly jumps to a different monitor. Numbered Space moves were dropped; windows move between Spaces through Mission Control.
 
 Each display uses its own usable frame, scale conversion, Dock/menu bar insets, layout anchor, and scroll position. A window crossing displays is removed from its old layout and inserted once into the confirmed destination. Hot-unplug reconciles with the windows' actual OS destinations rather than assuming macOS will restore former ownership; reconnect must not duplicate windows or unexpectedly pull them back.
 

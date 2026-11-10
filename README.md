@@ -22,7 +22,7 @@ Manages the windows of every regular (Dock-visible) app on each display's active
 
 | Keys (⌥⌘) | Command | Effect |
 | --- | --- | --- |
-| J / K | `focus left\|right` | Focus the adjacent column (nearest row), scrolling it into view; at the strip edge or with no managed window, switch to the adjacent Space (Control–arrow) |
+| J / K | `focus left\|right` | Focus the adjacent column (nearest row), scrolling it into view; at the end of the strip (or with no managed window focused) a short accent bar flashes on that edge of the focused window; J/K never switch Spaces |
 | — | `focus up\|down` | Focus the stacked window above/below |
 | Arrows | `swap left\|right\|up\|down` | Swap columns or stacked rows |
 | L / H | `width +\|- [fraction]` | Width ±10% of the canvas |
