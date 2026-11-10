@@ -82,4 +82,15 @@ import PaperiCore
         let right = CGRect(x: 1440, y: 0, width: 1280, height: 720)
         #expect(LiveReconciliation.park(peekLeft, display: builtIn, otherDisplays: [right]) == peekLeft)
     }
+
+    @Test func capturedSliversHideBehindTheFocusedWindow() {
+        let builtIn = CGRect(x: 0, y: 0, width: 1440, height: 932)
+        let external = CGRect(x: -1280, y: 0, width: 1280, height: 800)
+        let focused = Rect(x: -1272, y: 39, width: 1248, height: 753)
+        let hiddenRight = Rect(x: -9, y: 39, width: 1324, height: 753)
+        #expect(LiveReconciliation.park(hiddenRight, display: external, otherDisplays: [builtIn], cover: focused) == focused)
+        // A sliver with no neighbour on its side keeps its place.
+        let hiddenLeft = Rect(x: -1272 + 1 - 1324, y: 39, width: 1324, height: 753)
+        #expect(LiveReconciliation.park(hiddenLeft, display: external, otherDisplays: [builtIn], cover: focused) == hiddenLeft)
+    }
 }

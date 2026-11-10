@@ -62,6 +62,9 @@ import PaperiCore
     /// Last off-slot frame acted on per window, so an app that clamps its
     /// position is rewritten once rather than on every refresh.
     private var displaced: [UInt32: Rect] = [:]
+    /// Windows currently hidden behind the focused window because their sliver
+    /// would land on a neighbouring display; their real size is not adopted.
+    private var hiddenBehind: Set<UInt32> = []
     private var refreshScheduled = false
     /// Apps whose AX requests timed out are skipped briefly so one hung app
     /// cannot stall management of every other app.
@@ -617,7 +620,8 @@ import PaperiCore
             guard let session = coordinator.sessions[space],
                   let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { continue }
             for placement in placements {
-                guard let exp = expected[placement.windowID], now - exp.at > 0.6,
+                guard !hiddenBehind.contains(placement.windowID),
+                      let exp = expected[placement.windowID], now - exp.at > 0.6,
                       let frame = byID[placement.windowID]?.frame, frame.isValid,
                       abs(frame.width - exp.frame.width) > 2, let pid = pidForWindow[placement.windowID] else { continue }
                 if mouseDown { continue }
@@ -723,7 +727,7 @@ import PaperiCore
         }
         for wid in gone {
             references.removeValue(forKey: wid); pidForWindow.removeValue(forKey: wid)
-            expected.removeValue(forKey: wid); preferredWidth.removeValue(forKey: wid)
+            expected.removeValue(forKey: wid); preferredWidth.removeValue(forKey: wid); hiddenBehind.remove(wid)
             if journal.removeValue(forKey: wid) != nil { persistJournal() }
         }
         log("removed destroyed members \(gone.sorted())")
@@ -762,6 +766,7 @@ import PaperiCore
         let others = bounds.filter { $0.key != display?.displayUUID }.map(\.value)
         var allConfirmed = true
         var unresponsive: Set<pid_t> = []
+        let cover = placements.first { $0.slotID == session.state.layout.focused }?.frame
         for placement in placements {
             let wid = placement.windowID
             guard let element = references[wid] else { allConfirmed = false; continue }
@@ -779,7 +784,9 @@ import PaperiCore
                 allConfirmed = false
                 guard let pid = pidForWindow[wid], !unresponsive.contains(pid), Self.windowSpace(wid) == space else { continue }
             }
-            let target = LiveReconciliation.park(placement.frame, display: own, otherDisplays: others)
+            let target = LiveReconciliation.park(placement.frame, display: own, otherDisplays: others,
+                                                 cover: placement.slotID == session.state.layout.focused ? nil : cover)
+            if target != placement.frame && target == cover { hiddenBehind.insert(wid) } else { hiddenBehind.remove(wid) }
             if let frame = row?.frame, matches(frame, target) {
                 expected[wid] = (target, ProcessInfo.processInfo.systemUptime); displaced.removeValue(forKey: wid); continue
             }
