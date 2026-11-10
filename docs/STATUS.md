@@ -38,12 +38,11 @@ The responsible process (terminal/editor, or `dist/Paperi.app`) needs Accessibil
 
 Instrumentation (`status.performance`) and the interruptible focus-scroll animation landed in commits 936697a and 86008e5; live multi-app profiling of them is still pending.
 
-1. **Profile the focus-scroll animation live** (animation on vs `focusScrollDuration: 0`): tick cost, missed ticks, AX writes, first/final/confirmed timings with 3–6 windows across Terminal, Finder, TextEdit, Zed. These numbers are the baseline for the gesture's feasibility, so do this first.
-2. **Three-finger one-slot scrolling** — see [the plan](../PLAN.md#next-feature-realtime-three-finger-one-slot-scrolling--planned-2026-11-10). Overall difficulty **medium-high (3–4 increments)**: logic is low-risk because it reuses the animator; touch capture on macOS 26 and real-app smoothness are the uncertain parts. Order:
-   1. *Detect system three-finger gestures* (`TrackpadThreeFinger{HorizSwipe,VertSwipe}Gesture`, `TrackpadThreeFingerDrag` in `com.apple.AppleMultitouchTrackpad` and `com.apple.driver.AppleBluetoothMultitouch.trackpad`); disable the Paperi gesture, report it in `status`, and warn via menu item + popover. On this host all three-finger keys are 0 (2026-11-10), so the gesture would be enabled.
-   2. *Capture spike in live mode*: event tap on gesture events with `NSEvent.allTouches()` (PaperWM's path), `-v` logging; decide whether the private `MultitouchSupport` fallback is needed.
-   3. *Pure `SlotSwipe` reducer + scrubbed motion*: refactor `animateFocus` into one scheduler with a time or finger progress source; clamp to one slot with rubber band; commit/snap-back on release.
-   4. *Live validation and tuning* against the gesture performance gate.
+1. **Finish and validate the screenshot handoff first.** Keep the current keyboard animation; reserve screenshots for swipes. Diagnose the reported end offset using intended, captured, image and observed real geometry; validate alignment at overlay removal and after the following refresh.
+2. **Three-finger one-slot scrolling** — see [the plan](../PLAN.md#next-feature-realtime-three-finger-one-slot-scrolling--planned-2026-11-10). Difficulty remains **medium-high**. Next milestones: system-gesture detection/config/warnings; background touch-capture validation; pure reducer plus snapshot tracking/commit/snap-back; live interruption and performance validation. AX finger-tracking fallback is optional later work.
+
+**Working-tree handoff — 2026-11-10:** snapshot experiment merged in `aae59ac`; the merge passed 155 tests. Subsequent uncommitted changes in `HotKeys.swift`, `LiveManager.swift`, `LiveReconciliation.swift` and `SnapshotTransition.swift` detach snapshots from keyboard animation and begin a swipe API/simulation and observed-frame handoff. These changes are incomplete and unvalidated. The last recorded build failed in `SnapshotTransition.swift` on a `CGFloat?`/`Double?` conversion. No live touch source, system-gesture guard or completed swipe acceptance is established. Resume by fixing compilation and reviewing cancellation, capture geometry, pointer-display ownership and landing behavior; then run the appropriate tests and live checks before committing code. Do not infer that the prototype already satisfies the plan.
+
 3. Continue daily-use, installed-app/login, recovery, and eight-hour soak validation. Upper-display tiling and unplug/replug have been tested by the user; separate Spaces disabled now pauses management.
 4. Decide separately whether to add guarded create/destroy auto-centering.
 
