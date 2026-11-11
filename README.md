@@ -63,6 +63,10 @@ If macOS uses the same finger count for Mission Control, Spaces, or three-finger
 
 ## Drag to reorder or tile vertically
 
+![Animated illustration of dragging windows to swap columns, tile vertically, and unstack into a separate column](assets/demos/dragging.gif)
+
+*Illustrated demonstration: drag by the title bar, choose a highlighted drop zone, then release.*
+
 Drag a window by its title bar over a neighboring column or another window in its own stack. Dashed guides show the drop zones, and a labeled preview shows where it will land. Release over the preview to apply it.
 
 | Drop location | Result |

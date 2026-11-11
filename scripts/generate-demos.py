@@ -55,7 +55,98 @@ def fingers(d, x, y, direction):
         d.ellipse((x+dx-4,y-4,x+dx+4,y+4),fill=ACCENT)
     text(d,(560,414),direction,16,ACCENT)
 
+def drag_card(d, x, y, title, height=244, active=False, ghost=False):
+    x, y = round(x), round(y)
+    fill = '#625b53' if ghost else ('#e8e3d8' if active else '#aaa99f')
+    d.rounded_rectangle((x,y,x+246,y+height),12,fill=fill,
+                        outline=ACCENT if active or ghost else '#bbb9af',width=2)
+    text(d,(x+16,y+13),title,17,INK if ghost else '#363736')
+    d.line((x+14,y+43,x+232,y+43),fill='#8e887e',width=1)
+    for i in range(2 if height<150 else 5):
+        yy=y+60+i*26
+        d.rounded_rectangle((x+16,yy,x+197-(i%2)*32,yy+6),3,fill='#81776c' if ghost else '#c3beb3')
+
+
+def pointer(d, x, y, held):
+    d.polygon([(x,y),(x+3,y+21),(x+9,y+15),(x+15,y+25),
+               (x+20,y+22),(x+14,y+12),(x+23,y+10)],fill=INK,outline=BG)
+    if held:
+        d.ellipse((x-9,y-9,x+9,y+9),outline=ACCENT,width=2)
+
+
+def drop_preview(d, x, y, height, mode, label):
+    if mode=='bottom':
+        bounds=(x+5,y+height/2+3,x+241,y+height-5)
+        for yy in (y+height*.25,y+height*.75):
+            for xx in range(int(x)+8,int(x)+240,12):
+                d.line((xx,yy,xx+6,yy),fill=ACCENT,width=2)
+    elif mode=='left':
+        bounds=(x+5,y+5,x+120,y+height-5)
+        for xx in (x+61,x+184):
+            for yy in range(int(y)+8,int(y+height)-8,12):
+                d.line((xx,yy,xx,yy+6),fill=ACCENT,width=2)
+    else:
+        bounds=(x+5,y+5,x+241,y+height-5)
+    d.rounded_rectangle(bounds,6,fill='#756457',outline=ACCENT,width=2)
+    # Keep the label below the pointer and above the preview border.
+    text(d,(x+17,y+height-29),label,14,INK)
+
+
+def render_drag(t):
+    phase=min(2,int(t*3)); u=min(1,t*3-phase)
+    names=('1 / Reorder columns','2 / Tile vertically','3 / Pull out a column')
+    hints=('Drag to the middle, then release to swap.',
+           'Drag to the bottom zone, then release to stack.',
+           'Drag to the left zone of the other stacked window, then release.')
+    im,d=base('DRAG TO ARRANGE',hints[phase])
+    text(d,(30,416),names[phase],18,ACCENT)
+    text(d,(510,416),'Title bar drag  /  preview  /  release',16,MUTED)
+    move=ease((u-.13)/.38); settle=ease((u-.69)/.14)
+    held=.1<u<.69
+    preview=.43<u<.69
+    if phase==0:
+        # Browser starts left; Editor is dragged from the right onto its center.
+        drag_card(d,180+290*settle,110,'Browser')
+        if u>=.69:
+            drag_card(d, (470-290*move)*(1-settle)+180*settle,
+                      (110+95*move)*(1-settle)+110*settle,'Editor',active=True)
+        else:
+            drag_card(d,470,110,'Editor')
+            if held: drag_card(d,470-290*move,110+95*move,'Editor',ghost=True)
+        if preview: drop_preview(d,180,110,244,'middle','Swap')
+        px,py= (470-290*move+100,132+95*move) if u<.69 else (280,227)
+    elif phase==1:
+        # Editor now starts left. Bottom-quarter pointer chooses vertical tiling.
+        drag_card(d,470-145*settle,110,'Browser',height=244-126*settle)
+        if u>=.69:
+            drag_card(d,470-145*settle,288-52*settle,'Editor',height=244-126*settle,active=True)
+        else:
+            drag_card(d,180,110,'Editor',active=True)
+            if held: drag_card(d,180+290*move,110+178*move,'Editor',ghost=True)
+        if preview: drop_preview(d,470,110,244,'bottom','Stack below')
+        px,py=570,310
+        if u<.69: px,py=280+290*move,132+178*move
+    else:
+        # Same-column target exposes left/right zones for unstacking.
+        drag_card(d,325+145*settle,110,'Browser',height=118+126*settle)
+        if u>=.69:
+            drag_card(d,325-145*settle,236-126*settle,'Editor',height=118+126*settle,active=True)
+        else:
+            drag_card(d,325,236,'Editor',height=118,active=True)
+            if held: drag_card(d,325-70*move,236-105*move,'Editor',height=118,ghost=True)
+        if preview: drop_preview(d,325,110,118,'left','New column left')
+        px,py=425-70*move,258-105*move
+    pointer(d,px,py,held)
+    # Keep moving illustrations inside the desktop canvas.
+    d.rectangle((0,375,899,479),fill=BG)
+    text(d,(30,416),names[phase],18,ACCENT)
+    text(d,(510,416),'Title bar drag  /  preview  /  release',16,MUTED)
+    return im
+
+
 def render(kind, t):
+    if kind == 'dragging':
+        return render_drag(t)
     if kind == 'navigation':
         p = ease((t-.18)/.38)
         im,d=base('MOVE THROUGH YOUR WORKSPACE','Swipe left to reveal the column on the right.')
@@ -99,13 +190,14 @@ def render(kind, t):
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    for kind in ('navigation','close-window','close-tab'):
-        frames=[render(kind,i/71).resize((900,480)) for i in range(72)]
+    for kind in ('navigation','close-window','close-tab','dragging'):
+        count = 216 if kind == 'dragging' else 72
+        frames=[render(kind,i/(count-1)) for i in range(count)]
         # A shared palette prevents color shimmer between frames.
         palette=frames[0].quantize(colors=96)
         frames=[im.quantize(palette=palette,dither=Image.Dither.NONE) for im in frames]
         path=OUT/(kind+'.gif')
-        frames[0].save(path,save_all=True,append_images=frames[1:],duration=[65]*71+[1200],loop=0,optimize=True,disposal=2)
+        frames[0].save(path,save_all=True,append_images=frames[1:],duration=[65]*(count-1)+[1200],loop=0,optimize=True,disposal=2)
         print(path.relative_to(OUT.parents[1]), path.stat().st_size)
 
 if __name__ == '__main__':
