@@ -21,9 +21,8 @@ enum LiveReconciliation {
 
     /// Complete physical targets: ordinary placements plus off-screen adjustments.
     static func focusTargets(_ placements: [Placement], canvas: Rect, screenInset: Double) -> [UInt32: Rect] {
-        let frames = placements.map { (window: $0.windowID, frame: $0.frame) }
-        return Dictionary(frames.map { ($0.window, $0.frame) }, uniquingKeysWith: { a, _ in a })
-            .merging(tuck(frames, canvas: canvas, screenInset: screenInset)) { _, tucked in tucked }
+        Dictionary(placements.map { ($0.windowID, $0.frame) }, uniquingKeysWith: { a, _ in a })
+            .merging(tuck(edgeItems(placements), canvas: canvas, screenInset: screenInset)) { _, tucked in tucked }
     }
 
     /// Removes destroyed physical members from existing containers. Containers
@@ -53,28 +52,42 @@ enum LiveReconciliation {
                     y: min(max(frame.y, canvas.y), canvas.y + canvas.height - height), width: width, height: height)
     }
 
-    /// Windows past each canvas edge, nearest to the visible area first
-    /// (desired top-to-bottom order). Fully visible columns never overlap.
-    static func edgeGroups(_ frames: [(window: UInt32, frame: Rect)], canvas: Rect) -> [[UInt32]] {
-        let left = frames.filter { $0.frame.x < canvas.x - 0.5 }
-            .sorted { $0.frame.x + $0.frame.width > $1.frame.x + $1.frame.width }.map(\.window)
-        let right = frames.filter { $0.frame.x + $0.frame.width > canvas.x + canvas.width + 0.5 }
-            .sorted { $0.frame.x < $1.frame.x }.map(\.window)
+    /// One window for `edgeGroups`/`tuck`: `column` identifies its column
+    /// (e.g. `Placement.virtualX`), since columns clamped at an edge can share x.
+    typealias EdgeItem = (window: UInt32, frame: Rect, column: Double)
+
+    static func edgeItems(_ placements: [Placement]) -> [EdgeItem] {
+        placements.map { ($0.windowID, $0.frame, $0.virtualX) }
+    }
+
+    /// Columns past each canvas edge, nearest to the visible area first
+    /// (desired top-to-bottom order), each listing its windows top to bottom.
+    /// Only edges with more than one column are listed: fully visible columns
+    /// never overlap.
+    static func edgeGroups(_ items: [EdgeItem], canvas: Rect) -> [[[UInt32]]] {
+        func columns(_ side: [EdgeItem], left: Bool) -> [[UInt32]] {
+            let byColumn = Dictionary(grouping: side, by: \.column)
+            return byColumn.keys.sorted(by: left ? (>) : (<)).map { key in
+                byColumn[key]!.sorted { $0.frame.y < $1.frame.y }.map(\.window)
+            }
+        }
+        let left = columns(items.filter { $0.frame.x < canvas.x - 0.5 }, left: true)
+        let right = columns(items.filter { $0.frame.x + $0.frame.width > canvas.x + canvas.width + 0.5 }, left: false)
         return [left, right].filter { $0.count > 1 }
     }
 
     /// Columns past the same edge overlap there (macOS keeps part of every
     /// window on screen), so which one shows would depend on window order,
     /// which clicks and app activation change. Only the column nearest the
-    /// visible area keeps its sliver or peek; those beyond it are pushed to the
-    /// screen edge with 1 pt left on screen. Returns their new frames.
-    static func tuck(_ frames: [(window: UInt32, frame: Rect)], canvas: Rect, screenInset: Double) -> [UInt32: Rect] {
-        let byID = Dictionary(frames.map { ($0.window, $0.frame) }, uniquingKeysWith: { a, _ in a })
-        let groups = edgeGroups(frames, canvas: canvas)
+    /// visible area keeps its sliver or peek, with every window of a stacked
+    /// column; those beyond it are pushed to the screen edge with 1 pt left on
+    /// screen. Returns their new frames.
+    static func tuck(_ items: [EdgeItem], canvas: Rect, screenInset: Double) -> [UInt32: Rect] {
+        let byID = Dictionary(items.map { ($0.window, $0.frame) }, uniquingKeysWith: { a, _ in a })
         var result: [UInt32: Rect] = [:]
-        for (index, group) in groups.enumerated() {
-            let left = byID[group[0]].map { $0.x < canvas.x } ?? (index == 0)
-            for wid in group.dropFirst() {
+        for (index, group) in edgeGroups(items, canvas: canvas).enumerated() {
+            let left = byID[group[0][0]].map { $0.x < canvas.x } ?? (index == 0)
+            for wid in group.dropFirst().joined() {
                 guard var frame = byID[wid] else { continue }
                 frame.x = left ? canvas.x - screenInset - frame.width + 1 : canvas.x + canvas.width + screenInset - 1
                 result[wid] = frame

@@ -2012,7 +2012,7 @@ import PaperiCore
         if !forced, applied[space] == placements { return }
         var allConfirmed = true
         var unresponsive: Set<pid_t> = []
-        let tucked = LiveReconciliation.tuck(placements.map { ($0.windowID, $0.frame) },
+        let tucked = LiveReconciliation.tuck(LiveReconciliation.edgeItems(placements),
                                              canvas: session.canvas, screenInset: options.outerGap)
         for placement in placements {
             let wid = placement.windowID

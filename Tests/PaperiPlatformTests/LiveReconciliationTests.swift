@@ -109,7 +109,7 @@ import PaperiCore
         })
         let placements = try layout.placements(in: canvas, gap: 8)
         let targets = LiveReconciliation.focusTargets(placements, canvas: canvas, screenInset: 8)
-        let tucked = LiveReconciliation.tuck(placements.map { ($0.windowID, $0.frame) }, canvas: canvas, screenInset: 8)
+        let tucked = LiveReconciliation.tuck(LiveReconciliation.edgeItems(placements), canvas: canvas, screenInset: 8)
         #expect(targets.count == placements.count)
         #expect(targets[1] == placements[0].frame)
         #expect(targets[2] == placements[1].frame)
@@ -167,28 +167,54 @@ import PaperiCore
 
     @Test func edgeGroupsListColumnsPastEachEdgeNearestFirst() {
         let canvas = Rect(x: 8, y: 38, width: 1424, height: 886)
-        func p(_ id: UInt32, _ x: Double, _ w: Double) -> (window: UInt32, frame: Rect) {
-            (id, Rect(x: x, y: 38, width: w, height: 886))
+        func p(_ id: UInt32, _ x: Double, _ w: Double) -> LiveReconciliation.EdgeItem {
+            (id, Rect(x: x, y: 38, width: w, height: 886), x)
         }
         let placements = [p(1, -1399, 1408), p(2, -1044, 1248), p(3, 212, 1212), p(4, 1264, 1212), p(5, 1431, 1408)]
-        #expect(LiveReconciliation.edgeGroups(placements, canvas: canvas) == [[2, 1], [4, 5]])
+        #expect(LiveReconciliation.edgeGroups(placements, canvas: canvas) == [[[2], [1]], [[4], [5]]])
         // A single column past an edge overlaps nothing.
         #expect(LiveReconciliation.edgeGroups([p(3, 212, 1212), p(4, 1264, 1212)], canvas: canvas).isEmpty)
     }
 
     @Test func columnsBeyondTheNearestArePushedToTheScreenEdge() {
         let canvas = Rect(x: 8, y: 38, width: 1424, height: 886)
-        let frames: [(window: UInt32, frame: Rect)] = [
-            (1, Rect(x: -1399, y: 38, width: 1408, height: 886)),   // left sliver behind the peek
-            (2, Rect(x: -1044, y: 38, width: 1248, height: 886)),   // left peek (nearest)
-            (3, Rect(x: 212, y: 38, width: 1212, height: 886)),     // focused
-            (4, Rect(x: 1431, y: 38, width: 1408, height: 886)),    // right sliver (alone)
+        let frames: [LiveReconciliation.EdgeItem] = [
+            (1, Rect(x: -1399, y: 38, width: 1408, height: 886), 1),   // left sliver behind the peek
+            (2, Rect(x: -1044, y: 38, width: 1248, height: 886), 2),   // left peek (nearest)
+            (3, Rect(x: 212, y: 38, width: 1212, height: 886), 3),     // focused
+            (4, Rect(x: 1431, y: 38, width: 1408, height: 886), 4),    // right sliver (alone)
         ]
         let tucked = LiveReconciliation.tuck(frames, canvas: canvas, screenInset: 8)
         #expect(tucked == [1: Rect(x: 0 - 1408 + 1, y: 38, width: 1408, height: 886)])
-        let right = LiveReconciliation.tuck([(5, Rect(x: 1264, y: 38, width: 1212, height: 886)),
-                                             (6, Rect(x: 1431, y: 38, width: 1408, height: 886))],
+        let right = LiveReconciliation.tuck([(5, Rect(x: 1264, y: 38, width: 1212, height: 886), 5),
+                                             (6, Rect(x: 1431, y: 38, width: 1408, height: 886), 6)],
                                             canvas: canvas, screenInset: 8)
         #expect(right == [6: Rect(x: 1439, y: 38, width: 1408, height: 886)])
+    }
+
+    @Test func aStackedColumnPastAnEdgeKeepsAllItsWindows() throws {
+        // The peeking column on the right is stacked; both its windows stay
+        // in it, and only the column beyond it is tucked.
+        let slot = { (id: UInt32) in Slot(id: "slot\(id)", members: [id], activeMember: id) }
+        let layout = Layout(columns: [Column(slots: [slot(1)], width: 1000),
+                                      Column(slots: [slot(2), slot(3)], width: 600),
+                                      Column(slots: [slot(4)], width: 600)], focused: "slot1")
+        let placements = try layout.placements(in: canvas, gap: 8)
+        #expect(LiveReconciliation.edgeGroups(LiveReconciliation.edgeItems(placements), canvas: canvas) == [[[2, 3], [4]]])
+        let targets = LiveReconciliation.focusTargets(placements, canvas: canvas, screenInset: 8)
+        let frames = Dictionary(uniqueKeysWithValues: placements.map { ($0.windowID, $0.frame) })
+        #expect(targets[2] == frames[2])
+        #expect(targets[3] == frames[3])
+        #expect(targets[4]?.x == canvas.x + canvas.width + 8 - 1)
+    }
+
+    @Test func columnsClampedAtTheSameEdgeStayDistinct() {
+        // Two columns clamped to the same sliver x are still two columns.
+        let canvas = Rect(x: 8, y: 38, width: 1424, height: 886)
+        let items: [LiveReconciliation.EdgeItem] = [
+            (1, Rect(x: 1431, y: 38, width: 600, height: 886), 2000),
+            (2, Rect(x: 1431, y: 38, width: 600, height: 886), 2608),
+        ]
+        #expect(LiveReconciliation.edgeGroups(items, canvas: canvas) == [[[1], [2]]])
     }
 }
