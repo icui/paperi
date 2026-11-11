@@ -30,12 +30,12 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         /// Bundle IDs whose windows hold in-content tabs (e.g. Chrome): a
         /// swipe up closes the current tab with ⌘W instead of the window.
         public var tabCloseApps: [String]
-        /// Swiping down minimizes the focused window (with its native tabs).
-        public var swipeDownToMinimize: Bool
+        /// What swiping down does to the focused window.
+        public var swipeDown: SwipeDownAction
 
         public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.4,
                     commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false,
-                    swipeUpToClose: Bool = true, tabCloseApps: [String] = [], swipeDownToMinimize: Bool = true) {
+                    swipeUpToClose: Bool = true, tabCloseApps: [String] = [], swipeDown: SwipeDownAction = .newWindow) {
             self.enabled = enabled
             self.fingers = fingers
             self.travel = travel
@@ -44,11 +44,13 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             self.invert = invert
             self.swipeUpToClose = swipeUpToClose
             self.tabCloseApps = tabCloseApps
-            self.swipeDownToMinimize = swipeDownToMinimize
+            self.swipeDown = swipeDown
         }
 
         enum CodingKeys: String, CodingKey {
-            case enabled, fingers, travel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDownToMinimize
+            case enabled, fingers, travel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDown
+            /// Legacy boolean: `false` reads as `swipeDown: "none"`.
+            case swipeDownToMinimize
         }
 
         /// Omitted keys keep their defaults.
@@ -63,9 +65,33 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             invert = try c.decodeIfPresent(Bool.self, forKey: .invert) ?? d.invert
             swipeUpToClose = try c.decodeIfPresent(Bool.self, forKey: .swipeUpToClose) ?? d.swipeUpToClose
             tabCloseApps = try c.decodeIfPresent([String].self, forKey: .tabCloseApps) ?? d.tabCloseApps
-            swipeDownToMinimize = try c.decodeIfPresent(Bool.self, forKey: .swipeDownToMinimize) ?? d.swipeDownToMinimize
+            if let raw = try c.decodeIfPresent(String.self, forKey: .swipeDown) {
+                guard let action = SwipeDownAction(rawValue: raw) else {
+                    throw DecodingError.dataCorruptedError(forKey: .swipeDown, in: c,
+                        debugDescription: "expected minimize, newWindow or none, got \(raw)")
+                }
+                swipeDown = action
+            } else if try c.decodeIfPresent(Bool.self, forKey: .swipeDownToMinimize) == false {
+                swipeDown = .none
+            } else {
+                swipeDown = d.swipeDown
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(enabled, forKey: .enabled); try c.encode(fingers, forKey: .fingers)
+            try c.encode(travel, forKey: .travel); try c.encode(commitThreshold, forKey: .commitThreshold)
+            try c.encode(flickVelocity, forKey: .flickVelocity); try c.encode(invert, forKey: .invert)
+            try c.encode(swipeUpToClose, forKey: .swipeUpToClose); try c.encode(tabCloseApps, forKey: .tabCloseApps)
+            try c.encode(swipeDown.rawValue, forKey: .swipeDown)
         }
     }
+
+    /// What swiping down does: open a new window of the focused window's app
+    /// (the default; its "New Window" menu item, else ⌘N), minimize it, or
+    /// nothing.
+    public enum SwipeDownAction: String, Codable, Equatable, Sendable, CaseIterable { case minimize, newWindow, none }
 
     /// Where focus goes when the focused tiled window closes: the column to
     /// the `left` (else right), to the `right` (else left), or wherever macOS
@@ -198,7 +224,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         "invert": false,
         "swipeUpToClose": true,
         "tabCloseApps": [],
-        "swipeDownToMinimize": true
+        "swipeDown": "newWindow"
       },
       "hotkeys": {
         "alt-cmd-j": "focus left",

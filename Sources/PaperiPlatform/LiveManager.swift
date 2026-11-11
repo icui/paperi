@@ -261,9 +261,11 @@ import PaperiCore
             destroyedNotified.insert(wid)
         }
         let ownMinimize = name == kAXWindowMiniaturizedNotification && swipe.map {
-            $0.minimizing && $0.released == true && $0.closeWindow == event["windowID"] as? UInt32
+            $0.pulling && $0.pullAction == .minimize && $0.released == true && $0.closeWindow == event["windowID"] as? UInt32
         } == true
-        if motionActive && !ownMinimize && [kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification,
+        // ⌘N from a released new-window swipe opens a window under the overlay.
+        let ownNewWindow = name == kAXWindowCreatedNotification && swipe.map { $0.showsNewWindow && $0.released == true } == true
+        if motionActive && !ownMinimize && !ownNewWindow && [kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification,
                                             kAXWindowCreatedNotification].contains(name) {
             cancelMotion(); motionFrames.removeAll()
         }
@@ -1045,11 +1047,16 @@ import PaperiCore
         /// The focused window a swipe up would close, if it is on screen.
         let closeWindow: UInt32?
         /// The fingers locked vertically: images track a close (up) or a
-        /// minimize (down, `minimizing`), not the strip.
+        /// pull (down, `pulling`: minimize or new window), not the strip.
         var closing = false
-        var minimizing = false
+        var pulling = false
+        var pullAction: LiveConfig.SwipeDownAction = .minimize
         /// The close-tab indicator replaces moving the window.
-        var showsTabClose: Bool { closing && !minimizing && tabClose != nil }
+        var showsTabClose: Bool { closing && !pulling && tabClose != nil }
+        /// The new-window indicator replaces moving the window.
+        var showsNewWindow: Bool { closing && pulling && pullAction == .newWindow }
+        var showsIndicator: Bool { showsTabClose || showsNewWindow }
+        var indicatorStyle: GestureIndicatorStyle { showsNewWindow ? .newWindow : .closeTab }
         /// Set when a swipe up closes a tab rather than the window: the window
         /// stays put and a close-tab indicator tracks the fingers instead.
         let tabClose: TabClose?
@@ -1186,7 +1193,7 @@ import PaperiCore
                 flickVelocity: options.config.gesture.flickVelocity,
                 invert: options.config.gesture.invert,
                 closeTravel: options.config.gesture.swipeUpToClose ? options.config.gesture.travel : nil,
-                minimizeTravel: options.config.gesture.swipeDownToMinimize ? options.config.gesture.travel : nil
+                pullTravel: options.config.gesture.swipeDown == .none ? nil : options.config.gesture.travel
             )
             var swipeReducer = SlotSwipe(config: cfg)
             swipeReducer.begin(at: time)
@@ -1218,16 +1225,16 @@ import PaperiCore
                     if case .closing(_, let progress, _, _) = swipeReducer.state {
                         updateSwipe(progress)
                     }
-                case .closeUpdated(let progress), .minimizeUpdated(let progress):
+                case .closeUpdated(let progress), .pullUpdated(let progress):
                     updateSwipe(progress)
-                case .minimizeStarted:
+                case .pullStarted:
                     let res: [String: Any] = swipe != nil ? ["ok": true] : beginSwipe()
-                    guard res["ok"] as? Bool == true, startClosing(minimize: true) else {
+                    guard res["ok"] as? Bool == true, startClosing(pull: true) else {
                         cancelSwipe()
                         slotSwipe = nil
                         return
                     }
-                    if case .minimizing(_, let progress, _, _) = swipeReducer.state {
+                    if case .pulling(_, let progress, _, _) = swipeReducer.state {
                         updateSwipe(progress)
                     }
                 case .cancelled:
@@ -1247,7 +1254,7 @@ import PaperiCore
             switch decision {
             case .commit(let direction):
                 endSwipe(commit: true, direction: direction)
-            case .close, .minimize:
+            case .close, .pull:
                 endSwipe(commit: true)
             case .snapBack:
                 endSwipe(commit: false)
@@ -1391,12 +1398,17 @@ import PaperiCore
         return ["ok": true, "neighbours": neighbours.count]
     }
 
-    /// Switches a tracking swipe to closing (or minimizing) its focused window.
-    private func startClosing(minimize: Bool = false) -> Bool {
+    /// Switches a tracking swipe to closing its focused window, or to a pull
+    /// (down: minimize it or open a new window, per `gesture.swipeDown`).
+    private func startClosing(pull: Bool = false) -> Bool {
         guard var state = swipe, state.released == nil, state.closeWindow != nil else { return false }
+        if pull, options.config.gesture.swipeDown == .none { return false }
         state.closing = true
-        state.minimizing = minimize
+        state.pulling = pull
+        state.pullAction = options.config.gesture.swipeDown
         swipe = state
+        // Nothing moves: show only the indicator over the live windows.
+        if state.showsIndicator { state.overlay.showIndicatorOnly() }
         return true
     }
 
@@ -1436,8 +1448,9 @@ import PaperiCore
         state.progress = next
         swipe = state
         guard changed else { return }
-        if state.showsTabClose, let wid = state.closeWindow {
-            state.overlay.trackTabClose(window: wid, progress: next, threshold: options.config.gesture.commitThreshold)
+        if state.showsIndicator, let wid = state.closeWindow {
+            state.overlay.trackIndicator(state.indicatorStyle, window: wid, progress: next,
+                                         threshold: options.config.gesture.commitThreshold)
         } else {
             state.overlay.place(swipeFrames(state))
             if state.closing, let wid = state.closeWindow { state.overlay.setOpacity(wid, closeOpacity(next)) }
@@ -1448,7 +1461,7 @@ import PaperiCore
 
     private func swipeFrames(_ state: Swipe, progress: Double) -> [UInt32: Rect] {
         // Closing a tab leaves the window where it is.
-        if state.closing { return state.showsTabClose ? state.starts : closeFrames(state, progress: progress) }
+        if state.closing { return state.showsIndicator ? state.starts : closeFrames(state, progress: progress) }
         let direction: Direction = progress < 0 ? .left : .right
         guard let ends = state.ends[direction] else {
             // Strip end: resist, moving at most a few points.
@@ -1470,11 +1483,11 @@ import PaperiCore
     /// its display; going down, it passes under the Dock.
     private func closeFrames(_ state: Swipe, progress: Double) -> [UInt32: Rect] {
         guard let wid = state.closeWindow, var frame = state.starts[wid] else { return state.starts }
-        let distance = state.minimizing
+        let distance = state.pulling
             ? state.overlay.screenBottom - frame.y + Self.closeShadowClearance
             : frame.y + frame.height - state.overlay.screenTop + Self.closeShadowClearance
         let absP = min(1, progress)
-        frame.y -= (state.minimizing ? -1 : 1) * (distance * absP + max(0, progress - 1) * Self.swipeEdgeResistance)
+        frame.y -= (state.pulling ? -1 : 1) * (distance * absP + max(0, progress - 1) * Self.swipeEdgeResistance)
         var frames = state.starts
         frames[wid] = frame
         return frames
@@ -1515,7 +1528,12 @@ import PaperiCore
         return Self.sendCommandW(to: pid, window: wid) ? .key : .none
     }
 
-    private static func sendCommandW(to pid: pid_t, window wid: UInt32) -> Bool {
+    static let keyW: CGKeyCode = 13, keyN: CGKeyCode = 45
+
+    private static func sendCommandW(to pid: pid_t, window wid: UInt32) -> Bool { sendCommand(keyW, to: pid, window: wid) }
+
+    /// ⌘`key` to the app, only while `wid` is its focused window.
+    private static func sendCommand(_ key: CGKeyCode, to pid: pid_t, window wid: UInt32) -> Bool {
         let application = AXUIElementCreateApplication(pid)
         guard let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
               CFGetTypeID(value) == AXUIElementGetTypeID(),
@@ -1523,8 +1541,7 @@ import PaperiCore
         // A private-state source is ignored as a key equivalent; HID state is not.
         let source = CGEventSource(stateID: .hidSystemState)
         for down in [true, false] {
-            // 13 is the W key.
-            guard let event = CGEvent(keyboardEventSource: source, virtualKey: 13, keyDown: down) else { return false }
+            guard let event = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down) else { return false }
             event.flags = .maskCommand
             event.postToPid(pid)
             if down { usleep(15_000) }
@@ -1544,7 +1561,8 @@ import PaperiCore
     /// window that stays (an unsaved-changes prompt) is revealed again.
     private func finishClose(_ state: Swipe, settle: Double) {
         guard let wid = state.closeWindow else { return }
-        if state.minimizing { finishMinimize(state, window: wid, settle: settle); return }
+        if state.showsNewWindow { finishNewWindow(state, window: wid); return }
+        if state.pulling { finishMinimize(state, window: wid, settle: settle); return }
         if state.showsTabClose, let mode = state.tabClose { finishTabClose(state, window: wid, mode: mode); return }
         let generation = state.generation, overlay = state.overlay
         let from = state.progress, path = state
@@ -1713,14 +1731,76 @@ import PaperiCore
         try? await Task.sleep(for: .milliseconds(34))
     }
 
-    /// Committed tab close: the indicator confirms, the app closes the front
-    /// tab under the overlay, and the overlay fades onto the next tab. A
+    enum NewWindowMethod: String { case menu, key, none }
+
+    /// Opens a new window of the app: its "New Window" menu item when it has
+    /// one (it means a window even where ⌘N opens a document or message, and
+    /// needs no keyboard focus), else ⌘N while `wid` is its focused window.
+    private static func openNewWindow(pid: pid_t, window wid: UInt32) -> NewWindowMethod {
+        if let item = newWindowMenuItem(pid: pid),
+           AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { return .menu }
+        return sendCommand(keyN, to: pid, window: wid) ? .key : .none
+    }
+
+    /// The app's English "New Window" menu item, else a "New … Window" one
+    /// (e.g. Finder's "New Finder Window"; never private or incognito). For
+    /// a submenu (Terminal's profiles), its first enabled item. Titles are
+    /// localised, so other languages fall back to ⌘N.
+    private static func newWindowMenuItem(pid: pid_t) -> AXUIElement? {
+        let application = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(application, 0.25)
+        func children(_ element: AXUIElement) -> [AXUIElement] {
+            Diagnostics.attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
+        }
+        func enabled(_ element: AXUIElement) -> Bool { Diagnostics.attribute(element, kAXEnabledAttribute) as? Bool != false }
+        guard let bar = Diagnostics.attribute(application, kAXMenuBarAttribute),
+              CFGetTypeID(bar) == AXUIElementGetTypeID() else { return nil }
+        var exact: AXUIElement?, loose: AXUIElement?
+        // Skip the Apple menu; look one level into each menu.
+        for top in children(bar as! AXUIElement).dropFirst() {
+            for menu in children(top) {
+                for item in children(menu) where enabled(item) {
+                    guard let title = (Diagnostics.attribute(item, kAXTitleAttribute) as? String)?
+                        .trimmingCharacters(in: .whitespaces).lowercased() else { continue }
+                    if title == "new window" { exact = exact ?? item }
+                    else if title.hasPrefix("new "), title.hasSuffix(" window"),
+                            !title.contains("private"), !title.contains("incognito") { loose = loose ?? item }
+                }
+            }
+            if exact != nil { break }
+        }
+        guard let found = exact ?? loose else { return nil }
+        if let submenu = children(found).first, let first = children(submenu).first(where: enabled) { return first }
+        return found
+    }
+
+    /// Committed swipe down with `swipeDown: newWindow`: the app opens a new
+    /// window (menu item, else ⌘N) and the overlay fades; the new window is
+    /// admitted to the strip like any other.
+    private func finishNewWindow(_ state: Swipe, window wid: UInt32) {
+        let generation = state.generation, overlay = state.overlay
+        let method = pidForWindow[wid].map { Self.openNewWindow(pid: $0, window: wid) } ?? .none
+        let sent = method != .none
+        if !sent { overlay.retractIndicator(duration: 0.18) }
+        swipeMetrics["newWindow"] = method.rawValue
+        swipeTask = Task { [weak self] in
+            // One frame for the action to land before the fade.
+            try? await Task.sleep(for: .milliseconds(16))
+            guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
+            overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
+            self.swipeMetrics["state"] = sent ? "newWindow" : "newWindowRefused"
+            self.swipeMetrics["totalMS"] = (ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 1000
+            self.scheduleRefresh()
+        }
+    }
+
+    /// Committed tab close: the app closes the front tab under the overlay,
+    /// and the overlay fades onto the next tab. A
     /// native tab is pressed shut (⌘W without a close button); a listed
     /// app's in-content tab gets ⌘W. A tab that stays (an unsaved-changes
     /// prompt) is simply revealed again.
     private func finishTabClose(_ state: Swipe, window wid: UInt32, mode: TabClose) {
         let generation = state.generation, overlay = state.overlay
-        overlay.confirmTabClose(window: wid)
         let released = ProcessInfo.processInfo.systemUptime
         let method: CloseMethod
         switch mode {
@@ -1729,10 +1809,8 @@ import PaperiCore
         }
         swipeMetrics["closeMethod"] = method.rawValue
         swipeMetrics["tabClose"] = mode.rawValue
-        if method == .none { overlay.retractTabClose(duration: 0.18) }
+        if method == .none { overlay.retractIndicator(duration: 0.18) }
         swipeTask = Task { [weak self] in
-            // Let the confirmation read before the next tab shows.
-            try? await Task.sleep(for: .milliseconds(200))
             var gone = false
             if method != .none {
                 if mode == .native {
@@ -1771,7 +1849,9 @@ import PaperiCore
             swipe = nil
             swipeTask = nil
             scheduleRefresh()
-            if commit, state.minimizing, let wid = target { _ = minimize(wid) }
+            if commit, state.showsNewWindow, let wid = target, let pid = pidForWindow[wid] {
+                _ = Self.openNewWindow(pid: pid, window: wid)
+            } else if commit, state.pulling, let wid = target { _ = minimize(wid) }
             else if commit, state.closing, let wid = target {
                 if state.showsTabClose && state.tabClose == .app, let pid = pidForWindow[wid] { _ = Self.sendCommandW(to: pid, window: wid) }
                 else { _ = pressClose(wid) }
@@ -1797,7 +1877,7 @@ import PaperiCore
             let from = state.progress, path = state
             overlay.slide(along: { u in self.swipeFrames(path, progress: from * (1 - u)) },
                           to: state.starts, duration: duration, curve: curve)
-            if state.showsTabClose { overlay.retractTabClose(duration: duration) }
+            if state.showsIndicator { overlay.retractIndicator(duration: duration) }
             else if state.closing, let wid = state.closeWindow { overlay.fade(wid, to: 1, duration: duration, curve: curve) }
             swipeTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
@@ -1879,9 +1959,9 @@ import PaperiCore
     private func simulateSwipe(_ direction: Direction, travel: Double) -> [String: Any] {
         let reply = beginSwipe(isSimulation: true)
         guard reply["ok"] as? Bool == true else { return reply }
-        if (direction == .up || direction == .down) && !startClosing(minimize: direction == .down) {
+        if (direction == .up || direction == .down) && !startClosing(pull: direction == .down) {
             cancelSwipe()
-            return ["ok": false, "error": "no focused window on screen to \(direction == .up ? "close" : "minimize")"]
+            return ["ok": false, "error": direction == .up ? "no focused window on screen to close" : "swipe down is off or no window is focused"]
         }
         let sign = direction == .left ? -1.0 : 1.0
         let started = ProcessInfo.processInfo.systemUptime
