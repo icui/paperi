@@ -53,6 +53,10 @@ import PaperiCore
         root.contents = try await background.value
         root.contentsScale = scale
         try Task.checkCancellation()
+        // The key window is the frontmost app's frontmost window; only it gets
+        // macOS's larger active shadow.
+        let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let key = windows.first { $0.owningApplication?.processID == frontPID }?.windowID
         // ScreenCaptureKit's list is front to back; compose back to front.
         for (item, task) in windowCaptures {
             let frame = Rect(x: item.frame.minX, y: item.frame.minY, width: item.frame.width, height: item.frame.height)
@@ -64,6 +68,7 @@ import PaperiCore
             layer.contentsScale = scale
             layer.contentsGravity = .resize
             layer.frame = local(frame)
+            Self.addShadow(to: layer, image: image, scale: scale, active: item.windowID == key)
             root.addSublayer(layer)
             layers[item.windowID] = layer
             captured[item.windowID] = frame
@@ -98,6 +103,32 @@ import PaperiCore
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
         textureBytes += image.bytesPerRow * image.height - bytes
         return image
+    }
+
+    /// Captures exclude window shadows (a shadowed capture is squeezed into the
+    /// window's frame), so draw an approximation of the system shadow instead of
+    /// letting it vanish while the overlay is up. A path keeps it cheap to move.
+    private static func addShadow(to layer: CALayer, image: CGImage, scale: Double, active: Bool) {
+        let radius = cornerRadius(of: image) / scale
+        layer.shadowPath = CGPath(roundedRect: layer.bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        layer.shadowColor = NSColor.black.cgColor
+        layer.shadowOpacity = active ? 0.4 : 0.22
+        layer.shadowRadius = active ? 16 : 7
+        layer.shadowOffset = CGSize(width: 0, height: active ? -8 : -3)
+    }
+
+    /// A rounded corner of radius r first turns opaque on the diagonal at
+    /// r * (1 - 1/sqrt 2); read that from the top-left corner of the capture.
+    private static func cornerRadius(of image: CGImage) -> Double {
+        let n = min(64, image.width, image.height)
+        guard n > 0, let corner = image.cropping(to: CGRect(x: 0, y: 0, width: n, height: n)),
+              let context = CGContext(data: nil, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let data = context.data?.assumingMemoryBound(to: UInt8.self) else { return 0 }
+        context.draw(corner, in: CGRect(x: 0, y: 0, width: n, height: n))
+        guard let first = (0..<n).first(where: { data[($0 * n + $0) * 4 + 3] >= 128 }) else { return 0 }
+        return Double(first) / (1 - 1 / 2.0.squareRoot())
     }
 
     var isShown: Bool { window != nil }
