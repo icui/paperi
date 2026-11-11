@@ -10,6 +10,8 @@ import PaperiCore
 @MainActor final class SnapshotTransition {
     private var window: NSWindow?
     private var layers: [UInt32: CALayer] = [:]
+    private var root: CALayer?
+    private var tabIndicator: TabCloseIndicator?
     private var screenFrame = CGRect.zero
     private var screen: NSScreen?
     private var frameClock: FrameClock?
@@ -79,6 +81,7 @@ import PaperiCore
             layers[item.windowID] = layer
             captured[item.windowID] = frame
         }
+        self.root = root
         let overlay = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
         overlay.isReleasedWhenClosed = false
         overlay.isOpaque = true
@@ -232,6 +235,38 @@ import PaperiCore
         window?.orderOut(nil)
         window = nil
         layers.removeAll()
+        root = nil; tabIndicator = nil
+    }
+
+    // MARK: close-tab indicator
+
+    /// Follows the fingers while a swipe up closes a tab: the window stays
+    /// put, dims, and a "Close Tab" pill rises over it with a ring that
+    /// fills until `threshold`, where it turns red (release closes).
+    func trackTabClose(window wid: UInt32, progress: Double, threshold: Double) {
+        guard let indicator = indicator(for: wid) else { return }
+        indicator.update(progress: progress, threshold: threshold)
+    }
+
+    /// Release past the threshold: the pill confirms with a short pop.
+    func confirmTabClose(window wid: UInt32) {
+        indicator(for: wid)?.confirm()
+    }
+
+    /// Released early: the pill sinks away and the dim lifts.
+    func retractTabClose(duration: Double) {
+        tabIndicator?.retract(duration: duration)
+    }
+
+    private func indicator(for wid: UInt32) -> TabCloseIndicator? {
+        if let tabIndicator { return tabIndicator }
+        guard let root, let frame = captured[wid], let window = layers[wid] else { return nil }
+        let indicator = TabCloseIndicator(window: local(frame), cornerRadius: 10,
+                                          scale: Double(screen?.backingScaleFactor ?? 2))
+        root.addSublayer(indicator.dim)
+        root.addSublayer(indicator.pill)
+        tabIndicator = indicator
+        return indicator
     }
 
     /// Fades the overlay out over the real windows, then removes it. The
@@ -242,6 +277,7 @@ import PaperiCore
         guard let overlay = window else { return }
         window = nil
         layers.removeAll()
+        root = nil; tabIndicator = nil
         guard duration > 0 else { overlay.orderOut(nil); return }
         let number = CGWindowID(overlay.windowNumber)
         Self.fading.insert(number)
@@ -294,5 +330,154 @@ import PaperiCore
     func invalidate() {
         link?.invalidate()
         link = nil
+    }
+}
+
+/// Close-tab feedback drawn over a window's snapshot. All geometry is in the
+/// overlay's (bottom-left) layer space.
+@MainActor private final class TabCloseIndicator {
+    let dim = CALayer()
+    let pill = CALayer()
+    private let track = CAShapeLayer()
+    private let ring = CAShapeLayer()
+    private let cross = CAShapeLayer()
+    private let label = CATextLayer()
+    private let rest: CGPoint
+    private var armed = false
+
+    private static let size = CGSize(width: 190, height: 48)
+    private static let rise = 28.0
+    private static let idle = NSColor(white: 0.1, alpha: 0.82).cgColor
+    private static let alert = NSColor.systemRed.withAlphaComponent(0.95).cgColor
+
+    init(window: CGRect, cornerRadius: Double, scale: Double) {
+        let off: [String: any CAAction] = ["position": NSNull(), "bounds": NSNull(), "opacity": NSNull(),
+                                           "transform": NSNull(), "backgroundColor": NSNull(), "strokeEnd": NSNull(),
+                                           "string": NSNull(), "contents": NSNull()]
+        dim.frame = window
+        dim.cornerRadius = cornerRadius
+        dim.backgroundColor = NSColor.black.cgColor
+        dim.opacity = 0
+        dim.actions = off
+
+        let size = Self.size
+        // Upper part of the window, where the tab bar is.
+        rest = CGPoint(x: window.midX, y: window.maxY - min(140, max(size.height, window.height * 0.28)))
+        pill.bounds = CGRect(origin: .zero, size: size)
+        pill.position = CGPoint(x: rest.x, y: rest.y - Self.rise)
+        pill.cornerRadius = size.height / 2
+        pill.backgroundColor = Self.idle
+        pill.borderColor = NSColor(white: 1, alpha: 0.18).cgColor
+        pill.borderWidth = 1
+        pill.shadowColor = NSColor.black.cgColor
+        pill.shadowOpacity = 0.35
+        pill.shadowRadius = 12
+        pill.shadowOffset = CGSize(width: 0, height: -4)
+        pill.shadowPath = CGPath(roundedRect: pill.bounds, cornerWidth: size.height / 2, cornerHeight: size.height / 2, transform: nil)
+        pill.opacity = 0
+        pill.actions = off
+
+        let center = CGPoint(x: size.height / 2, y: size.height / 2)
+        // From 12 o'clock, filling clockwise (layer space is y-up).
+        let clockwise = CGMutablePath()
+        clockwise.addArc(center: center, radius: 13, startAngle: .pi / 2, endAngle: .pi / 2 - 2 * .pi, clockwise: true)
+        for (layer, color) in [(track, NSColor(white: 1, alpha: 0.25)), (ring, NSColor.white)] {
+            layer.frame = pill.bounds
+            layer.path = clockwise
+            layer.fillColor = nil
+            layer.strokeColor = color.cgColor
+            layer.lineWidth = 2.5
+            layer.lineCap = .round
+            layer.actions = off
+            pill.addSublayer(layer)
+        }
+        ring.strokeEnd = 0
+
+        let cp = CGMutablePath()
+        cp.move(to: CGPoint(x: center.x - 5, y: center.y - 5)); cp.addLine(to: CGPoint(x: center.x + 5, y: center.y + 5))
+        cp.move(to: CGPoint(x: center.x - 5, y: center.y + 5)); cp.addLine(to: CGPoint(x: center.x + 5, y: center.y - 5))
+        cross.frame = pill.bounds
+        cross.path = cp
+        cross.strokeColor = NSColor.white.cgColor
+        cross.lineWidth = 2.5
+        cross.lineCap = .round
+        cross.actions = off
+        pill.addSublayer(cross)
+
+        label.frame = CGRect(x: size.height - 2, y: (size.height - 20) / 2 - 1, width: size.width - size.height - 10, height: 20)
+        label.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
+        label.fontSize = 15
+        label.foregroundColor = NSColor.white.cgColor
+        label.alignmentMode = .left
+        label.contentsScale = scale
+        label.actions = off
+        label.string = "Close Tab"
+        pill.addSublayer(label)
+    }
+
+    func update(progress: Double, threshold: Double) {
+        let p = max(0, progress)
+        let fill = min(1, p / max(0.01, threshold))
+        let appear = min(1, p / max(0.01, threshold * 0.4))
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        dim.opacity = Float(0.12 + 0.28 * fill) * Float(appear)
+        pill.opacity = Float(appear)
+        pill.position = CGPoint(x: rest.x, y: rest.y - Self.rise * (1 - fill) + max(0, p - threshold) * 12)
+        let scale = 0.9 + 0.1 * fill
+        pill.transform = CATransform3DMakeScale(scale, scale, 1)
+        ring.strokeEnd = fill
+        CATransaction.commit()
+        setArmed(p >= threshold)
+    }
+
+    private func setArmed(_ value: Bool) {
+        guard value != armed else { return }
+        armed = value
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        label.string = value ? "Release to Close" : "Close Tab"
+        pill.backgroundColor = value ? Self.alert : Self.idle
+        CATransaction.commit()
+        let flash = CABasicAnimation(keyPath: "backgroundColor")
+        flash.fromValue = value ? Self.idle : Self.alert
+        flash.toValue = value ? Self.alert : Self.idle
+        flash.duration = 0.12
+        pill.add(flash, forKey: "armed")
+    }
+
+    func confirm() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        ring.strokeEnd = 1
+        pill.opacity = 1
+        pill.position = rest
+        pill.transform = CATransform3DIdentity
+        dim.opacity = 0.45
+        label.string = "Closing Tab"
+        pill.backgroundColor = Self.alert
+        CATransaction.commit()
+        let pop = CAKeyframeAnimation(keyPath: "transform.scale")
+        pop.values = [1.0, 1.08, 1.0]
+        pop.keyTimes = [0, 0.4, 1]
+        pop.duration = 0.2
+        pop.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        pill.add(pop, forKey: "pop")
+        CATransaction.flush()
+    }
+
+    func retract(duration: Double) {
+        let ease = CAMediaTimingFunction(name: .easeOut)
+        for (layer, key, to) in [(pill, "opacity", 0.0 as Any), (dim, "opacity", 0.0 as Any),
+                                 (pill, "position", NSValue(point: CGPoint(x: rest.x, y: rest.y - Self.rise)) as Any)] {
+            let animation = CABasicAnimation(keyPath: key)
+            animation.fromValue = layer.presentation()?.value(forKeyPath: key) ?? layer.value(forKeyPath: key)
+            animation.toValue = to
+            animation.duration = max(0.01, duration)
+            animation.timingFunction = ease
+            layer.setValue(to, forKeyPath: key)
+            layer.add(animation, forKey: "retract-" + key)
+        }
+        CATransaction.flush()
     }
 }

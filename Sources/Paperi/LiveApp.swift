@@ -510,6 +510,10 @@ import PaperiPlatform
               copy: "\(gesture.invert)", tip: "\"gesture.invert\": reverse the swipe direction")
         value(sub, "Swipe up to close: \(gesture.swipeUpToClose ? "on" : "off")\(origin(gesture.swipeUpToClose == defaults.swipeUpToClose))",
               copy: "\(gesture.swipeUpToClose)", tip: "\"gesture.swipeUpToClose\": swiping up closes the focused window")
+        let apps = gesture.tabCloseApps.isEmpty ? "none" : gesture.tabCloseApps.joined(separator: ", ")
+        value(sub, "Tab close apps: \(apps)\(origin(gesture.tabCloseApps == defaults.tabCloseApps))",
+              copy: gesture.tabCloseApps.joined(separator: ", "),
+              tip: "\"gesture.tabCloseApps\": bundle IDs whose swipe up closes the current tab with ⌘W")
         item.submenu = sub
     }
 

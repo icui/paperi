@@ -1030,6 +1030,9 @@ import PaperiCore
         let closeWindow: UInt32?
         /// The fingers locked upwards: images track a close, not the strip.
         var closing = false
+        /// Set when a swipe up closes a tab rather than the window: the window
+        /// stays put and a close-tab indicator tracks the fingers instead.
+        let tabClose: TabClose?
         var starts: [UInt32: Rect] = [:]
         var progress = 0.0
         var targetProgress = 0.0
@@ -1044,6 +1047,12 @@ import PaperiCore
         var failed = false
         var released: Bool?
         var releaseDirection: Direction?
+    }
+    enum TabClose: String {
+        /// The window is the front tab of a native tab group (AX press).
+        case native
+        /// The app is listed in `gesture.tabCloseApps`; its tabs close with ⌘W.
+        case app
     }
     private var swipe: Swipe?
     private var swipeTask: Task<Void, Never>?
@@ -1289,9 +1298,14 @@ import PaperiCore
         let overlay = SnapshotTransition()
         // Only the focused tiled window closes, and only if its image is captured.
         let closeWindow = session.state.layout.focused == nil || surveys[ctx.window] == nil ? nil : ctx.window
+        let tabClose: TabClose? = closeWindow.flatMap { wid in
+            let bundleID = NSRunningApplication(processIdentifier: ctx.pid)?.bundleIdentifier
+            if let bundleID, options.config.gesture.tabCloseApps.contains(bundleID) { return .app }
+            return tabGroup(wid).count > 1 ? .native : nil
+        }
         swipe = Swipe(space: space, generation: generation, overlay: overlay, surveys: surveys,
                       ends: ends, neighbours: neighbours, canvas: session.canvas, closeWindow: closeWindow,
-                      tracking: !pendingLock)
+                      tabClose: tabClose, tracking: !pendingLock)
         motionSpace = space
         swipeBegan = ProcessInfo.processInfo.systemUptime
         swipeMetrics = ["state": "capturing", "windows": surveys.count]
@@ -1380,13 +1394,19 @@ import PaperiCore
         let changed = next != state.progress
         state.progress = next
         swipe = state
-        if changed { state.overlay.place(swipeFrames(state)) }
+        guard changed else { return }
+        if state.closing, state.tabClose != nil, let wid = state.closeWindow {
+            state.overlay.trackTabClose(window: wid, progress: next, threshold: options.config.gesture.commitThreshold)
+        } else {
+            state.overlay.place(swipeFrames(state))
+        }
     }
 
     private func swipeFrames(_ state: Swipe) -> [UInt32: Rect] { swipeFrames(state, progress: state.progress) }
 
     private func swipeFrames(_ state: Swipe, progress: Double) -> [UInt32: Rect] {
-        if state.closing { return closeFrames(state, progress: progress) }
+        // Closing a tab leaves the window where it is.
+        if state.closing { return state.tabClose == nil ? closeFrames(state, progress: progress) : state.starts }
         let direction: Direction = progress < 0 ? .left : .right
         guard let ends = state.ends[direction] else {
             // Strip end: resist, moving at most a few points.
@@ -1418,12 +1438,46 @@ import PaperiCore
     /// Room for the active window shadow (radius 16, offset 8) above the display.
     private static let closeShadowClearance = 32.0
 
-    /// Presses the window's close button. False when it has none.
-    private func pressClose(_ wid: UInt32) -> Bool {
-        guard let pid = pidForWindow[wid], let element = references[wid] ?? findWindow(wid, pid: pid),
-              let value = Diagnostics.attribute(element, kAXCloseButtonAttribute),
-              CFGetTypeID(value) == AXUIElementGetTypeID() else { return false }
-        return AXUIElementPerformAction(value as! AXUIElement, kAXPressAction as CFString) == .success
+    enum CloseMethod: String { case press, key, none }
+
+    /// Every native tab in the window's slot, itself included.
+    private func tabGroup(_ wid: UInt32) -> Set<UInt32> {
+        guard let space = coordinator.spaceForWindow[wid], let session = coordinator.sessions[space],
+              let slot = session.state.layout.columns.lazy.flatMap(\.slots).first(where: { $0.members.contains(wid) })
+        else { return [wid] }
+        return Set(slot.members)
+    }
+
+    /// Presses the window's close button through Accessibility; in a native
+    /// tab group that closes only the front tab. Without a usable close
+    /// button (custom window controls), ⌘W goes to the app, but only while
+    /// this window is its focused window, so it cannot close a different one.
+    private func pressClose(_ wid: UInt32) -> CloseMethod {
+        guard let pid = pidForWindow[wid], let element = references[wid] ?? findWindow(wid, pid: pid) else { return .none }
+        // AppKit reports a disabled close button for windows without one, and
+        // pressing it reports success while doing nothing.
+        if let value = Diagnostics.attribute(element, kAXCloseButtonAttribute), CFGetTypeID(value) == AXUIElementGetTypeID(),
+           Diagnostics.attribute(value as! AXUIElement, kAXEnabledAttribute) as? Bool != false {
+            if AXUIElementPerformAction(value as! AXUIElement, kAXPressAction as CFString) == .success { return .press }
+        }
+        return Self.sendCommandW(to: pid, window: wid) ? .key : .none
+    }
+
+    private static func sendCommandW(to pid: pid_t, window wid: UInt32) -> Bool {
+        let application = AXUIElementCreateApplication(pid)
+        guard let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
+              CFGetTypeID(value) == AXUIElementGetTypeID(),
+              paperi_window_id(value as! AXUIElement) == wid else { return false }
+        // A private-state source is ignored as a key equivalent; HID state is not.
+        let source = CGEventSource(stateID: .hidSystemState)
+        for down in [true, false] {
+            // 13 is the W key.
+            guard let event = CGEvent(keyboardEventSource: source, virtualKey: 13, keyDown: down) else { return false }
+            event.flags = .maskCommand
+            event.postToPid(pid)
+            if down { usleep(15_000) }
+        }
+        return true
     }
 
     /// Whether WindowServer still shows the window.
@@ -1438,14 +1492,16 @@ import PaperiCore
     /// window that stays (an unsaved-changes prompt) is revealed again.
     private func finishClose(_ state: Swipe, settle: Double) {
         guard let wid = state.closeWindow else { return }
+        if let mode = state.tabClose { finishTabClose(state, window: wid, mode: mode); return }
         let generation = state.generation, overlay = state.overlay
         let from = state.progress, path = state
         let duration = SlotSwipe.settleDuration(distance: max(0, 1 - from), base: settle)
         overlay.slide(along: { u in self.closeFrames(path, progress: from + (1 - from) * u) },
                       to: closeFrames(path, progress: 1), duration: duration)
         let released = ProcessInfo.processInfo.systemUptime
-        let pressed = pressClose(wid)
-        swipeMetrics["closePressed"] = pressed
+        let method = pressClose(wid)
+        let pressed = method != .none
+        swipeMetrics["closeMethod"] = method.rawValue
         swipeTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
             var gone = false
@@ -1468,6 +1524,50 @@ import PaperiCore
         }
     }
 
+    /// Committed tab close: the indicator confirms, the app closes the front
+    /// tab under the overlay, and the overlay fades onto the next tab. A
+    /// native tab is pressed shut (⌘W without a close button); a listed
+    /// app's in-content tab gets ⌘W. A tab that stays (an unsaved-changes
+    /// prompt) is simply revealed again.
+    private func finishTabClose(_ state: Swipe, window wid: UInt32, mode: TabClose) {
+        let generation = state.generation, overlay = state.overlay
+        overlay.confirmTabClose(window: wid)
+        let released = ProcessInfo.processInfo.systemUptime
+        let method: CloseMethod
+        switch mode {
+        case .native: method = pressClose(wid)
+        case .app: method = pidForWindow[wid].map { Self.sendCommandW(to: $0, window: wid) ? .key : .none } ?? .none
+        }
+        swipeMetrics["closeMethod"] = method.rawValue
+        swipeMetrics["tabClose"] = mode.rawValue
+        if method == .none { overlay.retractTabClose(duration: 0.18) }
+        swipeTask = Task { [weak self] in
+            // Let the confirmation read before the next tab shows.
+            try? await Task.sleep(for: .milliseconds(200))
+            var gone = false
+            if method != .none {
+                if mode == .native {
+                    // The closed tab's window leaves; the next tab is a different one.
+                    for _ in 0..<32 {
+                        guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
+                        if self.destroyedNotified.contains(wid) || !Self.windowOnScreen(wid) { gone = true; break }
+                        try? await Task.sleep(for: .milliseconds(25))
+                    }
+                } else {
+                    // In-content tabs give no signal; allow one redraw.
+                    gone = true
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+            }
+            guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
+            overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
+            self.swipeMetrics["state"] = gone ? "tabClosed" : (method == .none ? "noCloseButton" : "closeRefused")
+            self.swipeMetrics["closeMS"] = (ProcessInfo.processInfo.systemUptime - released) * 1000
+            self.swipeMetrics["totalMS"] = (ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 1000
+            self.scheduleRefresh()
+        }
+    }
+
     /// Release towards the reducer’s chosen neighbour, or the progress side
     /// for simulations. A rejected commit slides back with no writes.
     func endSwipe(commit requested: Bool, direction requestedDirection: Direction? = nil) {
@@ -1482,7 +1582,10 @@ import PaperiCore
             swipe = nil
             swipeTask = nil
             scheduleRefresh()
-            if commit, state.closing, let wid = target { _ = pressClose(wid) }
+            if commit, state.closing, let wid = target {
+                if state.tabClose == .app, let pid = pidForWindow[wid] { _ = Self.sendCommandW(to: pid, window: wid) }
+                else { _ = pressClose(wid) }
+            }
             else if commit { _ = handle(["focus", direction == .left ? "left" : "right"]) }
             return
         }
@@ -1501,6 +1604,7 @@ import PaperiCore
             let from = state.progress, path = state
             overlay.slide(along: { u in self.swipeFrames(path, progress: from * (1 - u)) },
                           to: state.starts, duration: duration)
+            if state.closing && state.tabClose != nil { overlay.retractTabClose(duration: duration) }
             swipeTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
                 guard let self, self.swipe?.generation == generation else { return }
