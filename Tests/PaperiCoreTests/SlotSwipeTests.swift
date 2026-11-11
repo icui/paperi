@@ -295,4 +295,59 @@ struct SlotSwipeTests {
         _ = swipe.move(dx: 0, dy: 0.04, at: 0.03)
         #expect(swipe.end(at: 0.035) == .close)
     }
+
+    // Down past the commit threshold, then right: a turn.
+    private func armedPull() -> SlotSwipe {
+        var swipe = SlotSwipe(config: .init(lockThreshold: 0.01, pullTravel: 0.2, turnTravel: 0.2))
+        swipe.begin(at: 0)
+        _ = swipe.move(dx: 0, dy: -0.02, at: 0.01)
+        _ = swipe.move(dx: 0, dy: -0.12, at: 0.1)
+        return swipe
+    }
+
+    @Test func armedPullTurningRightClosesInstead() {
+        var swipe = armedPull()
+        // A small sideways drift does not turn yet.
+        #expect(swipe.move(dx: 0.01, dy: 0, at: 0.2) != .turnStarted)
+        #expect(swipe.move(dx: 0.025, dy: -0.002, at: 0.25) == .turnStarted)
+        guard case .turning(_, let shown, _, _) = swipe.state else { Issue.record("turning"); return }
+        #expect(shown == 0)
+        guard case .turnUpdated(let progress) = swipe.move(dx: 0.12, dy: 0, at: 0.4) else { Issue.record("update"); return }
+        #expect(progress > 0.5)
+        #expect(swipe.end(at: 0.45) == .turn)
+    }
+
+    @Test func turnReleasedEarlyDoesNothing() {
+        var swipe = armedPull()
+        #expect(swipe.move(dx: 0.035, dy: 0, at: 0.2) == .turnStarted)
+        _ = swipe.move(dx: 0.01, dy: 0, at: 0.5)
+        // Neither the tab close nor the pull it came from.
+        #expect(swipe.end(at: 0.7) == .snapBack)
+    }
+
+    @Test func unarmedOrDisabledPullDoesNotTurn() {
+        var early = SlotSwipe(config: .init(lockThreshold: 0.01, pullTravel: 0.2, turnTravel: 0.2))
+        early.begin(at: 0)
+        _ = early.move(dx: 0, dy: -0.02, at: 0.01)
+        _ = early.move(dx: 0, dy: -0.02, at: 0.05) // shown progress well below 0.5
+        if case .pullUpdated = early.move(dx: 0.06, dy: 0, at: 0.1) {} else { Issue.record("still pulling") }
+
+        var off = SlotSwipe(config: .init(lockThreshold: 0.01, pullTravel: 0.2))
+        off.begin(at: 0)
+        _ = off.move(dx: 0, dy: -0.02, at: 0.01)
+        _ = off.move(dx: 0, dy: -0.12, at: 0.1)
+        if case .pullUpdated = off.move(dx: 0.06, dy: 0, at: 0.2) {} else { Issue.record("still pulling") }
+        #expect(off.end(at: 0.3) == .pull)
+    }
+
+    @Test func diagonalWhileStillPullingDoesNotTurn() {
+        var swipe = armedPull()
+        // Mostly down with some rightward drift keeps pulling.
+        for step in 1...6 {
+            if case .pullUpdated = swipe.move(dx: 0.01, dy: -0.02, at: 0.1 + Double(step) * 0.02) {} else {
+                Issue.record("still pulling"); return
+            }
+        }
+        #expect(swipe.end(at: 0.3) == .pull)
+    }
 }

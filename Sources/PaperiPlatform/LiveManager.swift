@@ -1056,12 +1056,17 @@ import PaperiCore
         var closing = false
         var pulling = false
         var pullAction: LiveConfig.SwipeDownAction = .minimize
+        /// An armed new-window pull turned right: it closes a tab instead.
+        var turned = false
         /// The close-tab indicator replaces moving the window.
-        var showsTabClose: Bool { closing && !pulling && tabClose != nil }
+        var showsTabClose: Bool { closing && tabCloseMode != nil && (!pulling || turned) }
+        /// How the tab closes. A turn always closes one: without a known
+        /// tab group it sends ⌘W (the app's own close-tab shortcut).
+        var tabCloseMode: TabClose? { turned ? tabClose ?? .app : tabClose }
         /// The new-window indicator replaces moving the window.
-        var showsNewWindow: Bool { closing && pulling && pullAction == .newWindow }
+        var showsNewWindow: Bool { closing && pulling && !turned && pullAction == .newWindow }
         var showsIndicator: Bool { showsTabClose || showsNewWindow }
-        var indicatorStyle: GestureIndicatorStyle { showsNewWindow ? .newWindow : .closeTab }
+        var indicatorStyle: GestureIndicatorStyle { showsNewWindow ? .newWindow : turned ? .closeTabTurn : .closeTab }
         /// When the indicator may first appear (media time). A fast flick
         /// releases before then and acts without flashing the indicator.
         var indicatorDue = 0.0
@@ -1245,9 +1250,24 @@ import PaperiCore
                         slotSwipe = nil
                         return
                     }
+                    // Down then right closes a tab.
+                    if let state = swipe, state.showsNewWindow {
+                        swipeReducer.config.turnTravel = options.config.gesture.travel
+                    }
                     if case .pulling(_, let progress, _, _) = swipeReducer.state {
                         updateSwipe(progress)
                     }
+                case .turnStarted:
+                    guard startTurn() else {
+                        cancelSwipe()
+                        slotSwipe = nil
+                        return
+                    }
+                    if case .turning(_, let progress, _, _) = swipeReducer.state {
+                        updateSwipe(progress)
+                    }
+                case .turnUpdated(let progress):
+                    updateSwipe(progress)
                 case .cancelled:
                     cancelSwipe()
                     slotSwipe = nil
@@ -1265,7 +1285,7 @@ import PaperiCore
             switch decision {
             case .commit(let direction):
                 endSwipe(commit: true, direction: direction)
-            case .close, .pull:
+            case .close, .pull, .turn:
                 endSwipe(commit: true)
             case .snapBack:
                 endSwipe(commit: false)
@@ -1427,6 +1447,24 @@ import PaperiCore
         return true
     }
 
+    /// Switches an armed new-window pull to closing the front tab: the
+    /// New Window pill slips away and a Close Tab pill follows the fingers
+    /// right from rest.
+    private func startTurn() -> Bool {
+        guard var state = swipe, state.released == nil, state.showsNewWindow else { return false }
+        state.turned = true
+        state.progress = 0
+        state.targetProgress = 0
+        state.visualVelocity = 0
+        state.indicatorShown = false
+        // Already past the delay; a turn released at once has no indicator to flash.
+        state.indicatorDue = min(state.indicatorDue, CACurrentMediaTime())
+        swipe = state
+        state.overlay.replaceIndicator(duration: 0.14)
+        swipeMetrics["turned"] = true
+        return true
+    }
+
     /// Keep only the newest finger target; the visual clock limits travel speed.
     func updateSwipe(_ progress: Double) {
         guard var state = swipe, state.released == nil, progress.isFinite else { return }
@@ -1582,9 +1620,9 @@ import PaperiCore
     /// window that stays (an unsaved-changes prompt) is revealed again.
     private func finishClose(_ state: Swipe, settle: Double) {
         guard let wid = state.closeWindow else { return }
+        if state.showsTabClose, let mode = state.tabCloseMode { finishTabClose(state, window: wid, mode: mode); return }
         if state.showsNewWindow { finishNewWindow(state, window: wid); return }
         if state.pulling { finishMinimize(state, window: wid, settle: settle); return }
-        if state.showsTabClose, let mode = state.tabClose { finishTabClose(state, window: wid, mode: mode); return }
         let generation = state.generation, overlay = state.overlay
         let from = state.progress, path = state
         // Leave at the speed the window had on screen, then slow to the edge.
@@ -1872,9 +1910,9 @@ import PaperiCore
             scheduleRefresh()
             if commit, state.showsNewWindow, let wid = target, let pid = pidForWindow[wid] {
                 _ = Self.openNewWindow(pid: pid, window: wid)
-            } else if commit, state.pulling, let wid = target { _ = minimize(wid) }
+            } else if commit, state.pulling, !state.turned, let wid = target { _ = minimize(wid) }
             else if commit, state.closing, let wid = target {
-                if state.showsTabClose && state.tabClose == .app, let pid = pidForWindow[wid] { _ = Self.sendCommandW(to: pid, window: wid) }
+                if state.showsTabClose && state.tabCloseMode == .app, let pid = pidForWindow[wid] { _ = Self.sendCommandW(to: pid, window: wid) }
                 else { _ = pressClose(wid) }
             }
             else if commit { _ = handle(["focus", direction == .left ? "left" : "right"]) }

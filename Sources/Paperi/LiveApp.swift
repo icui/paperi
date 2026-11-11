@@ -497,7 +497,7 @@ import PaperiPlatform
               + " · up: \(gesture.swipeUpToClose ? "close" : "off") · down: \(down)"
             : "off"
         let item = menu.addItem(withTitle: "Trackpad swipe: \(summary)", action: nil, keyEquivalent: "")
-        item.toolTip = "\"gesture\": sideways scrolls the strip by one column, up closes the focused window (or tab), down opens a new window or minimizes"
+        item.toolTip = "\"gesture\": sideways scrolls the strip by one column, up closes the focused window (or tab), down opens a new window or minimizes, down then right closes a tab"
         let sub = NSMenu()
         value(sub, "Enabled: \(gesture.enabled ? "on" : "off")\(origin(gesture.enabled == defaults.enabled))",
               copy: "\(gesture.enabled)", tip: "\"gesture.enabled\"")

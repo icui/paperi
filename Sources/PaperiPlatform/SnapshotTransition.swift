@@ -317,11 +317,29 @@ import PaperiCore
         tabIndicator?.retract(duration: duration)
     }
 
+    /// The gesture changed what it does: the current pill slips away and
+    /// the next `trackIndicator` brings in a new one. The dim stays where
+    /// it was until the new indicator's own dim passes it.
+    func replaceIndicator(duration: Double) {
+        guard let old = tabIndicator else { return }
+        tabIndicator = nil
+        dimFloor = old.dim.opacity
+        staleDim = old.dim
+        old.retract(duration: duration, dim: false)
+        let pill = old.pill
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.05) { pill.removeFromSuperlayer() }
+    }
+
+    /// Dim left by a replaced indicator, shown until the next one takes over.
+    private var dimFloor: Float = 0
+    private var staleDim: CALayer?
+
     private func indicator(_ style: GestureIndicatorStyle, for wid: UInt32) -> GestureIndicator? {
         if let tabIndicator { return tabIndicator }
         guard let root, let frame = captured[wid], layers[wid] != nil else { return nil }
         let indicator = GestureIndicator(style: style, window: local(frame), cornerRadius: 10,
-                                         scale: Double(screen?.backingScaleFactor ?? 2))
+                                         scale: Double(screen?.backingScaleFactor ?? 2), dimFloor: dimFloor)
+        staleDim?.removeFromSuperlayer(); staleDim = nil
         root.addSublayer(indicator.dim)
         root.addSublayer(indicator.pill)
         tabIndicator = indicator
@@ -401,14 +419,20 @@ struct GestureIndicatorStyle {
     /// A plus instead of a cross in the ring.
     let plus: Bool
     let armedColor: CGColor
-    /// +1: the pill rises into place (fingers up); -1: it comes down.
-    let direction: Double
+    /// The way the pill moves into place with the fingers, in layer space
+    /// (y up): (0, 1) rises, (0, -1) comes down, (1, 0) slides right.
+    let direction: CGVector
 
     static let closeTab = GestureIndicatorStyle(label: "Close Tab", armedLabel: "Release to Close",
                                                 plus: false, armedColor: NSColor.systemRed.withAlphaComponent(0.95).cgColor,
-                                                direction: 1)
+                                                direction: CGVector(dx: 0, dy: 1))
     static let newWindow = GestureIndicatorStyle(label: "New Window", armedLabel: "Release for New Window", plus: true,
-                                                 armedColor: NSColor.systemBlue.withAlphaComponent(0.95).cgColor, direction: -1)
+                                                 armedColor: NSColor.systemBlue.withAlphaComponent(0.95).cgColor,
+                                                 direction: CGVector(dx: 0, dy: -1))
+    /// Down then right: the pill slides in from the left.
+    static let closeTabTurn = GestureIndicatorStyle(label: "Close Tab", armedLabel: "Release to Close",
+                                                    plus: false, armedColor: closeTab.armedColor,
+                                                    direction: CGVector(dx: 1, dy: 0))
 }
 
 /// Gesture feedback drawn over a window's snapshot. All geometry is in the
@@ -423,23 +447,30 @@ struct GestureIndicatorStyle {
     private let rest: CGPoint
     private let style: GestureIndicatorStyle
     private var armed = false
+    private let dimFloor: Float
 
     private static let height = 48.0
     private static let rise = 28.0
     private static let idle = NSColor(white: 0.1, alpha: 0.82).cgColor
     private static let font = NSFont.systemFont(ofSize: 15, weight: .semibold)
     /// Where the pill waits before it moves in (it travels with the fingers).
-    private var away: CGPoint { CGPoint(x: rest.x, y: rest.y - Self.rise * style.direction) }
+    private var away: CGPoint { offset(-Self.rise) }
 
-    init(style: GestureIndicatorStyle, window: CGRect, cornerRadius: Double, scale: Double) {
+    /// `rest` moved `distance` along the style's direction.
+    private func offset(_ distance: Double) -> CGPoint {
+        CGPoint(x: rest.x + style.direction.dx * distance, y: rest.y + style.direction.dy * distance)
+    }
+
+    init(style: GestureIndicatorStyle, window: CGRect, cornerRadius: Double, scale: Double, dimFloor: Float = 0) {
         self.style = style
+        self.dimFloor = dimFloor
         let off: [String: any CAAction] = ["position": NSNull(), "bounds": NSNull(), "opacity": NSNull(),
                                            "transform": NSNull(), "backgroundColor": NSNull(), "strokeEnd": NSNull(),
                                            "string": NSNull(), "contents": NSNull()]
         dim.frame = window
         dim.cornerRadius = cornerRadius
         dim.backgroundColor = NSColor.black.cgColor
-        dim.opacity = 0
+        dim.opacity = dimFloor
         dim.actions = off
 
         // Wide enough for the longest label.
@@ -449,7 +480,7 @@ struct GestureIndicatorStyle {
         // Upper part of the window, where the tab bar is.
         rest = CGPoint(x: window.midX, y: window.maxY - min(140, max(size.height, window.height * 0.28)))
         pill.bounds = CGRect(origin: .zero, size: size)
-        pill.position = CGPoint(x: rest.x, y: rest.y - Self.rise * style.direction)
+        pill.position = away
         pill.cornerRadius = size.height / 2
         pill.backgroundColor = Self.idle
         pill.borderColor = NSColor(white: 1, alpha: 0.18).cgColor
@@ -511,9 +542,9 @@ struct GestureIndicatorStyle {
         let appear = min(1, p / max(0.01, threshold * 0.4))
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        dim.opacity = Float(0.12 + 0.28 * fill) * Float(appear)
+        dim.opacity = max(dimFloor, Float(0.12 + 0.28 * fill) * Float(appear))
         pill.opacity = Float(appear)
-        pill.position = CGPoint(x: rest.x, y: rest.y + style.direction * (-Self.rise * (1 - fill) + max(0, p - threshold) * 12))
+        pill.position = offset(-Self.rise * (1 - fill) + max(0, p - threshold) * 12)
         let scale = 0.9 + 0.1 * fill
         pill.transform = CATransform3DMakeScale(scale, scale, 1)
         ring.strokeEnd = fill
@@ -536,10 +567,11 @@ struct GestureIndicatorStyle {
         pill.add(flash, forKey: "armed")
     }
 
-    func retract(duration: Double) {
+    func retract(duration: Double, dim fadesDim: Bool = true) {
         let ease = CAMediaTimingFunction(name: .easeOut)
-        for (layer, key, to) in [(pill, "opacity", 0.0 as Any), (dim, "opacity", 0.0 as Any),
-                                 (pill, "position", NSValue(point: away) as Any)] {
+        var moves: [(CALayer, String, Any)] = [(pill, "opacity", 0.0), (pill, "position", NSValue(point: away))]
+        if fadesDim { moves.append((dim, "opacity", 0.0)) }
+        for (layer, key, to) in moves {
             let animation = CABasicAnimation(keyPath: key)
             animation.fromValue = layer.presentation()?.value(forKeyPath: key) ?? layer.value(forKeyPath: key)
             animation.toValue = to

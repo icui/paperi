@@ -11,6 +11,9 @@ import Foundation
 /// With `pullTravel` set, a downward lock tracks a pull the same way
 /// (progress grows as the fingers move down); the caller decides what a
 /// pull does (minimize, new window).
+/// With `turnTravel` set too, a pull held past the commit threshold that
+/// then turns right becomes a turn: progress grows as the fingers move
+/// right from there (closing a tab), and the pull no longer acts.
 public struct SlotSwipe: Equatable, Sendable {
     public enum State: Equatable, Sendable {
         case idle
@@ -18,6 +21,7 @@ public struct SlotSwipe: Equatable, Sendable {
         case active(rawProgress: Double, clampedProgress: Double, velocity: Double, lastTime: Double)
         case closing(rawProgress: Double, clampedProgress: Double, velocity: Double, lastTime: Double)
         case pulling(rawProgress: Double, clampedProgress: Double, velocity: Double, lastTime: Double)
+        case turning(rawProgress: Double, clampedProgress: Double, velocity: Double, lastTime: Double)
         case completed(Decision)
         case cancelled
     }
@@ -26,6 +30,7 @@ public struct SlotSwipe: Equatable, Sendable {
         case commit(Direction)
         case close
         case pull
+        case turn
         case snapBack
     }
 
@@ -36,6 +41,8 @@ public struct SlotSwipe: Equatable, Sendable {
         case closeUpdated(progress: Double)
         case pullStarted
         case pullUpdated(progress: Double)
+        case turnStarted
+        case turnUpdated(progress: Double)
         case finished(Decision)
         case cancelled
     }
@@ -52,6 +59,9 @@ public struct SlotSwipe: Equatable, Sendable {
         /// Downward finger travel for a full pull (e.g. the focused window off
         /// the bottom). `nil`: downward swipes cancel.
         public var pullTravel: Double?
+        /// Rightward finger travel for a full turn out of an armed pull.
+        /// `nil`: a pull cannot turn.
+        public var turnTravel: Double?
 
         public init(travel: Double = 0.4,
                     commitThreshold: Double = 0.5,
@@ -59,7 +69,8 @@ public struct SlotSwipe: Equatable, Sendable {
                     lockThreshold: Double = 0.015,
                     invert: Bool = false,
                     closeTravel: Double? = nil,
-                    pullTravel: Double? = nil) {
+                    pullTravel: Double? = nil,
+                    turnTravel: Double? = nil) {
             self.travel = travel
             self.commitThreshold = commitThreshold
             self.flickVelocity = flickVelocity
@@ -67,6 +78,7 @@ public struct SlotSwipe: Equatable, Sendable {
             self.invert = invert
             self.closeTravel = closeTravel
             self.pullTravel = pullTravel
+            self.turnTravel = turnTravel
         }
     }
 
@@ -146,6 +158,7 @@ public struct SlotSwipe: Equatable, Sendable {
 
     public mutating func begin(at time: Double) {
         state = .detecting(accDx: 0, accDy: 0, startTime: time)
+        turnX = 0; turnY = 0
     }
 
     public mutating func move(dx: Double, dy: Double, at time: Double) -> Action? {
@@ -222,15 +235,28 @@ public struct SlotSwipe: Equatable, Sendable {
             state = .closing(rawProgress: next.raw, clampedProgress: next.shown, velocity: next.velocity, lastTime: time)
             return .closeUpdated(progress: next.shown)
 
-        case .pulling(let rawProg, _, let lastVel, let lastTime):
+        case .pulling(let rawProg, let shownProg, let lastVel, let lastTime):
+            if let turnTravel = config.turnTravel, let turn = turnLock(dx: dx, dy: dy, armed: shownProg >= config.commitThreshold) {
+                // Shown from rest at the turn, like the other locks.
+                let raw = turn / max(0.01, turnTravel)
+                origin = min(0.5, raw)
+                state = .turning(rawProgress: raw, clampedProgress: shownClose(raw), velocity: 0, lastTime: time)
+                return .turnStarted
+            }
             guard let next = vertical(rawProg, lastVel, lastTime, delta: -dy / max(0.01, config.pullTravel ?? 1), at: time)
             else { return nil }
             state = .pulling(rawProgress: next.raw, clampedProgress: next.shown, velocity: next.velocity, lastTime: time)
             return .pullUpdated(progress: next.shown)
+
+        case .turning(let rawProg, _, let lastVel, let lastTime):
+            guard let next = vertical(rawProg, lastVel, lastTime, delta: dx / max(0.01, config.turnTravel ?? 1), at: time)
+            else { return nil }
+            state = .turning(rawProgress: next.raw, clampedProgress: next.shown, velocity: next.velocity, lastTime: time)
+            return .turnUpdated(progress: next.shown)
         }
     }
 
-    /// One vertical (close or pull) update; `delta` is in progress units.
+    /// One close, pull or turn update; `delta` is in progress units.
     private func vertical(_ raw: Double, _ lastVel: Double, _ lastTime: Double, delta: Double, at time: Double)
         -> (raw: Double, shown: Double, velocity: Double)? {
         guard time > lastTime else { return nil }
@@ -243,6 +269,27 @@ public struct SlotSwipe: Equatable, Sendable {
 
     /// Raw progress at the axis lock.
     private var origin = 0.0
+
+    /// Finger travel since an armed pull last moved mostly down.
+    private var turnX = 0.0, turnY = 0.0
+
+    /// Rightward travel a turn needs: a deliberate move, well past a drift.
+    public static let turnLockMultiple = 3.0
+
+    /// While a pull is armed, collects motion until it turns clearly right;
+    /// returns the rightward travel then. Downward motion (still pulling)
+    /// or a disarmed pull starts the collection over, and leftward drift
+    /// does not build up a debt.
+    private mutating func turnLock(dx: Double, dy: Double, armed: Bool) -> Double? {
+        guard armed else { turnX = 0; turnY = 0; return nil }
+        turnX = max(0, turnX + dx)
+        turnY += dy
+        let lock = config.lockThreshold * Self.turnLockMultiple
+        if abs(turnY) >= lock, abs(turnY) > 1.2 * turnX { turnX = 0; turnY = 0; return nil }
+        guard turnX >= lock, turnX > 1.2 * abs(turnY) else { return nil }
+        defer { turnX = 0; turnY = 0 }
+        return turnX
+    }
 
     /// Shown progress: 0 at the lock (`origin`), meeting raw progress at
     /// ±1 and beyond, linear in between on each side. Removes the lead-in
@@ -284,13 +331,18 @@ public struct SlotSwipe: Equatable, Sendable {
             state = .completed(decision)
             return decision
 
-        case .closing(let rawProg, _, let vel, let lastTime), .pulling(let rawProg, _, let vel, let lastTime):
+        case .closing(let rawProg, _, let vel, let lastTime), .pulling(let rawProg, _, let vel, let lastTime),
+             .turning(let rawProg, _, let vel, let lastTime):
             // A swipe dragged back past its start does nothing. Decide on
             // the whole finger travel, including the lead-in to the lock.
             let commits = rawProg > 0
                 && releases(raw: rawProg, clamped: Self.closeBand(rawProg), velocity: vel, lastTime: lastTime, at: time)
             let decision: Decision
-            if case .closing = state { decision = commits ? .close : .snapBack } else { decision = commits ? .pull : .snapBack }
+            switch state {
+            case .closing: decision = commits ? .close : .snapBack
+            case .turning: decision = commits ? .turn : .snapBack
+            default: decision = commits ? .pull : .snapBack
+            }
             state = .completed(decision)
             return decision
 
