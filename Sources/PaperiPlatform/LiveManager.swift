@@ -1401,7 +1401,7 @@ import PaperiCore
             swipeTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
                 guard let self, self.swipe?.generation == generation else { return }
-                overlay.hide(); self.swipe = nil; self.swipeTask = nil
+                overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
                 self.swipeMetrics["state"] = "snappedBack"
                 self.swipeMetrics["totalMS"] = (ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 1000
                 self.scheduleRefresh()
@@ -1460,7 +1460,7 @@ import PaperiCore
             // newly drawn surfaces. Keep the mask for two 60 Hz frames.
             try? await Task.sleep(for: .milliseconds(34))
             guard self.swipe?.generation == generation, !Task.isCancelled else { return }
-            overlay.hide(); self.swipe = nil; self.swipeTask = nil
+            overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
             self.swipeMetrics["state"] = result.settled ? (result.maxDeviation <= 0.5 ? "completed" : "landedAdjusted") : "handoffUnsettled"
             self.swipeMetrics["handoffMS"] = (ProcessInfo.processInfo.systemUptime - released) * 1000 - duration * 1000
             self.swipeMetrics["landingCorrectionPT"] = result.maxDeviation

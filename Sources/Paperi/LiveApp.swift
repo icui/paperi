@@ -443,6 +443,12 @@ import PaperiPlatform
         let swatch = value(menu, "Swap highlight: \(color)\(origin(config.swapHighlight != nil))", copy: color,
                            tip: "\"swapHighlight\": mask over the window a drag would swap with, #RRGGBB[AA]")
         swatch.image = Self.swatch(config.swapHighlightColor)
+        let scroll = config.focusScrollDuration ?? 0.22
+        value(menu, "Focus scroll duration: \(scroll == 0 ? "off (immediate)" : "\(scroll) s")\(origin(config.focusScrollDuration != nil))",
+              copy: "\(scroll)", tip: "\"focusScrollDuration\": seconds from 0 to 1 for focus scrolls and swipe landings; 0 disables")
+        value(menu, "Focus after close: \(config.focusAfterClose.rawValue)\(origin(config.focusAfterClose != .left))",
+              copy: config.focusAfterClose.rawValue,
+              tip: "\"focusAfterClose\": left, right or system — where focus goes when the focused column closes")
         menu.addItem(.separator())
 
         let cliApps = Set(cliInclude), cliSingles = Set(cliSingletons)
@@ -472,16 +478,37 @@ import PaperiPlatform
         } else {
             value(menu, "Shortcuts: off (--no-hotkeys)", copy: nil, tip: nil)
         }
-        let gestureStatus = manager.options.config.gesture.enabled
-            ? "\(manager.options.config.gesture.fingers) fingers (\(manager.options.config.gesture.travel) travel)"
-            : "off"
-        value(menu, "Trackpad swipe: \(gestureStatus)", copy: nil, tip: "Horizontal slot swipe")
+        gestureRows(menu, config.gesture)
         value(menu, "Restore windows on stop: \(manager.options.restoreOnStop ? "on" : "off (--no-restore)")", copy: nil, tip: nil)
         value(menu, "Verbose logging: \(verbose ? "on (--verbose)" : "off")", copy: nil, tip: nil)
         menu.addItem(.separator())
         add(menu, exists ? "Edit Config…" : "Create Config…", #selector(openConfig))
         add(menu, "Reload Config", #selector(reloadConfig))
         return menu
+    }
+
+    /// The "gesture" object: a summary row with every field in its submenu.
+    private func gestureRows(_ menu: NSMenu, _ gesture: LiveConfig.GestureConfig) {
+        let defaults = LiveConfig.GestureConfig()
+        func origin(_ isDefault: Bool) -> String { isDefault ? "  (default)" : "" }
+        let summary = gesture.enabled ? "\(gesture.fingers) fingers" + (gesture.invert ? ", inverted" : "") : "off"
+        let item = menu.addItem(withTitle: "Trackpad swipe: \(summary)", action: nil, keyEquivalent: "")
+        item.toolTip = "\"gesture\": horizontal swipe that scrolls the strip by one column"
+        let sub = NSMenu()
+        value(sub, "Enabled: \(gesture.enabled ? "on" : "off")\(origin(gesture.enabled == defaults.enabled))",
+              copy: "\(gesture.enabled)", tip: "\"gesture.enabled\"")
+        value(sub, "Fingers: \(gesture.fingers)\(origin(gesture.fingers == defaults.fingers))",
+              copy: "\(gesture.fingers)", tip: "\"gesture.fingers\": 3 or 4")
+        value(sub, "Travel: \(gesture.travel)\(origin(gesture.travel == defaults.travel))", copy: "\(gesture.travel)",
+              tip: "\"gesture.travel\": fraction of the trackpad width for one column, in (0, 1]")
+        value(sub, "Commit threshold: \(gesture.commitThreshold)\(origin(gesture.commitThreshold == defaults.commitThreshold))",
+              copy: "\(gesture.commitThreshold)",
+              tip: "\"gesture.commitThreshold\": fraction of a column past which release moves, in (0, 1]")
+        value(sub, "Flick velocity: \(gesture.flickVelocity)\(origin(gesture.flickVelocity == defaults.flickVelocity))",
+              copy: "\(gesture.flickVelocity)", tip: "\"gesture.flickVelocity\": release speed that moves regardless of distance")
+        value(sub, "Invert: \(gesture.invert ? "on" : "off")\(origin(gesture.invert == defaults.invert))",
+              copy: "\(gesture.invert)", tip: "\"gesture.invert\": reverse the swipe direction")
+        item.submenu = sub
     }
 
     @discardableResult private func value(_ menu: NSMenu, _ title: String, copy: String?, tip: String?) -> NSMenuItem {

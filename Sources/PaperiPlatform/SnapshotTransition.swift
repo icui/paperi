@@ -6,7 +6,7 @@ import PaperiCore
 /// Screenshot compositor for the swipe gesture. Captures never leave memory.
 /// An opaque capture of everything except the strip masks the real windows
 /// while their images move; the caller moves the real windows once underneath,
-/// slides the images onto the frames the real windows actually took, then hides.
+/// slides the images onto the frames the real windows actually took, then fades out.
 @MainActor final class SnapshotTransition {
     private var window: NSWindow?
     private var layers: [UInt32: CALayer] = [:]
@@ -45,7 +45,10 @@ import PaperiCore
         root.actions = Self.noActions
         // Submit all screenshots together. Serial capture adds one display-frame
         // wait per window, leaving short swipes invisible until finger release.
-        let background = Task { try await self.capture(SCContentFilter(display: display, excludingWindows: windows), scale: scale) }
+        let fadingOverlays = content.windows.filter { Self.fading.contains($0.windowID) }
+        let background = Task {
+            try await self.capture(SCContentFilter(display: display, excludingWindows: windows + fadingOverlays), scale: scale)
+        }
         let windowCaptures = windows.reversed().map { item in
             (item, Task { try await self.capture(SCContentFilter(desktopIndependentWindow: item), scale: scale) })
         }
@@ -227,6 +230,32 @@ import PaperiCore
         window = nil
         layers.removeAll()
     }
+
+    /// Fades the overlay out over the real windows, then removes it. The
+    /// transition is finished at once: a new swipe can start during the fade,
+    /// and its capture leaves the fading overlay out.
+    func fadeOut(duration: Double = 0.18) {
+        stopFrameClock()
+        guard let overlay = window else { return }
+        window = nil
+        layers.removeAll()
+        guard duration > 0 else { overlay.orderOut(nil); return }
+        let number = CGWindowID(overlay.windowNumber)
+        Self.fading.insert(number)
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = duration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            overlay.animator().alphaValue = 0
+        }, completionHandler: {
+            MainActor.assumeIsolated {
+                overlay.orderOut(nil)
+                Self.fading.remove(number)
+            }
+        })
+    }
+
+    /// Overlays still fading out; later captures must not see them.
+    private static var fading: Set<CGWindowID> = []
 
     private func center(_ frame: Rect) -> CGPoint {
         let rect = local(frame)
