@@ -8,7 +8,7 @@ import PaperiPlatform
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item?.button?.title = "Paperi"
+        BrandIcon.install(on: item?.button)
         let menu = NSMenu()
         menu.addItem(withTitle: "Feasibility build — management inactive", action: nil, keyEquivalent: "")
         let access = menu.addItem(withTitle: "Request Accessibility Access…", action: #selector(requestAccess), keyEquivalent: "")

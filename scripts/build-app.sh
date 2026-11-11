@@ -1,9 +1,11 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+./scripts/generate-branding.sh
 ./scripts/swift.sh build -c release
 app="dist/Paperi.app"
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+cp assets/branding/Paperi.icns "$app/Contents/Resources/Paperi.icns"
 bin_dir="$(./scripts/swift.sh build -c release --show-bin-path)"
 cp "$bin_dir/paperi" "$app/Contents/MacOS/Paperi"
 cat > "$app/Contents/Info.plist" <<'PLIST'
@@ -13,6 +15,7 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>dev.paperi.app</string>
 <key>CFBundleName</key><string>Paperi</string>
 <key>CFBundleExecutable</key><string>Paperi</string>
+<key>CFBundleIconFile</key><string>Paperi</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.1.0</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>

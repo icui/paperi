@@ -93,7 +93,7 @@ import PaperiPlatform
         let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(prompt)
         FileHandle.standardError.write(Data("paperi run: waiting for Accessibility access…\n".utf8))
-        item?.button?.title = "▥ ⚠︎"
+        item?.button?.title = " ⚠︎"
         trustTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, AXIsProcessTrusted() else { return }
@@ -336,7 +336,7 @@ import PaperiPlatform
 
     private func installMenu() {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item?.button?.title = "▥"
+        BrandIcon.install(on: item?.button)
         item?.button?.toolTip = "Paperi"
         let menu = NSMenu()
         menu.delegate = self
@@ -345,7 +345,7 @@ import PaperiPlatform
 
     private func updateTitle() {
         guard AXIsProcessTrusted() else { return }
-        item?.button?.title = manager.paused ? "▥ ⏸" : "▥"
+        item?.button?.title = manager.paused ? " ⏸" : ""
         item?.button?.toolTip = arrangementPause.map { "Paperi paused: \(Self.pauseLabel($0))" } ?? "Paperi"
     }
 
