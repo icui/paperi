@@ -27,3 +27,23 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+## Design inspirations and implementation references
+
+Paperi's scrolling layout and macOS workflow draw on
+[PaperWM](https://github.com/paperwm/PaperWM) and
+[PaperWM.spoon](https://github.com/mogenson/PaperWM.spoon).
+Palm webOS inspired the card-like motion, upward dismissal, and original Paperi
+icon. [Sleipnir](https://www.fenrir-inc.com/jp/iphone/apps/sleipnir-mobile/help/iphone.html),
+by Fenrir, inspired the directional gesture vocabulary.
+
+[Hammerspoon](https://github.com/Hammerspoon/hammerspoon) and
+[yabai](https://github.com/asmvik/yabai) were studied as implementation references
+for macOS window management. The [reference audit](docs/REFERENCE-AUDIT.md)
+records the source revisions and mechanisms consulted. These acknowledgments
+are distinct from the adapted code and license notice above.
+
+Paperi's branding and animated README illustrations are original artwork;
+no Palm or Fenrir artwork or code is included. These names identify independent
+projects and their contributions or influence, without implying affiliation.
