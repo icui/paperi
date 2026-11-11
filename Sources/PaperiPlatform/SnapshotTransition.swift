@@ -165,6 +165,38 @@ import PaperiCore
         CATransaction.commit()
     }
 
+    /// Sets one image's opacity at once (finger tracking).
+    func setOpacity(_ wid: UInt32, _ value: Double) {
+        guard let layer = layers[wid] else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.removeAnimation(forKey: "fade")
+        layer.opacity = Float(value)
+        CATransaction.commit()
+    }
+
+    /// Animates one image's opacity from what is on screen now.
+    func fade(_ wid: UInt32, to value: Double, duration: Double, curve: (Double, Double, Double, Double)? = nil) {
+        guard let layer = layers[wid] else { return }
+        let from = layer.presentation()?.opacity ?? layer.opacity
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.removeAnimation(forKey: "fade")
+        layer.opacity = Float(value)
+        if duration > 0, from != Float(value) {
+            let animation = CABasicAnimation(keyPath: "opacity")
+            animation.fromValue = from
+            animation.toValue = Float(value)
+            animation.duration = duration
+            animation.timingFunction = curve.map {
+                CAMediaTimingFunction(controlPoints: Float($0.0), Float($0.1), Float($0.2), Float($0.3))
+            } ?? CAMediaTimingFunction(name: .easeOut)
+            layer.add(animation, forKey: "fade")
+        }
+        CATransaction.commit()
+        CATransaction.flush()
+    }
+
     /// Slides images from wherever they are on screen now (including mid-slide).
     func slide(to frames: [UInt32: Rect], duration: Double, easeIn: Bool = false) {
         CATransaction.begin()

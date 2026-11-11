@@ -1408,6 +1408,7 @@ import PaperiCore
             state.overlay.trackTabClose(window: wid, progress: next, threshold: options.config.gesture.commitThreshold)
         } else {
             state.overlay.place(swipeFrames(state))
+            if state.closing, let wid = state.closeWindow { state.overlay.setOpacity(wid, closeOpacity(next)) }
         }
     }
 
@@ -1442,6 +1443,13 @@ import PaperiCore
         var frames = state.starts
         frames[wid] = frame
         return frames
+    }
+
+    /// A closing window stays opaque until release would close it (the
+    /// commit threshold), then fades slightly as it rises: 70% once fully off.
+    private func closeOpacity(_ progress: Double) -> Double {
+        let threshold = min(0.99, options.config.gesture.commitThreshold)
+        return 1 - 0.3 * min(1, max(0, (progress - threshold) / (1 - threshold)))
     }
 
     /// Room for the active window shadow (radius 16, offset 8) above the display.
@@ -1507,9 +1515,10 @@ import PaperiCore
         // Leave at the speed the window had on screen, then slow to the edge.
         let distance = max(0, 1 - from)
         let duration = SlotSwipe.settleDuration(distance: distance, speed: state.visualVelocity, base: settle)
+        let curve = SlotSwipe.settleCurve(speed: state.visualVelocity, distance: distance, duration: duration)
         overlay.slide(along: { u in self.closeFrames(path, progress: from + (1 - from) * u) },
-                      to: closeFrames(path, progress: 1), duration: duration,
-                      curve: SlotSwipe.settleCurve(speed: state.visualVelocity, distance: distance, duration: duration))
+                      to: closeFrames(path, progress: 1), duration: duration, curve: curve)
+        overlay.fade(wid, to: closeOpacity(1), duration: duration, curve: curve)
         let released = ProcessInfo.processInfo.systemUptime
         let method = pressClose(wid)
         let pressed = method != .none
@@ -1526,7 +1535,11 @@ import PaperiCore
                 }
             }
             guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
-            if !gone { overlay.slide(to: path.starts, duration: 0.18); try? await Task.sleep(for: .milliseconds(190)) }
+            if !gone {
+                overlay.slide(to: path.starts, duration: 0.18)
+                overlay.fade(wid, to: 1, duration: 0.18)
+                try? await Task.sleep(for: .milliseconds(190))
+            }
             guard self.swipe?.generation == generation, !Task.isCancelled else { return }
             overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
             self.swipeMetrics["state"] = gone ? "closed" : (pressed ? "closeRefused" : "noCloseButton")
@@ -1620,6 +1633,7 @@ import PaperiCore
             overlay.slide(along: { u in self.swipeFrames(path, progress: from * (1 - u)) },
                           to: state.starts, duration: duration, curve: curve)
             if state.closing && state.tabClose != nil { overlay.retractTabClose(duration: duration) }
+            else if state.closing, let wid = state.closeWindow { overlay.fade(wid, to: 1, duration: duration, curve: curve) }
             swipeTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
                 guard let self, self.swipe?.generation == generation else { return }
