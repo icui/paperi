@@ -1,8 +1,10 @@
 # Paperi
 
+> Archived 2026-11-11: the requested feature set is implemented. Retained for historical context; proposed work and release gates below describe the original planning checkpoint, not an active roadmap. See [current status](../STATUS.md) for verification limits.
+
 Draft plan for a standalone macOS scrolling window manager that reproduces this user's PaperWM.spoon workflow with lower latency and resource use.
 
-Implementation has started. See [current status](docs/STATUS.md), [development instructions](README.md), and [feasibility protocol](docs/FEASIBILITY.md). Release gates below remain open until verified; an in-memory tab-slot model does not establish working native-tab discovery.
+Implementation has started. See [current status](../STATUS.md), [development instructions](../../README.md), and [feasibility protocol](FEASIBILITY.md). Release gates below remain open until verified; an in-memory tab-slot model does not establish working native-tab discovery.
 
 ## Recommendation
 
@@ -285,7 +287,7 @@ same day: that working version must manage real application windows (opt-in
 allowlist, CLI-driven commands are acceptable); shortcuts follow once it shows
 tabs, Spaces and multiple displays are resolved. Prefer extending live mode over
 new disposable probes. See
-[docs/STATUS.md](docs/STATUS.md) for the current capability matrix and handoff
+[docs/STATUS.md](../STATUS.md) for the current capability matrix and handoff
 instructions through increment 63.
 
 1. Connect native discovery/events → lifecycle reducer → layout → confirmed AX

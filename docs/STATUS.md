@@ -34,12 +34,14 @@ The responsible process (terminal/editor, or `dist/Paperi.app`) needs Accessibil
 | Global keyboard shortcuts (⌥⌘ defaults from the PaperWM config; `hotkeys` in config.json) | Verified via synthesized keys: J/K (Space switching removed 2026-11-10), H, →, I, O, C | Binding table unit-tested | Conflicting registrations (Hammerspoon) are reported, not overridden; PaperWM's auto-center on create/destroy is not copied |
 | Baseline, performance, soak | Not started | — | Release gates; refresh cost is reported as `lastRefreshMS` (58–99 ms with 6 windows, all apps; only apps with on-screen windows are surveyed) |
 
-### Next
+### Historical follow-up notes
+
+The requested feature set is implemented as of 2026-11-11. The notes below preserve earlier checkpoints; they are not an active feature backlog. Validation limits remain documented separately.
 
 Instrumentation (`status.performance`) and the interruptible focus-scroll animation landed in commits 936697a and 86008e5; live multi-app profiling of them is still pending.
 
 1. **Finish and validate the screenshot handoff first.** Keep the current keyboard animation; reserve screenshots for swipes. Diagnose the reported end offset using intended, captured, image and observed real geometry; validate alignment at overlay removal and after the following refresh.
-2. **Three-finger one-slot scrolling** — see [the plan](../PLAN.md#next-feature-realtime-three-finger-one-slot-scrolling--planned-2026-11-10). Difficulty remains **medium-high**. Next milestones: system-gesture detection/config/warnings; background touch-capture validation; pure reducer plus snapshot tracking/commit/snap-back; live interruption and performance validation. AX finger-tracking fallback is optional later work.
+2. **Three-finger one-slot scrolling** — see [the plan](archive/PLAN.md#next-feature-realtime-three-finger-one-slot-scrolling--planned-2026-11-10). Difficulty remains **medium-high**. Next milestones: system-gesture detection/config/warnings; background touch-capture validation; pure reducer plus snapshot tracking/commit/snap-back; live interruption and performance validation. AX finger-tracking fallback is optional later work.
 
 **Realtime swipe gesture — 2026-11-10:** Trackpad swipe gesture is implemented across all four planned layers.
 - **Pure model (`SlotSwipe` in `PaperiCore`):** direction lock (abandoning vertical dominance), signed progress in -1...1, rubber-band resistance beyond limits and at strip ends, mid-gesture reversal crossing zero, smoothed release velocity, flick commit, and commit/snap-back decisions. Unit tested across 9 cases.
@@ -77,7 +79,7 @@ Instrumentation (`status.performance`) and the interruptible focus-scroll animat
 | Working sustained AppKit native-tab fixture | [NativeTabProbe.swift](../Sources/PaperiPlatform/NativeTabProbe.swift), [check-native-tabs.rb](../scripts/check-native-tabs.rb) |
 | Terminal sustained session, placement and resize probes | [TerminalPlacementProbe.swift](../Sources/PaperiPlatform/TerminalPlacementProbe.swift), [check-terminal-tabs.rb](../scripts/check-terminal-tabs.rb) |
 | Finder native-tab and singleton discovery harness | [check-finder-documents.rb](../scripts/check-finder-documents.rb) |
-| Commands, prerequisites and broader validation modes | [README](../README.md), [feasibility protocol](FEASIBILITY.md), [implementation plan](../plan.md) |
+| Commands, prerequisites and broader validation modes | [README](../README.md), [feasibility protocol](archive/FEASIBILITY.md), [implementation plan](archive/PLAN.md) |
 
 ### Key technical notes and remaining limitations for handoff
 
@@ -94,7 +96,7 @@ Instrumentation (`status.performance`) and the interruptible focus-scroll animat
   - Intermittent AX reference/role failures and restart rediscovery remain open (last full 10-mode integrated cycle passed 9/10).
   - Live mode registers the user's Option–Command shortcuts (`HotKeys.swift`). Abrupt-exit crash recovery, OS/Control Center popup recovery, baseline/performance benchmarks, and daily-use soak remain release gates.
 
-Commit validated milestones autonomously per the [commit policy](../plan.md#commit-checkpoints). Keep raw captures/scratch out of commits and preserve unrelated changes. Historical increments in [HISTORY.md](HISTORY.md) describe evidence at their original dates; this handoff and the current checkpoint are the resume instructions.
+Keep raw captures/scratch out of commits and preserve unrelated changes. Historical increments in [HISTORY.md](HISTORY.md) describe evidence at their original dates. The [implementation plan](archive/PLAN.md) is archived and no longer serves as active work instructions.
 
 ### Display-settings guard — 2026-11-10
 

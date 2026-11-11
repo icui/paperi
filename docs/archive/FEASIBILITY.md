@@ -1,5 +1,7 @@
 # Native feasibility protocol
 
+> Archived 2026-11-11: the requested feature set is implemented. Retained for historical context; proposed work and release gates below describe the original planning checkpoint, not an active roadmap. See [current status](../STATUS.md) for verification limits.
+
 Run read-only capture while the existing manager is active. Do not grant a future live manager control over the same windows concurrently with PaperWM.
 
 1. Save a snapshot before and after each action. Record app bundle/version, OS, visible display configuration, and whether existing PaperWM was enabled.

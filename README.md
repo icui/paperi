@@ -8,6 +8,12 @@ A scrolling window manager for macOS. Keep windows at useful sizes, arrange them
 
 Paperi is a standalone menu bar app, written in Swift. It is in active development; build from source and check the [current verification scope](docs/STATUS.md) before relying on it for daily work.
 
+## See it in action
+
+[![Paperi workspace screen recording](assets/demos/workspace-demo.jpg)](assets/demos/workspace-demo.mp4)
+
+[Watch the workspace demo](assets/demos/workspace-demo.mp4) — scrolling, window gestures, and drag-to-tile in a real session.
+
 ## A desktop that moves with you
 
 Windows sit beside one another in columns. Focusing a window scrolls it into view; adding more windows extends the strip. Stack related windows vertically, adjust a column's width, or float a window when it needs its own space. Each display's active Space has its own strip.
@@ -133,7 +139,7 @@ Paperi uses private macOS interfaces for Space information and trackpad gesture 
 ./scripts/swift.sh test
 ```
 
-There are no third-party Swift package dependencies. See [development and diagnostic notes](docs/DEVELOPMENT.md), [implementation status](docs/STATUS.md), and the [design plan](PLAN.md).
+There are no third-party Swift package dependencies. See [development and diagnostic notes](docs/DEVELOPMENT.md), [implementation status](docs/STATUS.md), and the [archived design plan](docs/archive/PLAN.md).
 
 Thanks to [PaperWM](https://github.com/paperwm/PaperWM), [PaperWM.spoon](https://github.com/mogenson/PaperWM.spoon), [Hammerspoon](https://github.com/Hammerspoon/hammerspoon), and [yabai](https://github.com/asmvik/yabai) for the scrolling-window workflow and implementation references. The [reference audit](docs/REFERENCE-AUDIT.md) records which mechanisms were studied. The Mission Control test helper adapts code from PaperWM.spoon; its copyright and MIT license are preserved in [third-party notices](THIRD_PARTY_NOTICES.md).
 

@@ -163,7 +163,7 @@ Increment 43 connects native create/destroy notifications to that reducer/effect
 path for two new non-tabbing fixture windows. Debug and release both verify
 1→2→1→0 logical slots, confirmed reflow of the survivor after the left window
 closes, matching physical identities and clean native-source teardown. This is
-the creation/closure subset of the [agreed implementation order](../PLAN.md#agreed-implementation-order--2026-11-08),
+the creation/closure subset of the [agreed implementation order](archive/PLAN.md#agreed-implementation-order--2026-11-08),
 with focus/commands/external resize and transient recovery still to implement.
 
 Increments 44–45 add observed horizontal resizing and focused width-command
