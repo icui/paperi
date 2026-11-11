@@ -197,7 +197,7 @@ def main():
         palette=frames[0].quantize(colors=96)
         frames=[im.quantize(palette=palette,dither=Image.Dither.NONE) for im in frames]
         path=OUT/(kind+'.gif')
-        frames[0].save(path,save_all=True,append_images=frames[1:],duration=[65]*(count-1)+[1200],loop=0,optimize=True,disposal=2)
+        frames[0].save(path,save_all=True,append_images=frames[1:],duration=[35]*(count-1)+[600],loop=0,optimize=True,disposal=2)
         print(path.relative_to(OUT.parents[1]), path.stat().st_size)
 
 if __name__ == '__main__':
