@@ -42,6 +42,39 @@ import PaperiCore
         #expect(LiveReconciliation.interpolate([1: start], [1: end], progress: 3)[1]?.x == 300)
     }
 
+    @Test func swipeInterpolationMovesEveryImageAtTheStripSpeed() {
+        // Strip scrolls 600 pt left. Window 2 leaves view into the left tuck;
+        // window 3 enters from the right tuck; window 4 stays tucked.
+        let canvas = Rect(x: 0, y: 0, width: 1000, height: 800)
+        let starts: [UInt32: Rect] = [1: Rect(x: 700, y: 0, width: 500, height: 800),
+                                      2: Rect(x: 100, y: 0, width: 300, height: 800),
+                                      3: Rect(x: 999, y: 0, width: 500, height: 800),
+                                      4: Rect(x: -499, y: 0, width: 500, height: 800)]
+        let ends: [UInt32: Rect] = [1: Rect(x: 100, y: 0, width: 500, height: 800),
+                                    2: Rect(x: -299, y: 0, width: 300, height: 800),
+                                    3: Rect(x: 600, y: 0, width: 500, height: 800),
+                                    4: Rect(x: -499, y: 0, width: 500, height: 800)]
+        var previous = starts
+        for step in 1...10 {
+            let frames = LiveReconciliation.interpolate(starts, ends, progress: Double(step) / 10, canvas: canvas)
+            for (wid, frame) in frames {
+                let moved = previous[wid]!.x - frame.x
+                // No image ever outruns the strip (60 pt per step) or moves backwards.
+                #expect(moved >= -0.001 && moved <= 60.001)
+            }
+            previous = frames
+        }
+        #expect(previous == ends)
+        // Leaving: moves with the strip from the start, then holds at the tuck.
+        let half = LiveReconciliation.interpolate(starts, ends, progress: 0.5, canvas: canvas)
+        #expect(abs(half[1]!.x - 400) < 0.001 && abs(half[2]!.x - -200) < 0.001)
+        // Entering: holds at the tuck, then moves with the strip into place.
+        #expect(abs(half[3]!.x - 900) < 0.001 && half[4]?.x == -499)
+        #expect(LiveReconciliation.interpolate(starts, ends, progress: 0.3, canvas: canvas)[3]?.x == 999)
+        let late = LiveReconciliation.interpolate(starts, ends, progress: 0.9, canvas: canvas)
+        #expect(abs((late[3]!.x - ends[3]!.x) - (late[1]!.x - ends[1]!.x)) < 0.001)
+    }
+
     @Test func handoffNeedsCompleteStableObservationsAndReportsClamping() {
         let target = Rect(x: -500, y: 40, width: 600, height: 700)
         let actual = Rect(x: -490, y: 40, width: 600, height: 700)

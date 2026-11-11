@@ -1020,6 +1020,7 @@ import PaperiCore
         let surveys: [UInt32: Survey]
         let ends: [Direction: [UInt32: Rect]]
         let neighbours: [Direction: UInt32]
+        let canvas: Rect
         var starts: [UInt32: Rect] = [:]
         var progress = 0.0
         var targetProgress = 0.0
@@ -1258,7 +1259,7 @@ import PaperiCore
         let generation = motionGeneration
         let overlay = SnapshotTransition()
         swipe = Swipe(space: space, generation: generation, overlay: overlay, surveys: surveys,
-                      ends: ends, neighbours: neighbours, tracking: !pendingLock)
+                      ends: ends, neighbours: neighbours, canvas: session.canvas, tracking: !pendingLock)
         motionSpace = space
         swipeBegan = ProcessInfo.processInfo.systemUptime
         swipeMetrics = ["state": "capturing", "windows": surveys.count]
@@ -1333,18 +1334,20 @@ import PaperiCore
         if changed { state.overlay.place(swipeFrames(state)) }
     }
 
-    private func swipeFrames(_ state: Swipe) -> [UInt32: Rect] {
-        let direction: Direction = state.progress < 0 ? .left : .right
+    private func swipeFrames(_ state: Swipe) -> [UInt32: Rect] { swipeFrames(state, progress: state.progress) }
+
+    private func swipeFrames(_ state: Swipe, progress: Double) -> [UInt32: Rect] {
+        let direction: Direction = progress < 0 ? .left : .right
         guard let ends = state.ends[direction] else {
             // Strip end: resist, moving at most a few points.
-            let shift = -Self.swipeEdgeResistance * state.progress
+            let shift = -Self.swipeEdgeResistance * progress
             return state.starts.mapValues { var frame = $0; frame.x += shift; return frame }
         }
-        let absP = abs(state.progress)
+        let absP = abs(progress)
         if absP <= 1.0 {
-            return LiveReconciliation.interpolate(state.starts, ends, progress: absP)
+            return LiveReconciliation.interpolate(state.starts, ends, progress: absP, canvas: state.canvas)
         } else {
-            let base = LiveReconciliation.interpolate(state.starts, ends, progress: 1.0)
+            let base = LiveReconciliation.interpolate(state.starts, ends, progress: 1.0, canvas: state.canvas)
             let extraShift = (direction == .left ? 1.0 : -1.0) * (absP - 1.0) * Self.swipeEdgeResistance
             return base.mapValues { var frame = $0; frame.x += extraShift; return frame }
         }
@@ -1373,7 +1376,10 @@ import PaperiCore
         guard commit, let wid = target, let session = coordinator.sessions[space],
               let ends = state.ends[direction] else {
             let duration = SlotSwipe.settleDuration(distance: abs(state.progress), base: settle)
-            overlay.slide(to: state.starts, duration: duration)
+            // Follow the tracking path back so every image keeps the strip's speed.
+            let from = state.progress, path = state
+            overlay.slide(along: { u in self.swipeFrames(path, progress: from * (1 - u)) },
+                          to: state.starts, duration: duration)
             swipeTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
                 guard let self, self.swipe?.generation == generation else { return }
@@ -1392,7 +1398,10 @@ import PaperiCore
         _ = raise(wid)
         let destinationProgress = direction == .left ? -1.0 : 1.0
         let duration = SlotSwipe.settleDuration(distance: abs(destinationProgress - state.progress), base: settle)
-        overlay.slide(to: ends, duration: duration)
+        let from = state.progress, path = state
+        overlay.slide(along: { u in
+            self.swipeFrames(path, progress: from + (destinationProgress - from) * u)
+        }, to: ends, duration: duration)
         let released = ProcessInfo.processInfo.systemUptime
         swipeTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(Int(duration * 1000)))

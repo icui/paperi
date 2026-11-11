@@ -175,6 +175,36 @@ import PaperiCore
         CATransaction.flush()
     }
 
+    /// Slides images along `path` (frames at fraction 0…1 of the way), ending
+    /// exactly on `frames`. Unlike `slide(to:)`, images whose straight-line
+    /// distances differ still move together at the path's speed.
+    func slide(along path: (Double) -> [UInt32: Rect], to frames: [UInt32: Rect], duration: Double) {
+        guard duration > 0 else { place(frames); return }
+        let steps = 32
+        let samples = (0...steps).map { path(Double($0) / Double(steps)) }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (wid, layer) in layers {
+            guard let frame = frames[wid] else { continue }
+            let from = layer.presentation()?.position ?? layer.position
+            let to = center(frame)
+            layer.removeAnimation(forKey: "slide")
+            layer.position = to
+            var values = samples.map { $0[wid].map(center) ?? from }
+            values[0] = from
+            values[steps] = to
+            guard values.contains(where: { $0 != to }) else { continue }
+            let animation = CAKeyframeAnimation(keyPath: "position")
+            animation.values = values.map { NSValue(point: $0) }
+            animation.calculationMode = .linear
+            animation.duration = duration
+            animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            layer.add(animation, forKey: "slide")
+        }
+        CATransaction.commit()
+        CATransaction.flush()
+    }
+
     func hide() {
         window?.orderOut(nil)
         window = nil

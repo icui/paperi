@@ -87,13 +87,33 @@ enum LiveReconciliation {
 
     /// Positions `progress` (0…1) of the way from `starts` to `ends`; sizes
     /// stay at the start. Windows missing from either side keep their start.
-    static func interpolate(_ starts: [UInt32: Rect], _ ends: [UInt32: Rect], progress: Double) -> [UInt32: Rect] {
+    ///
+    /// Every image moves at the same speed: the strip's, set by the longest
+    /// travel. A window tucked at a canvas edge at one end travels less, so it
+    /// moves only for its share of the gesture: leaving the tuck at the end
+    /// (when it enters view) or reaching it early (when it leaves view), as if
+    /// it were part of the rigid strip clamped at the edge.
+    static func interpolate(_ starts: [UInt32: Rect], _ ends: [UInt32: Rect], progress: Double,
+                            canvas: Rect? = nil) -> [UInt32: Rect] {
         let t = min(1, max(0, progress.isFinite ? progress : 0))
+        func distance(_ a: Rect, _ b: Rect) -> Double { hypot(b.x - a.x, b.y - a.y) }
+        func visible(_ frame: Rect, _ canvas: Rect) -> Double {
+            max(0, min(frame.x + frame.width, canvas.x + canvas.width) - max(frame.x, canvas.x))
+        }
+        let travel = starts.compactMap { id, start in ends[id].map { distance(start, $0) } }.max() ?? 0
         return starts.reduce(into: [:]) { result, item in
             var frame = item.value
             if let end = ends[item.key] {
-                frame.x += (end.x - frame.x) * t
-                frame.y += (end.y - frame.y) * t
+                let own = distance(frame, end)
+                var u = t
+                // Within a couple of points of the strip's travel is the strip.
+                if own > 0, own < travel - 2 {
+                    let share = own / travel
+                    let entering = canvas.map { visible(frame, $0) < visible(end, $0) } ?? false
+                    u = min(1, max(0, entering ? (t - (1 - share)) / share : t / share))
+                }
+                frame.x += (end.x - frame.x) * u
+                frame.y += (end.y - frame.y) * u
             }
             result[item.key] = frame
         }
