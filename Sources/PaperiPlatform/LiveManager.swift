@@ -48,6 +48,9 @@ import PaperiCore
     private var journal: [UInt32: (pid: pid_t, frame: Rect)] = [:]
     private var userFloating: Set<UInt32> = []
     private var destroyedNotified: Set<UInt32> = []
+    /// Neighbour chosen when the focused window closed (`focusAfterClose`). It
+    /// overrides the OS focus briefly, while its raise and app activation land.
+    private var closeFocus: (window: UInt32, until: Double)?
     private var expected: [UInt32: (frame: Rect, at: Double)] = [:]
     /// Managed window the user is dragging (moved while the left button is
     /// down). It is not written until mouse up, so it follows the pointer.
@@ -105,7 +108,7 @@ import PaperiCore
         running = true; paused = false
         references.removeAll(); pidForWindow.removeAll(); expected.removeAll(); applied.removeAll()
         endDrag(); displaced.removeAll()
-        destroyedNotified.removeAll(); slowUntil.removeAll(); forceApply = true
+        destroyedNotified.removeAll(); closeFocus = nil; slowUntil.removeAll(); forceApply = true
         coordinator = DisplaySpaceCoordinator(ownerPIDs: [], displays: topologies())
         recorder = EventRecorder(workspaceCenter: NSWorkspace.shared.notificationCenter,
                                  runningApplications: { NSWorkspace.shared.runningApplications },
@@ -479,7 +482,14 @@ import PaperiCore
             destroyedNotified.contains(wid) || levels[wid] == nil || pidForWindow[wid].map { !livePIDs.contains($0) } ?? true
         }
         destroyedNotified.removeAll()
+        // Spaces whose strip lost a window: the survivors close the gap animated.
+        let closedSpaces = Set(gone.compactMap { coordinator.spaceForWindow[$0] })
+        let closeTarget = neighbourAfterClose(gone)
         if !gone.isEmpty { removeMembers(gone) }
+        if let closeTarget {
+            closeFocus = (closeTarget, ProcessInfo.processInfo.systemUptime + 0.8)
+            log("focus after close: \(closeTarget)")
+        }
         preferredWidth = preferredWidth.filter { levels[$0.key] != nil }
 
         let discoveryStart = ProcessInfo.processInfo.systemUptime
@@ -605,12 +615,23 @@ import PaperiCore
             }
             raiseAfterApply = focusedWindow
         }
+        var focusedPID = front?.processIdentifier
+        if let hold = closeFocus {
+            // A click (or the target being reached, gone, or overdue) ends the hold.
+            if mouseDown || focusedWindow == hold.window || ProcessInfo.processInfo.systemUptime > hold.until
+                || !isActiveRepresentative(hold.window) || pidForWindow[hold.window] == nil {
+                closeFocus = nil
+            } else {
+                focusedWindow = hold.window; focusedPID = pidForWindow[hold.window]
+                raiseAfterApply = nil
+            }
+        }
         var focusAnimationSpace: UInt64?
         for (space, session) in coordinator.sessions where activeSpaces.contains(space) {
             let previousOffset = session.state.layout.offset
             let owned = focusedWindow.flatMap { session.slots[$0] != nil ? $0 : nil }
             let classification = owned != nil ? Self.tiled : WindowPolicy.classify(WindowFacts(bundleID: "foreign"))
-            try? session.focus(windowID: owned, ownerPID: owned != nil ? front?.processIdentifier : nil,
+            try? session.focus(windowID: owned, ownerPID: owned != nil ? focusedPID : nil,
                                classification: classification, ticket: session.ticket)
             // Removals, insertions and focus changes can leave the focused
             // column partly off-canvas; reveal is minimal and idempotent.
@@ -622,6 +643,9 @@ import PaperiCore
                !forceApply, ProcessInfo.processInfo.systemUptime >= forceUntil {
                 focusAnimationSpace = space
             }
+        }
+        if focusAnimationSpace == nil, !forceApply, ProcessInfo.processInfo.systemUptime >= forceUntil {
+            focusAnimationSpace = closedSpaces.first { activeSpaces.contains($0) && coordinator.sessions[$0] != nil }
         }
 
         // 7. Adopt user width changes on active representatives (on mouse up).
@@ -689,9 +713,33 @@ import PaperiCore
                 AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
                 log("raised \(wid): app activated without a focused window")
             }
+            if let wid = closeTarget, closeFocus?.window == wid, raise(wid) { log("raised \(wid) after close") }
         }
         rememberWidths()
         lastRefreshMS = (ProcessInfo.processInfo.systemUptime - started) * 1000
+    }
+
+    /// When the window Paperi last saw focused closes and takes its whole
+    /// column with it, the representative to focus instead: the nearest
+    /// surviving column on the configured side, else the other side. A
+    /// surviving tab or stacked window keeps the column, so macOS's choice
+    /// stands. Chosen before removal, while the closed column's index exists.
+    private func neighbourAfterClose(_ gone: Set<UInt32>) -> UInt32? {
+        let preference = options.config.focusAfterClose
+        guard preference != .system else { return nil }
+        for session in coordinator.sessions.values {
+            guard let focused = session.state.osFocusedWindow, gone.contains(focused),
+                  let slotID = session.slots[focused], let loc = session.state.layout.index(of: slotID) else { continue }
+            let columns = session.state.layout.columns
+            func survivor(_ column: Int) -> UInt32? {
+                columns[column].slots.lazy.map(\.activeMember).first { !gone.contains($0) }
+            }
+            if columns[loc.column].slots.contains(where: { $0.members.contains { !gone.contains($0) } }) { return nil }
+            let left = stride(from: loc.column - 1, through: 0, by: -1).lazy.compactMap(survivor).first
+            let right = (loc.column + 1 ..< columns.count).lazy.compactMap(survivor).first
+            return preference == .left ? left ?? right : right ?? left
+        }
+        return nil
     }
 
     private func isActiveRepresentative(_ wid: UInt32) -> Bool {
@@ -787,7 +835,8 @@ import PaperiCore
     /// WindowServer supplies current frames; unknown windows still take the full
     /// reconciliation path. A normal refresh follows animation completion.
     private func animateCachedFocus() -> Bool {
-        guard !forceApply, ProcessInfo.processInfo.systemUptime >= forceUntil,
+        // A pending close must go through the full pass so the gap is removed.
+        guard !forceApply, ProcessInfo.processInfo.systemUptime >= forceUntil, destroyedNotified.isEmpty, closeFocus == nil,
               NSEvent.pressedMouseButtons == 0, drag == nil,
               (options.config.focusScrollDuration ?? 0.22) > 0,
               DisplayArrangement.currentProblem() == nil,

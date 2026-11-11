@@ -31,6 +31,19 @@ struct LiveConfigTests {
         }
     }
 
+    @Test func focusAfterClose() throws {
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).focusAfterClose == .left)
+        #expect(LiveConfig().focusAfterClose == .left)
+        for value in LiveConfig.FocusAfterClose.allCases {
+            let config = try JSONDecoder().decode(LiveConfig.self, from: Data("{\"focusAfterClose\":\"\(value.rawValue)\"}".utf8))
+            #expect(config.focusAfterClose == value)
+            #expect(try JSONDecoder().decode(LiveConfig.self, from: JSONEncoder().encode(config)) == config)
+        }
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"focusAfterClose":"up"}"#.utf8))
+        }
+    }
+
     @Test func gestureConfiguration() throws {
         let defaults = try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8))
         #expect(defaults.gesture.enabled == true)

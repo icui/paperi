@@ -36,6 +36,11 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         }
     }
 
+    /// Where focus goes when the focused tiled window closes: the column to
+    /// the `left` (else right), to the `right` (else left), or wherever macOS
+    /// puts it (`system`). A surviving tab or stacked window keeps the column.
+    public enum FocusAfterClose: String, Codable, Equatable, Sendable, CaseIterable { case left, right, system }
+
     /// When set, only these bundle IDs are managed (the `--app` flag).
     public var include: [String]?
     /// Bundle IDs never managed, in addition to `defaultExclude`.
@@ -49,6 +54,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public var tile: [FloatRule]
     /// Focus-scroll duration in seconds; zero disables animation.
     public var focusScrollDuration: Double?
+    public var focusAfterClose: FocusAfterClose
     public var gap: Double?
     public var outerGap: Double?
     /// Key spec → command (as accepted by `paperi msg`), merged over the
@@ -71,11 +77,12 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         self.include = include; self.exclude = exclude; self.singleton = singleton
         self.float = float; self.tile = tile; self.gap = gap; self.outerGap = outerGap
         self.hotkeys = [:]
+        self.focusAfterClose = .left
         self.gesture = gesture ?? GestureConfig()
     }
 
     enum CodingKeys: String, CodingKey {
-        case include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight, edgeHint, focusScrollDuration, gesture
+        case include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight, edgeHint, focusScrollDuration, focusAfterClose, gesture
     }
 
     public init(from decoder: Decoder) throws {
@@ -88,6 +95,15 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         focusScrollDuration = try c.decodeIfPresent(Double.self, forKey: .focusScrollDuration)
         if let duration = focusScrollDuration, !duration.isFinite || duration < 0 || duration > 1 {
             throw DecodingError.dataCorruptedError(forKey: .focusScrollDuration, in: c, debugDescription: "expected seconds from 0 to 1")
+        }
+        if let raw = try c.decodeIfPresent(String.self, forKey: .focusAfterClose) {
+            guard let value = FocusAfterClose(rawValue: raw) else {
+                throw DecodingError.dataCorruptedError(forKey: .focusAfterClose, in: c,
+                    debugDescription: "expected left, right or system, got \(raw)")
+            }
+            focusAfterClose = value
+        } else {
+            focusAfterClose = .left
         }
         gap = try c.decodeIfPresent(Double.self, forKey: .gap)
         outerGap = try c.decodeIfPresent(Double.self, forKey: .outerGap)
@@ -138,6 +154,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "tile": [],
       "singleton": [],
       "focusScrollDuration": 0.22,
+      "focusAfterClose": "left",
       "gap": 8,
       "outerGap": 8,
       "swapHighlight": "#0A84FF4D",

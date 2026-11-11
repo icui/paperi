@@ -240,9 +240,14 @@ Association reports expose quarantine separately from evidence status: `quaranti
 Increment 18 narrows physical-owner conflict quarantine to the implicated groups: unrelated groups continue learning, including both native groups in the mixed content fixture. Shared or malformed AX identities still quarantine the whole observer. Reports distinguish `scopeQuarantined` and retained `quarantinedGroups`, with a `quarantined` flag on each candidate. Group quarantine survives topology changes, disappearance and destruction invalidation until a new observer scope. An `observed` report can include both blocked and usable candidates; blocked candidates have no bindings and cannot be complete. This supersedes the whole-scope physical-owner policy described above.
 
 Focus scrolling uses `focusScrollDuration` in config.json (seconds, default
-`0.22`; set `0` for immediate placement). Only keyboard focus scrolling is
-animated. New commands retarget the in-flight positions; mouse input and
-Space/display/lifecycle changes cancel the scheduler.
+`0.22`; set `0` for immediate placement). Keyboard focus scrolling is
+animated, plus columns closing the gap left by a closed window. When the
+focused window closes with its column, `focusAfterClose` picks the next
+focus: `"left"` (default; the column to the left, else the right), `"right"`
+(the reverse), or `"system"` (whatever macOS focuses). A surviving tab or
+stacked window keeps the column focused instead. New commands retarget the
+in-flight positions; mouse input and Space/display/lifecycle changes cancel
+the scheduler.
 
 `paperi msg status` includes `performance`: discovery/topology/layout phase
 milliseconds, cumulative AX geometry-write calls/time, last tick cost and
