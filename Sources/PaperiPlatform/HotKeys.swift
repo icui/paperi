@@ -122,7 +122,7 @@ public enum LiveCommand {
         case "focus", "swap", "move":
             return rest.count == 1 && directions.contains(rest[0]) ? nil : "usage: \(verb) left|right|up|down"
         case "swipe":
-            guard (1...2).contains(rest.count), ["left", "right", "up"].contains(rest[0]) else { return "usage: swipe left|right|up [travel]" }
+            guard (1...2).contains(rest.count), directions.contains(rest[0]) else { return "usage: swipe left|right|up|down [travel]" }
             if rest.count == 2 { guard let t = Double(rest[1]), t > 0, t <= 1 else { return "travel must be in (0, 1]" } }
             return nil
         case "width", "height":

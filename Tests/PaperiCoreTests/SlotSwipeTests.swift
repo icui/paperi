@@ -211,6 +211,27 @@ struct SlotSwipeTests {
         #expect(swipe.end(at: 0.06) == .close)
     }
 
+    @Test func downwardSwipeTracksMinimizeWhenEnabled() {
+        var swipe = SlotSwipe(config: .init(lockThreshold: 0.01, closeTravel: 0.2, minimizeTravel: 0.2))
+        swipe.begin(at: 0.0)
+        #expect(swipe.move(dx: 0.001, dy: -0.02, at: 0.01) == .minimizeStarted)
+        guard case .minimizeUpdated(let shown) = swipe.move(dx: 0, dy: -0.1, at: 0.05) else { Issue.record("update"); return }
+        #expect(abs(shown - 0.5 / 0.9) < 1e-9)
+        #expect(swipe.end(at: 0.06) == .minimize)
+    }
+
+    @Test func minimizeDraggedBackUpSnapsBack() {
+        var swipe = SlotSwipe(config: .init(lockThreshold: 0.01, minimizeTravel: 0.2))
+        swipe.begin(at: 0.0)
+        _ = swipe.move(dx: 0, dy: -0.15, at: 0.05)
+        #expect(swipe.move(dx: 0, dy: 0.25, at: 0.3) == .minimizeUpdated(progress: 0))
+        #expect(swipe.end(at: 0.6) == .snapBack)
+        // Upwards without closeTravel still cancels.
+        var up = SlotSwipe(config: .init(lockThreshold: 0.01, minimizeTravel: 0.2))
+        up.begin(at: 0)
+        #expect(up.move(dx: 0, dy: 0.02, at: 0.01) == .cancelled)
+    }
+
     @Test func downwardSwipeCancelsEvenWithCloseEnabled() {
         var swipe = SlotSwipe(config: .init(lockThreshold: 0.01, closeTravel: 0.2))
         swipe.begin(at: 0.0)

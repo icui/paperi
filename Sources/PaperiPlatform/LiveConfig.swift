@@ -30,10 +30,12 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         /// Bundle IDs whose windows hold in-content tabs (e.g. Chrome): a
         /// swipe up closes the current tab with ⌘W instead of the window.
         public var tabCloseApps: [String]
+        /// Swiping down minimizes the focused window (with its native tabs).
+        public var swipeDownToMinimize: Bool
 
         public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.4,
                     commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false,
-                    swipeUpToClose: Bool = true, tabCloseApps: [String] = []) {
+                    swipeUpToClose: Bool = true, tabCloseApps: [String] = [], swipeDownToMinimize: Bool = true) {
             self.enabled = enabled
             self.fingers = fingers
             self.travel = travel
@@ -42,10 +44,11 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             self.invert = invert
             self.swipeUpToClose = swipeUpToClose
             self.tabCloseApps = tabCloseApps
+            self.swipeDownToMinimize = swipeDownToMinimize
         }
 
         enum CodingKeys: String, CodingKey {
-            case enabled, fingers, travel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps
+            case enabled, fingers, travel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDownToMinimize
         }
 
         /// Omitted keys keep their defaults.
@@ -60,6 +63,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             invert = try c.decodeIfPresent(Bool.self, forKey: .invert) ?? d.invert
             swipeUpToClose = try c.decodeIfPresent(Bool.self, forKey: .swipeUpToClose) ?? d.swipeUpToClose
             tabCloseApps = try c.decodeIfPresent([String].self, forKey: .tabCloseApps) ?? d.tabCloseApps
+            swipeDownToMinimize = try c.decodeIfPresent(Bool.self, forKey: .swipeDownToMinimize) ?? d.swipeDownToMinimize
         }
     }
 
@@ -193,7 +197,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         "flickVelocity": 1.5,
         "invert": false,
         "swipeUpToClose": true,
-        "tabCloseApps": []
+        "tabCloseApps": [],
+        "swipeDownToMinimize": true
       },
       "hotkeys": {
         "alt-cmd-j": "focus left",

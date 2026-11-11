@@ -40,6 +40,9 @@ struct LiveConfigTests {
         let chrome = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"tabCloseApps":["com.google.Chrome"]}}"#.utf8))
         #expect(chrome.gesture.tabCloseApps == ["com.google.Chrome"])
         #expect(chrome.gesture.swipeUpToClose)
+        #expect(chrome.gesture.swipeDownToMinimize)
+        let noMinimize = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"swipeDownToMinimize":false}}"#.utf8))
+        #expect(!noMinimize.gesture.swipeDownToMinimize)
         let template = try JSONDecoder().decode(LiveConfig.self, from: Data(LiveConfig.template.utf8))
         #expect(template.gesture == LiveConfig.GestureConfig())
     }

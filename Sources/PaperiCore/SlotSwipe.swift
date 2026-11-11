@@ -8,12 +8,15 @@ import Foundation
 ///
 /// With `closeTravel` set, an upward vertical lock instead tracks a close:
 /// progress runs from 0 (in place) to 1 (the focused window off the top).
+/// With `minimizeTravel` set, a downward lock tracks a minimize the same way
+/// (progress grows as the fingers move down).
 public struct SlotSwipe: Equatable, Sendable {
     public enum State: Equatable, Sendable {
         case idle
         case detecting(accDx: Double, accDy: Double, startTime: Double)
         case active(rawProgress: Double, clampedProgress: Double, velocity: Double, lastTime: Double)
         case closing(rawProgress: Double, clampedProgress: Double, velocity: Double, lastTime: Double)
+        case minimizing(rawProgress: Double, clampedProgress: Double, velocity: Double, lastTime: Double)
         case completed(Decision)
         case cancelled
     }
@@ -21,6 +24,7 @@ public struct SlotSwipe: Equatable, Sendable {
     public enum Decision: Equatable, Sendable {
         case commit(Direction)
         case close
+        case minimize
         case snapBack
     }
 
@@ -29,6 +33,8 @@ public struct SlotSwipe: Equatable, Sendable {
         case updated(progress: Double)
         case closeStarted
         case closeUpdated(progress: Double)
+        case minimizeStarted
+        case minimizeUpdated(progress: Double)
         case finished(Decision)
         case cancelled
     }
@@ -42,19 +48,24 @@ public struct SlotSwipe: Equatable, Sendable {
         /// Upward finger travel (fraction of the trackpad height) that takes
         /// the focused window fully off screen. `nil`: vertical swipes cancel.
         public var closeTravel: Double?
+        /// Downward finger travel that takes the focused window fully off the
+        /// bottom (minimize). `nil`: downward swipes cancel.
+        public var minimizeTravel: Double?
 
         public init(travel: Double = 0.4,
                     commitThreshold: Double = 0.5,
                     flickVelocity: Double = 1.5,
                     lockThreshold: Double = 0.015,
                     invert: Bool = false,
-                    closeTravel: Double? = nil) {
+                    closeTravel: Double? = nil,
+                    minimizeTravel: Double? = nil) {
             self.travel = travel
             self.commitThreshold = commitThreshold
             self.flickVelocity = flickVelocity
             self.lockThreshold = lockThreshold
             self.invert = invert
             self.closeTravel = closeTravel
+            self.minimizeTravel = minimizeTravel
         }
     }
 
@@ -160,21 +171,26 @@ public struct SlotSwipe: Equatable, Sendable {
                     state = .active(rawProgress: rawProg, clampedProgress: clamped, velocity: vel, lastTime: time)
                     return .started
                 } else if absY > 1.2 * absX {
-                    // Touch y grows upwards. Only an upward swipe closes.
-                    guard let closeTravel = config.closeTravel, newY > 0 else {
+                    // Touch y grows upwards: up closes, down minimizes.
+                    guard let travel = newY > 0 ? config.closeTravel : config.minimizeTravel else {
                         state = .cancelled
                         return .cancelled
                     }
                     // Raw progress (release decisions) counts the travel
                     // before the lock; the shown progress starts from rest
-                    // there, as one close unit is a whole window height and
-                    // the lock distance at once would jump tens of points.
-                    let rawProg = newY / max(0.01, closeTravel)
+                    // there, as one unit is a whole window height and the
+                    // lock distance at once would jump tens of points.
+                    let rawProg = abs(newY) / max(0.01, travel)
                     let dt = max(1.0 / 120.0, time - start)
                     origin = min(0.5, rawProg)
-                    state = .closing(rawProgress: rawProg, clampedProgress: shownClose(rawProg),
-                                     velocity: rawProg / dt, lastTime: time)
-                    return .closeStarted
+                    if newY > 0 {
+                        state = .closing(rawProgress: rawProg, clampedProgress: shownClose(rawProg),
+                                         velocity: rawProg / dt, lastTime: time)
+                        return .closeStarted
+                    }
+                    state = .minimizing(rawProgress: rawProg, clampedProgress: shownClose(rawProg),
+                                        velocity: rawProg / dt, lastTime: time)
+                    return .minimizeStarted
                 } else {
                     // Keep accumulating ambiguous diagonal motion until an axis wins.
                     state = .detecting(accDx: newX, accDy: newY, startTime: start)
@@ -200,17 +216,28 @@ public struct SlotSwipe: Equatable, Sendable {
             return .updated(progress: clamped)
 
         case .closing(let rawProg, _, let lastVel, let lastTime):
-            let deltaProg = dy / max(0.01, config.closeTravel ?? 1)
-            let newRaw = rawProg + deltaProg
-            guard time > lastTime else { return nil }
-            let dt = time - lastTime
-            let instantVel = deltaProg / max(1.0 / 120.0, dt)
-            let weight = 1 - exp(-dt / 0.025)
-            let newVel = lastVel + weight * (instantVel - lastVel)
-            let clamped = shownClose(newRaw)
-            state = .closing(rawProgress: newRaw, clampedProgress: clamped, velocity: newVel, lastTime: time)
-            return .closeUpdated(progress: clamped)
+            guard let next = vertical(rawProg, lastVel, lastTime, delta: dy / max(0.01, config.closeTravel ?? 1), at: time)
+            else { return nil }
+            state = .closing(rawProgress: next.raw, clampedProgress: next.shown, velocity: next.velocity, lastTime: time)
+            return .closeUpdated(progress: next.shown)
+
+        case .minimizing(let rawProg, _, let lastVel, let lastTime):
+            guard let next = vertical(rawProg, lastVel, lastTime, delta: -dy / max(0.01, config.minimizeTravel ?? 1), at: time)
+            else { return nil }
+            state = .minimizing(rawProgress: next.raw, clampedProgress: next.shown, velocity: next.velocity, lastTime: time)
+            return .minimizeUpdated(progress: next.shown)
         }
+    }
+
+    /// One vertical (close or minimize) update; `delta` is in progress units.
+    private func vertical(_ raw: Double, _ lastVel: Double, _ lastTime: Double, delta: Double, at time: Double)
+        -> (raw: Double, shown: Double, velocity: Double)? {
+        guard time > lastTime else { return nil }
+        let newRaw = raw + delta
+        let dt = time - lastTime
+        let instantVel = delta / max(1.0 / 120.0, dt)
+        let weight = 1 - exp(-dt / 0.025)
+        return (newRaw, shownClose(newRaw), lastVel + weight * (instantVel - lastVel))
     }
 
     /// Raw progress at the axis lock.
@@ -256,12 +283,13 @@ public struct SlotSwipe: Equatable, Sendable {
             state = .completed(decision)
             return decision
 
-        case .closing(let rawProg, _, let vel, let lastTime):
-            // A swipe dragged back below its start is not a close. Decide on
+        case .closing(let rawProg, _, let vel, let lastTime), .minimizing(let rawProg, _, let vel, let lastTime):
+            // A swipe dragged back past its start does nothing. Decide on
             // the whole finger travel, including the lead-in to the lock.
-            let decision: Decision = rawProg > 0
+            let commits = rawProg > 0
                 && releases(raw: rawProg, clamped: Self.closeBand(rawProg), velocity: vel, lastTime: lastTime, at: time)
-                ? .close : .snapBack
+            let decision: Decision
+            if case .closing = state { decision = commits ? .close : .snapBack } else { decision = commits ? .minimize : .snapBack }
             state = .completed(decision)
             return decision
 

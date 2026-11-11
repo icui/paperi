@@ -144,6 +144,8 @@ import PaperiCore
 
     /// Top edge of the overlay's display, in top-left (AX) coordinates.
     var screenTop: Double { mainHeight - Double(screenFrame.maxY) }
+    /// Bottom edge of the overlay's display, in top-left (AX) coordinates.
+    var screenBottom: Double { mainHeight - Double(screenFrame.minY) }
 
     func show() {
         // Submit the fully composed layer tree before exposing the opaque window.

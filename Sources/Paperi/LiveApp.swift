@@ -514,6 +514,8 @@ import PaperiPlatform
         value(sub, "Tab close apps: \(apps)\(origin(gesture.tabCloseApps == defaults.tabCloseApps))",
               copy: gesture.tabCloseApps.joined(separator: ", "),
               tip: "\"gesture.tabCloseApps\": bundle IDs whose swipe up closes the current tab with ⌘W")
+        value(sub, "Swipe down to minimize: \(gesture.swipeDownToMinimize ? "on" : "off")\(origin(gesture.swipeDownToMinimize == defaults.swipeDownToMinimize))",
+              copy: "\(gesture.swipeDownToMinimize)", tip: "\"gesture.swipeDownToMinimize\": swiping down minimizes the focused window")
         item.submenu = sub
     }
 

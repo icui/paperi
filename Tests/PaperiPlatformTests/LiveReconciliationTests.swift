@@ -92,7 +92,8 @@ import PaperiCore
         #expect(LiveCommand.validate(["swipe", "right"]) == nil)
         #expect(LiveCommand.validate(["swipe", "left", "0.3"]) == nil)
         #expect(LiveCommand.validate(["swipe", "up"]) == nil)
-        for args in [["swipe"], ["swipe", "down"], ["swipe", "left", "nan"],
+        #expect(LiveCommand.validate(["swipe", "down", "0.6"]) == nil)
+        for args in [["swipe"], ["swipe", "sideways"], ["swipe", "left", "nan"],
                      ["swipe", "right", "0"], ["swipe", "right", "2"]] {
             #expect(LiveCommand.validate(args) != nil)
         }

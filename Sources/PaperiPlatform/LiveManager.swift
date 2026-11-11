@@ -260,8 +260,11 @@ import PaperiCore
             cancelMotion(); motionFrames.removeAll()
             destroyedNotified.insert(wid)
         }
-        if motionActive && [kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification,
-                                 kAXWindowCreatedNotification].contains(name) {
+        let ownMinimize = name == kAXWindowMiniaturizedNotification && swipe.map {
+            $0.minimizing && $0.released == true && $0.closeWindow == event["windowID"] as? UInt32
+        } == true
+        if motionActive && !ownMinimize && [kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification,
+                                            kAXWindowCreatedNotification].contains(name) {
             cancelMotion(); motionFrames.removeAll()
         }
         if name == kAXResizedNotification, let state = swipe, state.released == nil {
@@ -488,8 +491,8 @@ import PaperiCore
         }
         destroyedNotified.removeAll()
         // Spaces whose strip lost a window: the survivors close the gap animated.
-        let closedSpaces = Set(gone.compactMap { coordinator.spaceForWindow[$0] })
-        let closeTarget = neighbourAfterClose(gone)
+        var closedSpaces = Set(gone.compactMap { coordinator.spaceForWindow[$0] })
+        var closeTarget = neighbourAfterClose(gone)
         if !gone.isEmpty { removeMembers(gone) }
         if let closeTarget {
             closeFocus = (closeTarget, ProcessInfo.processInfo.systemUptime + 0.8)
@@ -520,6 +523,19 @@ import PaperiCore
         // 3. Definitive state changes (minimized, fullscreen, floated by the
         // user or a rule) leave the strip. Transient metadata, e.g. a sheet
         // making its parent temporarily non-movable, keeps the slot.
+        // A minimized window leaves like a closed one: the survivors close the
+        // gap animated, and focus follows `focusAfterClose`.
+        let minimized = Set(byID.filter { coordinator.spaceForWindow[$0.key] != nil && $0.value.facts.minimized == true
+            && isActiveRepresentative($0.key) }.keys)
+        if !minimized.isEmpty {
+            let members = Set(minimized.flatMap { coordinator.session(containing: $0)?.members(of: $0) ?? [$0] })
+            closedSpaces.formUnion(minimized.compactMap { coordinator.spaceForWindow[$0] })
+            if closeTarget == nil, let target = neighbourAfterClose(members) {
+                closeTarget = target
+                closeFocus = (target, ProcessInfo.processInfo.systemUptime + 0.8)
+                log("focus after minimize: \(target)")
+            }
+        }
         for (wid, row) in byID where coordinator.spaceForWindow[wid] != nil &&
             (row.facts.minimized == true || row.facts.fullscreen == true || row.floatRequested) {
             if isActiveRepresentative(wid) { _ = try? coordinator.removeContainer(containing: wid, classification: Self.tiled) }
@@ -1028,8 +1044,12 @@ import PaperiCore
         let canvas: Rect
         /// The focused window a swipe up would close, if it is on screen.
         let closeWindow: UInt32?
-        /// The fingers locked upwards: images track a close, not the strip.
+        /// The fingers locked vertically: images track a close (up) or a
+        /// minimize (down, `minimizing`), not the strip.
         var closing = false
+        var minimizing = false
+        /// The close-tab indicator replaces moving the window.
+        var showsTabClose: Bool { closing && !minimizing && tabClose != nil }
         /// Set when a swipe up closes a tab rather than the window: the window
         /// stays put and a close-tab indicator tracks the fingers instead.
         let tabClose: TabClose?
@@ -1165,7 +1185,8 @@ import PaperiCore
                 commitThreshold: options.config.gesture.commitThreshold,
                 flickVelocity: options.config.gesture.flickVelocity,
                 invert: options.config.gesture.invert,
-                closeTravel: options.config.gesture.swipeUpToClose ? options.config.gesture.travel : nil
+                closeTravel: options.config.gesture.swipeUpToClose ? options.config.gesture.travel : nil,
+                minimizeTravel: options.config.gesture.swipeDownToMinimize ? options.config.gesture.travel : nil
             )
             var swipeReducer = SlotSwipe(config: cfg)
             swipeReducer.begin(at: time)
@@ -1197,8 +1218,18 @@ import PaperiCore
                     if case .closing(_, let progress, _, _) = swipeReducer.state {
                         updateSwipe(progress)
                     }
-                case .closeUpdated(let progress):
+                case .closeUpdated(let progress), .minimizeUpdated(let progress):
                     updateSwipe(progress)
+                case .minimizeStarted:
+                    let res: [String: Any] = swipe != nil ? ["ok": true] : beginSwipe()
+                    guard res["ok"] as? Bool == true, startClosing(minimize: true) else {
+                        cancelSwipe()
+                        slotSwipe = nil
+                        return
+                    }
+                    if case .minimizing(_, let progress, _, _) = swipeReducer.state {
+                        updateSwipe(progress)
+                    }
                 case .cancelled:
                     cancelSwipe()
                     slotSwipe = nil
@@ -1216,7 +1247,7 @@ import PaperiCore
             switch decision {
             case .commit(let direction):
                 endSwipe(commit: true, direction: direction)
-            case .close:
+            case .close, .minimize:
                 endSwipe(commit: true)
             case .snapBack:
                 endSwipe(commit: false)
@@ -1360,10 +1391,11 @@ import PaperiCore
         return ["ok": true, "neighbours": neighbours.count]
     }
 
-    /// Switches a tracking swipe to closing its focused window.
-    private func startClosing() -> Bool {
+    /// Switches a tracking swipe to closing (or minimizing) its focused window.
+    private func startClosing(minimize: Bool = false) -> Bool {
         guard var state = swipe, state.released == nil, state.closeWindow != nil else { return false }
         state.closing = true
+        state.minimizing = minimize
         swipe = state
         return true
     }
@@ -1404,7 +1436,7 @@ import PaperiCore
         state.progress = next
         swipe = state
         guard changed else { return }
-        if state.closing, state.tabClose != nil, let wid = state.closeWindow {
+        if state.showsTabClose, let wid = state.closeWindow {
             state.overlay.trackTabClose(window: wid, progress: next, threshold: options.config.gesture.commitThreshold)
         } else {
             state.overlay.place(swipeFrames(state))
@@ -1416,7 +1448,7 @@ import PaperiCore
 
     private func swipeFrames(_ state: Swipe, progress: Double) -> [UInt32: Rect] {
         // Closing a tab leaves the window where it is.
-        if state.closing { return state.tabClose == nil ? closeFrames(state, progress: progress) : state.starts }
+        if state.closing { return state.showsTabClose ? state.starts : closeFrames(state, progress: progress) }
         let direction: Direction = progress < 0 ? .left : .right
         guard let ends = state.ends[direction] else {
             // Strip end: resist, moving at most a few points.
@@ -1433,13 +1465,16 @@ import PaperiCore
         }
     }
 
-    /// Swipe up: only the window being closed moves, straight up. At 1 it
-    /// (and its shadow) is just past the top of its display.
+    /// Swipe up (down): only the window being closed (minimized) moves,
+    /// straight up (down). At 1 it and its shadow are just past that edge of
+    /// its display; going down, it passes under the Dock.
     private func closeFrames(_ state: Swipe, progress: Double) -> [UInt32: Rect] {
         guard let wid = state.closeWindow, var frame = state.starts[wid] else { return state.starts }
-        let distance = frame.y + frame.height - state.overlay.screenTop + Self.closeShadowClearance
+        let distance = state.minimizing
+            ? state.overlay.screenBottom - frame.y + Self.closeShadowClearance
+            : frame.y + frame.height - state.overlay.screenTop + Self.closeShadowClearance
         let absP = min(1, progress)
-        frame.y -= distance * absP + max(0, progress - 1) * Self.swipeEdgeResistance
+        frame.y -= (state.minimizing ? -1 : 1) * (distance * absP + max(0, progress - 1) * Self.swipeEdgeResistance)
         var frames = state.starts
         frames[wid] = frame
         return frames
@@ -1509,7 +1544,8 @@ import PaperiCore
     /// window that stays (an unsaved-changes prompt) is revealed again.
     private func finishClose(_ state: Swipe, settle: Double) {
         guard let wid = state.closeWindow else { return }
-        if let mode = state.tabClose { finishTabClose(state, window: wid, mode: mode); return }
+        if state.minimizing { finishMinimize(state, window: wid, settle: settle); return }
+        if state.showsTabClose, let mode = state.tabClose { finishTabClose(state, window: wid, mode: mode); return }
         let generation = state.generation, overlay = state.overlay
         let from = state.progress, path = state
         // Leave at the speed the window had on screen, then slow to the edge.
@@ -1547,6 +1583,134 @@ import PaperiCore
             self.swipeMetrics["totalMS"] = (ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 1000
             self.scheduleRefresh()
         }
+    }
+
+    /// Minimizes through Accessibility. False when the window refuses.
+    private func minimize(_ wid: UInt32) -> Bool {
+        guard let pid = pidForWindow[wid], let element = references[wid] ?? findWindow(wid, pid: pid) else { return false }
+        var settable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(element, kAXMinimizedAttribute as CFString, &settable) == .success,
+              settable.boolValue else { return false }
+        return AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanTrue) == .success
+    }
+
+    /// Committed swipe down: the image leaves through the bottom (under the
+    /// Dock) while macOS minimizes the window underneath. Its Genie/Scale
+    /// effect plays below the overlay (measured: only the Dock changes on
+    /// screen), and the window stays on screen until the effect ends (~0.55 s
+    /// for Genie), so the overlay waits for that before fading.
+    private func finishMinimize(_ state: Swipe, window wid: UInt32, settle: Double) {
+        let generation = state.generation, overlay = state.overlay
+        let from = state.progress, path = state
+        let distance = max(0, 1 - from)
+        let duration = SlotSwipe.settleDuration(distance: distance, speed: state.visualVelocity, base: settle)
+        let curve = SlotSwipe.settleCurve(speed: state.visualVelocity, distance: distance, duration: duration)
+        overlay.slide(along: { u in self.closeFrames(path, progress: from + (1 - from) * u) },
+                      to: closeFrames(path, progress: 1), duration: duration, curve: curve)
+        overlay.fade(wid, to: closeOpacity(1), duration: duration, curve: curve)
+        let released = ProcessInfo.processInfo.systemUptime
+        let done = minimize(wid)
+        swipeMetrics["minimize"] = done
+        swipeTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
+            var gone = false
+            if done {
+                for _ in 0..<60 {
+                    guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
+                    if !Self.windowOnScreen(wid) { gone = true; break }
+                    try? await Task.sleep(for: .milliseconds(25))
+                }
+            }
+            guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
+            var instantSpace: UInt64?
+            if gone {
+                // Close the gap inside the overlay, as a swipe lands: a refresh
+                // after the fade would race it and could show a snap.
+                let collapse = self.collapseGap(after: wid, state: path)
+                self.swipeMetrics["gap"] = collapse.map { _ in "animated" } ?? "instant"
+                if let collapse {
+                    let duration = collapse.duration
+                    try? await Task.sleep(for: .milliseconds(Int(duration * 1000)))
+                    guard self.swipe?.generation == generation, !Task.isCancelled else { return }
+                    await self.finishHandoff(overlay: overlay, targets: collapse.targets, generation: generation)
+                    guard self.swipe?.generation == generation, !Task.isCancelled else { return }
+                } else {
+                    instantSpace = path.space
+                }
+            } else {
+                overlay.slide(to: path.starts, duration: 0.18)
+                overlay.fade(wid, to: 1, duration: 0.18)
+                try? await Task.sleep(for: .milliseconds(190))
+            }
+            guard self.swipe?.generation == generation, !Task.isCancelled else { return }
+            overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
+            // Sizes changed (e.g. a stacked column): images cannot show that,
+            // so the real windows move after the fade.
+            if let space = instantSpace { self.animateFocus(space: space, byID: self.latestSurvey) }
+            self.swipeMetrics["state"] = gone ? "minimized" : (done ? "minimizeUnconfirmed" : "minimizeRefused")
+            self.swipeMetrics["minimizeMS"] = (ProcessInfo.processInfo.systemUptime - released) * 1000
+            self.swipeMetrics["totalMS"] = (ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 1000
+            self.scheduleRefresh()
+        }
+    }
+
+    /// The minimized window leaves the strip now, as a refresh would remove
+    /// it, with focus per `focusAfterClose`. When the survivors keep their
+    /// sizes, their images slide into the gap while the real windows are
+    /// placed once underneath; returns the slide's targets and duration.
+    /// Otherwise (or with animation off) returns nil after the logical
+    /// removal, leaving placement to the caller.
+    private func collapseGap(after wid: UInt32, state: Swipe) -> (targets: [UInt32: Rect], duration: Double)? {
+        guard let session = coordinator.sessions[state.space], isActiveRepresentative(wid) else { return nil }
+        let members = Set(session.members(of: wid) ?? [wid])
+        let target = neighbourAfterClose(members)
+        guard (try? coordinator.removeContainer(containing: wid, classification: Self.tiled)) != nil else { return nil }
+        if let target {
+            try? session.focus(windowID: target, ownerPID: pidForWindow[target], classification: Self.tiled, ticket: session.ticket)
+            closeFocus = (target, ProcessInfo.processInfo.systemUptime + 0.8)
+            log("focus after minimize: \(target)")
+        }
+        reveal(session)
+        applied.removeValue(forKey: state.space)
+        let duration = options.config.focusScrollDuration ?? 0.22
+        guard duration > 0, let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { return nil }
+        let targets = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
+        // Every survivor needs an image of the right size to slide.
+        guard targets.allSatisfy({ id, frame in
+            guard let start = state.starts[id] else { return false }
+            return abs(start.width - frame.width) <= 2 && abs(start.height - frame.height) <= 2
+        }) else { return nil }
+        state.overlay.slide(to: targets, duration: duration, easeIn: true)
+        apply(space: state.space, byID: state.surveys)
+        if let target { _ = raise(target) }
+        return (targets, duration)
+    }
+
+    /// After a slide under the overlay: wait for the real windows to stop at
+    /// their targets (up to 0.4 s), correct the images onto where they
+    /// actually landed, and hold two frames for apps to redraw.
+    private func finishHandoff(overlay: SnapshotTransition, targets: [UInt32: Rect], generation: UInt64) async {
+        var previous: [UInt32: Rect] = [:]
+        var result = (settled: false, landing: targets, maxDeviation: 0.0)
+        for _ in 0..<16 {
+            guard swipe?.generation == generation, !Task.isCancelled else { return }
+            var current: [UInt32: Rect] = [:]
+            for id in targets.keys {
+                guard let element = references[id] else { continue }
+                AXUIElementSetMessagingTimeout(element, 0.02)
+                if let frame = Diagnostics.frame(element) { current[id] = frame }
+                AXUIElementSetMessagingTimeout(element, 0.2)
+            }
+            result = LiveReconciliation.handoff(previous: previous, current: current, targets: targets)
+            if result.settled { break }
+            previous = current
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        if result.maxDeviation > 0.5 {
+            overlay.slide(to: result.landing, duration: 0.08)
+            try? await Task.sleep(for: .milliseconds(90))
+        }
+        try? await Task.sleep(for: .milliseconds(34))
     }
 
     /// Committed tab close: the indicator confirms, the app closes the front
@@ -1607,8 +1771,9 @@ import PaperiCore
             swipe = nil
             swipeTask = nil
             scheduleRefresh()
-            if commit, state.closing, let wid = target {
-                if state.tabClose == .app, let pid = pidForWindow[wid] { _ = Self.sendCommandW(to: pid, window: wid) }
+            if commit, state.minimizing, let wid = target { _ = minimize(wid) }
+            else if commit, state.closing, let wid = target {
+                if state.showsTabClose && state.tabClose == .app, let pid = pidForWindow[wid] { _ = Self.sendCommandW(to: pid, window: wid) }
                 else { _ = pressClose(wid) }
             }
             else if commit { _ = handle(["focus", direction == .left ? "left" : "right"]) }
@@ -1632,7 +1797,7 @@ import PaperiCore
             let from = state.progress, path = state
             overlay.slide(along: { u in self.swipeFrames(path, progress: from * (1 - u)) },
                           to: state.starts, duration: duration, curve: curve)
-            if state.closing && state.tabClose != nil { overlay.retractTabClose(duration: duration) }
+            if state.showsTabClose { overlay.retractTabClose(duration: duration) }
             else if state.closing, let wid = state.closeWindow { overlay.fade(wid, to: 1, duration: duration, curve: curve) }
             swipeTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
@@ -1708,15 +1873,15 @@ import PaperiCore
         }
     }
 
-    /// `paperi msg swipe left|right|up [travel]`: the gesture without a trackpad.
+    /// `paperi msg swipe left|right|up|down [travel]`: the gesture without a trackpad.
     /// Fingers move `travel` (fraction of one slot) over 0.25 s, then lift;
     /// at least half a slot commits.
     private func simulateSwipe(_ direction: Direction, travel: Double) -> [String: Any] {
         let reply = beginSwipe(isSimulation: true)
         guard reply["ok"] as? Bool == true else { return reply }
-        if direction == .up && !startClosing() {
+        if (direction == .up || direction == .down) && !startClosing(minimize: direction == .down) {
             cancelSwipe()
-            return ["ok": false, "error": "no focused window on screen to close"]
+            return ["ok": false, "error": "no focused window on screen to \(direction == .up ? "close" : "minimize")"]
         }
         let sign = direction == .left ? -1.0 : 1.0
         let started = ProcessInfo.processInfo.systemUptime
@@ -1939,7 +2104,7 @@ import PaperiCore
             animateFocus(space: ctx.space, byID: latestSurvey)
             return ["ok": raise(wid), "windowID": wid]
         case "swipe":
-            guard let dir = direction(rest.first), dir != .down else { return fail("usage: swipe left|right|up [travel]") }
+            guard let dir = direction(rest.first) else { return fail("usage: swipe left|right|up|down [travel]") }
             return simulateSwipe(dir, travel: rest.count > 1 ? Double(rest[1]) ?? 1 : 1)
         case "swap", "move":
             guard let dir = direction(rest.first) else { return fail("usage: swap left|right|up|down") }
