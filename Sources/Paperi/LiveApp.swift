@@ -441,7 +441,7 @@ import PaperiPlatform
               copy: "\(manager.options.outerGap)", tip: "\"outerGap\": inset from the screen edges")
         let color = config.swapHighlight ?? LiveConfig.defaultSwapHighlight
         let swatch = value(menu, "Swap highlight: \(color)\(origin(config.swapHighlight != nil))", copy: color,
-                           tip: "\"swapHighlight\": mask over the window a drag would swap with, #RRGGBB[AA]")
+                           tip: "\"swapHighlight\": drop overlay (swap, stack, new column) over the window a drag targets, #RRGGBB[AA]")
         swatch.image = Self.swatch(config.swapHighlightColor)
         let scroll = config.focusScrollDuration ?? 0.22
         value(menu, "Focus scroll duration: \(scroll == 0 ? "off (immediate)" : "\(scroll) s")\(origin(config.focusScrollDuration != nil))",

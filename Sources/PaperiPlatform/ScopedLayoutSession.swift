@@ -257,12 +257,12 @@ import PaperiCore
         return true
     }
 
-    /// Swaps the slot holding `windowID` with slot `target` after a user drag;
-    /// focus is unchanged.
-    @discardableResult func swapSlots(windowID: UInt32, with target: String, ticket: UUID) -> Bool {
+    /// Drops the slot holding `windowID` on slot `target` after a user drag
+    /// (swap, stack or new column); focus is unchanged.
+    @discardableResult func drop(windowID: UInt32, on target: String, action: DropAction, ticket: UUID) -> Bool {
         guard accepts(ticket), let id = slots[windowID] else { return false }
         var layout = state.layout
-        guard layout.swapSlots(id, target) else { return false }
+        guard layout.drop(id, on: target, action: action) else { return false }
         var next = LifecycleState(layout: layout, floating: state.floating)
         if let focused = state.osFocusedWindow {
             _ = try? next.reduce(.focus(windowID: focused, classification: Self.tiledClassification))

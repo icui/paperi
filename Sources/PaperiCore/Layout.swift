@@ -167,7 +167,8 @@ public struct Layout: Codable, Equatable, Sendable {
                 if lo <= canvas.x { hi = max(hi, canvas.x + reach) }
                 if hi >= right { lo = min(lo, right - reach) }
                 guard hi > lo else { continue }
-                result.append(SwapTarget(slotID: slot.id, region: Rect(x: lo, y: frame.y, width: hi - lo, height: frame.height)))
+                result.append(SwapTarget(slotID: slot.id, region: Rect(x: lo, y: frame.y, width: hi - lo, height: frame.height),
+                                         sameColumn: c == source.column))
             }
         }
         return result
@@ -183,6 +184,32 @@ public struct Layout: Codable, Equatable, Sendable {
             let slot = columns[i.column].slots[i.row]
             columns[i.column].slots[i.row] = columns[j.column].slots[j.row]
             columns[j.column].slots[j.row] = slot
+        }
+        return true
+    }
+    /// Applies a drag-and-drop of slot `source` onto slot `target`. Stacking
+    /// splits the target's height between it and the dropped window; a new
+    /// column takes the dragged window's column width. Columns emptied by the
+    /// move are removed. Focus is unchanged.
+    @discardableResult public mutating func drop(_ source: String, on target: String, action: DropAction) -> Bool {
+        guard source != target, let s = index(of: source), index(of: target) != nil else { return false }
+        if action == .swap { return swapSlots(source, target) }
+        if (action == .newColumnLeft || action == .newColumnRight), columns[s.column].slots.count < 2 { return false }
+        let width = columns[s.column].width
+        let slot = columns[s.column].slots.remove(at: s.row)
+        columns[s.column].weights.remove(at: s.row)
+        if columns[s.column].slots.isEmpty { columns.remove(at: s.column) }
+        let t = index(of: target)!
+        switch action {
+        case .stackAbove, .stackBelow:
+            let half = columns[t.column].weights[t.row] / 2
+            columns[t.column].weights[t.row] = half
+            let row = t.row + (action == .stackBelow ? 1 : 0)
+            columns[t.column].slots.insert(slot, at: row)
+            columns[t.column].weights.insert(half, at: row)
+        case .newColumnLeft, .newColumnRight:
+            columns.insert(Column(slots: [slot], width: width), at: t.column + (action == .newColumnRight ? 1 : 0))
+        case .swap: break
         }
         return true
     }
@@ -213,12 +240,42 @@ public struct Layout: Codable, Equatable, Sendable {
     }
 }
 
+/// What releasing a dragged window over a `SwapTarget` does.
+public enum DropAction: String, Equatable, Sendable {
+    /// Exchange the two windows.
+    case swap
+    /// Join the target's column directly above / below it, splitting its height.
+    case stackAbove, stackBelow
+    /// Leave the shared column for a new column on its left / right.
+    case newColumnLeft, newColumnRight
+}
+
 public struct SwapTarget: Equatable, Sendable {
     public var slotID: String
-    /// Screen area (top-left origin) that arms the swap and is highlighted.
+    /// Screen area (top-left origin) that arms the drop and is highlighted.
     public var region: Rect
+    /// The target is stacked in the dragged window's own column.
+    public var sameColumn: Bool
+    /// Fraction of the region at each end that arms a stack or new-column drop.
+    public static let edgeZone = 0.25
+    public init(slotID: String, region: Rect, sameColumn: Bool = false) {
+        self.slotID = slotID; self.region = region; self.sameColumn = sameColumn
+    }
     public func contains(x: Double, y: Double) -> Bool {
         x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height
+    }
+    /// The drop armed at a point: for a window in another column the top and
+    /// bottom quarters stack the dragged window above or below it; for one in
+    /// the dragged window's own stack the left and right quarters move the
+    /// dragged window out into a new column on that side. The middle swaps.
+    public func action(x: Double, y: Double) -> DropAction? {
+        guard contains(x: x, y: y) else { return nil }
+        if sameColumn {
+            let f = (x - region.x) / region.width
+            return f < Self.edgeZone ? .newColumnLeft : f >= 1 - Self.edgeZone ? .newColumnRight : .swap
+        }
+        let f = (y - region.y) / region.height
+        return f < Self.edgeZone ? .stackAbove : f >= 1 - Self.edgeZone ? .stackBelow : .swap
     }
 }
 

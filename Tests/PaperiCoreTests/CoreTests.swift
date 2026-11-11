@@ -101,6 +101,62 @@ struct CoreTests {
         checkTrue(!layout.swapSlots("2", "2") && !layout.swapSlots("2", "9"))
         try layout.validate()
     }
+    @Test func testDropZonesStackOtherColumnsAndSplitOutOwnStack() throws {
+        let canvas = Rect(x: 0, y: 0, width: 1000, height: 808)
+        // [1] [2 over 3]: dragging 2, slot 1 is another column, slot 3 its own stack.
+        let layout = Layout(columns: [Column(slots: [slot(1)], width: 300), Column(slots: [slot(2), slot(3)], width: 300)],
+                            focused: "2")
+        let targets = try layout.swapTargets(slotID: "2", in: canvas)
+        checkEqual(targets.map(\.sameColumn), [false, true])
+        let other = targets[0]   // 0...300 × 0...808
+        checkEqual(other.action(x: 150, y: 100), .stackAbove)
+        checkEqual(other.action(x: 150, y: 202), .swap)
+        checkEqual(other.action(x: 150, y: 605), .swap)
+        checkEqual(other.action(x: 150, y: 606), .stackBelow)
+        checkEqual(other.action(x: 10, y: 400), .swap)   // left/right do not split out of another column
+        checkTrue(other.action(x: 400, y: 400) == nil)
+        let own = targets[1]     // 308...608 × 408...808
+        checkEqual(own.action(x: 380, y: 410), .newColumnLeft)
+        checkEqual(own.action(x: 458, y: 800), .swap)
+        checkEqual(own.action(x: 533, y: 600), .newColumnRight)
+    }
+    @Test func testDropStacksSplittingTargetHeightAndRemovesEmptiedColumn() throws {
+        let base = Layout(columns: [Column(slots: [slot(1)], width: 300), Column(slots: [slot(2)], width: 500),
+                                    Column(slots: [slot(3), slot(4)], width: 400, weights: [300, 100])], focused: "2")
+        var layout = base
+        checkTrue(layout.drop("2", on: "1", action: .stackAbove))
+        checkEqual(layout.columns.map { $0.slots.map(\.id) }, [["2", "1"], ["3", "4"]])
+        checkEqual(layout.columns[0].weights, [0.5, 0.5])
+        checkEqual(layout.columns.map(\.width), [300, 400])
+        checkEqual(layout.focused, "2")
+        try layout.validate()
+        layout = base
+        checkTrue(layout.drop("2", on: "3", action: .stackBelow))
+        checkEqual(layout.columns.map { $0.slots.map(\.id) }, [["1"], ["3", "2", "4"]])
+        checkEqual(layout.columns[1].weights, [150, 150, 100])
+        try layout.validate()
+        layout = base
+        checkTrue(layout.drop("2", on: "1", action: .swap))
+        checkEqual(layout.columns.map { $0.slots.map(\.id) }, [["2"], ["1"], ["3", "4"]])
+    }
+    @Test func testDropSplitsOutOfOwnStackIntoNewColumn() throws {
+        let base = Layout(columns: [Column(slots: [slot(1)], width: 300),
+                                    Column(slots: [slot(2), slot(3), slot(4)], width: 400, weights: [1, 2, 3])], focused: "3")
+        var layout = base
+        checkTrue(layout.drop("3", on: "2", action: .newColumnLeft))
+        checkEqual(layout.columns.map { $0.slots.map(\.id) }, [["1"], ["3"], ["2", "4"]])
+        checkEqual(layout.columns[2].weights, [1, 3])
+        checkEqual(layout.columns.map(\.width), [300, 400, 400])
+        try layout.validate()
+        layout = base
+        checkTrue(layout.drop("3", on: "4", action: .newColumnRight))
+        checkEqual(layout.columns.map { $0.slots.map(\.id) }, [["1"], ["2", "4"], ["3"]])
+        try layout.validate()
+        // A window alone in its column has no stack to leave.
+        layout = base
+        checkTrue(!layout.drop("1", on: "2", action: .newColumnRight) && !layout.drop("2", on: "2", action: .stackAbove))
+        checkEqual(layout, base)
+    }
     @Test func testHexColorParsesRGBAndRGBA() {
         checkEqual(HexColor("#0A84FF4D"), HexColor("0a84ff4d"))
         checkEqual(HexColor("#FF0000")?.alpha, 1)

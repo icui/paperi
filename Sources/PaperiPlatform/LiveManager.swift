@@ -55,12 +55,16 @@ import PaperiCore
     /// Managed window the user is dragging (moved while the left button is
     /// down). It is not written until mouse up, so it follows the pointer.
     /// While the pointer is over a neighbouring window (adjacent column or
-    /// same stack) it is highlighted (`hovered`); releasing there swaps them.
-    private struct Drag { let windowID: UInt32; let space: UInt64; let targets: [SwapTarget]; var hovered: SwapTarget? }
+    /// same stack) it is highlighted with a preview of the drop armed by the
+    /// pointer's zone (`hovered`); releasing there swaps, stacks or splits out.
+    private struct Drag {
+        let windowID: UInt32; let space: UInt64; let targets: [SwapTarget]
+        var hovered: (target: SwapTarget, action: DropAction)?
+    }
     private var drag: Drag?
     private var dragging: UInt32? { drag?.windowID }
     private var dragTimer: Timer?
-    private let highlight = SwapHighlight()
+    private let highlight = DropHighlight()
     private var mouseUpWatch = false
     /// Last off-slot frame acted on per window, so an app that clamps its
     /// position is rewritten once rather than on every refresh.
@@ -291,33 +295,34 @@ import PaperiCore
         }
     }
 
-    /// Follows the pointer during a drag: highlights the neighbour under it and,
-    /// on mouse up, finishes the drag and places the window.
+    /// Follows the pointer during a drag: highlights the neighbour under it,
+    /// previewing the drop its zone arms, and on mouse up finishes the drag
+    /// and places the window.
     private func trackDrag() {
         guard running, var current = drag else { endDrag(); return }
         if NSEvent.pressedMouseButtons & 1 == 0 { finishDrag(); refresh(); return }
         let pointer = NSEvent.mouseLocation
         let primaryHeight = Double(NSScreen.screens.first?.frame.height ?? 0)
-        let hit = current.targets.first { $0.contains(x: pointer.x, y: primaryHeight - pointer.y) }
-        guard hit != current.hovered else { return }
+        let (x, y) = (Double(pointer.x), primaryHeight - Double(pointer.y))
+        let hit = current.targets.lazy.compactMap { t in t.action(x: x, y: y).map { (target: t, action: $0) } }.first
+        guard hit?.target != current.hovered?.target || hit?.action != current.hovered?.action else { return }
         current.hovered = hit; drag = current
-        if let hit, let session = coordinator.sessions[current.space],
-           let loc = session.state.layout.index(of: hit.slotID) {
-            let target = session.state.layout.columns[loc.column].slots[loc.row].activeMember
-            highlight.show(hit.region, color: options.config.swapHighlightColor, above: target)
+        if let hit {
+            highlight.show(hit.target, action: hit.action, color: options.config.swapHighlightColor)
         } else {
             highlight.hide()
         }
     }
 
-    /// Swaps with the hovered window, if any, and forces a placement pass.
+    /// Applies the drop armed over the hovered window, if any, and forces a
+    /// placement pass.
     private func finishDrag() {
         guard let current = drag else { endDrag(); return }
         endDrag()
         forceApply = true
-        guard let target = current.hovered, let session = coordinator.sessions[current.space] else { return }
-        if session.swapSlots(windowID: current.windowID, with: target.slotID, ticket: session.ticket) {
-            log("swapped \(current.windowID) with slot \(target.slotID) after drag")
+        guard let (target, action) = current.hovered, let session = coordinator.sessions[current.space] else { return }
+        if session.drop(windowID: current.windowID, on: target.slotID, action: action, ticket: session.ticket) {
+            log("dropped \(current.windowID) on slot \(target.slotID) (\(action.rawValue)) after drag")
         }
     }
 
@@ -693,8 +698,8 @@ import PaperiCore
         }
 
         // 7b. User moves. A window moved without a drag is put back. A drag is
-        // tracked until mouse up (trackDrag): it swaps with a neighbouring
-        // column only if released over it, then snaps into its slot.
+        // tracked until mouse up (trackDrag): released over a neighbouring
+        // window it swaps, stacks or splits out (by zone), then snaps into its slot.
         if !mouseDown, drag != nil { finishDrag() }
         if !forceApply, now >= forceUntil {
             for space in activeSpaces {
