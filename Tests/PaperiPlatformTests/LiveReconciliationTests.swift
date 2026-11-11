@@ -4,6 +4,13 @@ import PaperiCore
 @testable import PaperiPlatform
 
 @MainActor struct LiveReconciliationTests {
+    @Test func animationAcceptsTerminalRoundingButRejectsResizing() {
+        let target = Rect(x: 8, y: 38, width: 720, height: 886)
+        #expect(LiveReconciliation.animationSizeMatches(Rect(x: 1439, y: 38, width: 720, height: 889), target))
+        #expect(!LiveReconciliation.animationSizeMatches(Rect(x: 8, y: 38, width: 720, height: 900), target))
+        #expect(!LiveReconciliation.animationSizeMatches(Rect(x: 8, y: 38, width: 730, height: 886), target))
+    }
+
     @Test func edgeBounceReturnsToLayoutWithoutResizing() {
         let frame = Rect(x: 100, y: 40, width: 700, height: 800)
         for direction in [Direction.left, .right, .up, .down] {

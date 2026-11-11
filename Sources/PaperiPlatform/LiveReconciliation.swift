@@ -3,6 +3,13 @@ import PaperiCore
 
 /// Pure helpers for the live manager. No OS effects run here.
 enum LiveReconciliation {
+    /// Apps such as Terminal round requested sizes to character-cell boundaries.
+    /// A few points of rounding should not disable motion of the entire strip.
+    static func animationSizeMatches(_ actual: Rect, _ target: Rect) -> Bool {
+        actual.isValid && target.isValid && abs(actual.width - target.width) <= 4
+            && abs(actual.height - target.height) <= 4
+    }
+
     /// A small excursion away from the requested edge, returning exactly to
     /// the layout frame. Position only: window dimensions and focus stay fixed.
     static func edgeBounce(_ frame: Rect, toward direction: Direction, progress: Double) -> Rect {

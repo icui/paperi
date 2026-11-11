@@ -943,7 +943,7 @@ import PaperiCore
                 cancelMotion(); apply(space: space, byID: byID); return
             }
             // Position-only animation cannot apply admission or resize changes.
-            guard abs(frame.width - target.width) <= 2, abs(frame.height - target.height) <= 2 else {
+            guard LiveReconciliation.animationSizeMatches(frame, target) else {
                 cancelMotion(); apply(space: space, byID: byID); return
             }
             if bounce != nil || !matches(frame, target) { starts[wid] = frame }
@@ -1360,7 +1360,7 @@ import PaperiCore
             // Images keep their size; a size change cannot be shown by sliding.
             guard surveys.allSatisfy({ wid, row in
                 guard let frame = row.frame, let target = targets[wid] else { return false }
-                return abs(frame.width - target.width) <= 2 && abs(frame.height - target.height) <= 2
+                return LiveReconciliation.animationSizeMatches(frame, target)
             }) else { scheduleRefresh(); return fail("strip not settled") }
             ends[direction] = targets
             neighbours[direction] = layout.columns[loc.column].slots[loc.row].activeMember
@@ -1755,7 +1755,7 @@ import PaperiCore
         // Every survivor needs an image of the right size to slide.
         guard targets.allSatisfy({ id, frame in
             guard let start = state.starts[id] else { return false }
-            return abs(start.width - frame.width) <= 2 && abs(start.height - frame.height) <= 2
+            return LiveReconciliation.animationSizeMatches(start, frame)
         }) else { return nil }
         state.overlay.slide(to: targets, duration: duration, easeIn: true)
         apply(space: state.space, byID: state.surveys)
