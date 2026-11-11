@@ -1057,6 +1057,10 @@ import PaperiCore
         var showsNewWindow: Bool { closing && pulling && pullAction == .newWindow }
         var showsIndicator: Bool { showsTabClose || showsNewWindow }
         var indicatorStyle: GestureIndicatorStyle { showsNewWindow ? .newWindow : .closeTab }
+        /// When the indicator may first appear (media time). A fast flick
+        /// releases before then and acts without flashing the indicator.
+        var indicatorDue = 0.0
+        var indicatorShown = false
         /// Set when a swipe up closes a tab rather than the window: the window
         /// stays put and a close-tab indicator tracks the fingers instead.
         let tabClose: TabClose?
@@ -1094,6 +1098,8 @@ import PaperiCore
     private var lastGestureConflicts: [String]?
     /// Travel past the strip's ends, in points, at full progress.
     private static let swipeEdgeResistance = 40.0
+    /// Delay before the close-tab / new-window indicator appears after the lock.
+    private static let indicatorDelay = 0.12
 
     private var motionActive: Bool { motionTimer != nil || swipe != nil }
     /// A focus scroll or a released swipe's landing/snap-back is on screen.
@@ -1408,7 +1414,11 @@ import PaperiCore
         state.pullAction = options.config.gesture.swipeDown
         swipe = state
         // Nothing moves: show only the indicator over the live windows.
-        if state.showsIndicator { state.overlay.showIndicatorOnly() }
+        if state.showsIndicator {
+            state.indicatorDue = CACurrentMediaTime() + Self.indicatorDelay
+            swipe = state
+            state.overlay.showIndicatorOnly()
+        }
         return true
     }
 
@@ -1446,15 +1456,21 @@ import PaperiCore
         state.lastVisualTime = now
         let changed = next != state.progress
         state.progress = next
-        swipe = state
-        guard changed else { return }
-        if state.showsIndicator, let wid = state.closeWindow {
+        if state.showsIndicator {
+            // Held still past the delay: show the indicator without waiting for movement.
+            guard now >= state.indicatorDue, changed || !state.indicatorShown, let wid = state.closeWindow else {
+                swipe = state; return
+            }
+            state.indicatorShown = true
+            swipe = state
             state.overlay.trackIndicator(state.indicatorStyle, window: wid, progress: next,
                                          threshold: options.config.gesture.commitThreshold)
-        } else {
-            state.overlay.place(swipeFrames(state))
-            if state.closing, let wid = state.closeWindow { state.overlay.setOpacity(wid, closeOpacity(next)) }
+            return
         }
+        swipe = state
+        guard changed else { return }
+        state.overlay.place(swipeFrames(state))
+        if state.closing, let wid = state.closeWindow { state.overlay.setOpacity(wid, closeOpacity(next)) }
     }
 
     private func swipeFrames(_ state: Swipe) -> [UInt32: Rect] { swipeFrames(state, progress: state.progress) }
