@@ -190,7 +190,8 @@ import PaperiCore
     /// Slides images along `path` (frames at fraction 0…1 of the way), ending
     /// exactly on `frames`. Unlike `slide(to:)`, images whose straight-line
     /// distances differ still move together at the path's speed.
-    func slide(along path: (Double) -> [UInt32: Rect], to frames: [UInt32: Rect], duration: Double) {
+    func slide(along path: (Double) -> [UInt32: Rect], to frames: [UInt32: Rect], duration: Double,
+               curve: (Double, Double, Double, Double)? = nil) {
         guard duration > 0 else { place(frames); return }
         let steps = 32
         let samples = (0...steps).map { path(Double($0) / Double(steps)) }
@@ -210,7 +211,9 @@ import PaperiCore
             animation.values = values.map { NSValue(point: $0) }
             animation.calculationMode = .linear
             animation.duration = duration
-            animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            animation.timingFunction = curve.map {
+                CAMediaTimingFunction(controlPoints: Float($0.0), Float($0.1), Float($0.2), Float($0.3))
+            } ?? CAMediaTimingFunction(name: .easeOut)
             layer.add(animation, forKey: "slide")
         }
         CATransaction.commit()

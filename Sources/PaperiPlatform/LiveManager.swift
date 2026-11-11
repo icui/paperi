@@ -1037,6 +1037,8 @@ import PaperiCore
         var progress = 0.0
         var targetProgress = 0.0
         var lastVisualTime = 0.0
+        /// On-screen speed of the images, progress per second (smoothed).
+        var visualVelocity = 0.0
         /// Tracking frame pacing, as the display clock delivered it.
         var lastFrameTime = 0.0
         var frames = 0
@@ -1372,6 +1374,9 @@ import PaperiCore
         let wasTracking = state.tracking
         state.tracking = true
         state.targetProgress = state.closing ? min(1.3, max(0, progress)) : min(1.3, max(-1.3, progress))
+        // Time the first tracked frame from now, not from when the capture
+        // finished, so it takes a normal step rather than a catch-up one.
+        if !wasTracking { state.lastVisualTime = CACurrentMediaTime() }
         swipe = state
         if state.ready && !wasTracking { state.overlay.show() }
     }
@@ -1388,8 +1393,14 @@ import PaperiCore
         }
         state.lastFrameTime = link.timestamp
         let now = link.targetTimestamp
-        let next = SlotSwipe.advanceVisualProgress(state.progress, toward: state.targetProgress,
-                                                   elapsed: now - state.lastVisualTime)
+        let elapsed = now - state.lastVisualTime
+        let next = state.closing
+            ? SlotSwipe.followVisualProgress(state.progress, toward: state.targetProgress, elapsed: elapsed)
+            : SlotSwipe.advanceVisualProgress(state.progress, toward: state.targetProgress, elapsed: elapsed)
+        if elapsed > 0 {
+            let instant = (next - state.progress) / elapsed
+            state.visualVelocity += (1 - exp(-elapsed / 0.03)) * (instant - state.visualVelocity)
+        }
         state.lastVisualTime = now
         let changed = next != state.progress
         state.progress = next
@@ -1495,9 +1506,12 @@ import PaperiCore
         if let mode = state.tabClose { finishTabClose(state, window: wid, mode: mode); return }
         let generation = state.generation, overlay = state.overlay
         let from = state.progress, path = state
-        let duration = SlotSwipe.settleDuration(distance: max(0, 1 - from), base: settle)
+        // Leave at the speed the window had on screen, then slow to the edge.
+        let distance = max(0, 1 - from)
+        let duration = SlotSwipe.settleDuration(distance: distance, speed: state.visualVelocity, base: settle)
         overlay.slide(along: { u in self.closeFrames(path, progress: from + (1 - from) * u) },
-                      to: closeFrames(path, progress: 1), duration: duration)
+                      to: closeFrames(path, progress: 1), duration: duration,
+                      curve: SlotSwipe.settleCurve(speed: state.visualVelocity, distance: distance, duration: duration))
         let released = ProcessInfo.processInfo.systemUptime
         let method = pressClose(wid)
         let pressed = method != .none
@@ -1599,11 +1613,16 @@ import PaperiCore
         if commit && state.closing { finishClose(state, settle: settle); return }
         guard commit, let wid = target, let session = coordinator.sessions[space],
               let ends = state.ends[direction] else {
-            let duration = SlotSwipe.settleDuration(distance: abs(state.progress), base: settle)
+            // A close drops back from the speed it had on screen.
+            let back = -state.visualVelocity
+            let duration = state.closing
+                ? SlotSwipe.settleDuration(distance: abs(state.progress), speed: back, base: settle)
+                : SlotSwipe.settleDuration(distance: abs(state.progress), base: settle)
+            let curve = state.closing ? SlotSwipe.settleCurve(speed: back, distance: abs(state.progress), duration: duration) : nil
             // Follow the tracking path back so every image keeps the strip's speed.
             let from = state.progress, path = state
             overlay.slide(along: { u in self.swipeFrames(path, progress: from * (1 - u)) },
-                          to: state.starts, duration: duration)
+                          to: state.starts, duration: duration, curve: curve)
             if state.closing && state.tabClose != nil { overlay.retractTabClose(duration: duration) }
             swipeTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))

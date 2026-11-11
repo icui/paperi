@@ -87,6 +87,42 @@ public struct SlotSwipe: Equatable, Sendable {
         return current + min(step, max(-step, target - current))
     }
 
+    /// Visual time constant for closes: absorbs uneven touch reports (one
+    /// close unit is a whole window height) at the cost of ~16 ms of lag.
+    public static let closeSmoothing = 0.016
+
+    /// Like `advanceVisualProgress`, but approaches the target exponentially
+    /// so frames without new input still move a little and the next one does
+    /// not jump. The speed limit still applies.
+    public static func followVisualProgress(_ current: Double, toward target: Double, elapsed: Double,
+                                            timeConstant: Double = closeSmoothing) -> Double {
+        guard current.isFinite, target.isFinite, elapsed.isFinite, elapsed > 0, timeConstant > 0 else { return current }
+        let dt = min(elapsed, 1.0 / 30.0)
+        let eased = current + (target - current) * (1 - exp(-dt / timeConstant))
+        // Snap the last fraction of a point's worth instead of creeping forever.
+        let next = abs(target - eased) < 1e-4 ? target : eased
+        return advanceVisualProgress(current, toward: next, elapsed: dt)
+    }
+
+    /// Bezier control points for a settle that starts at `speed` (progress
+    /// per second, along the motion) and decelerates to rest over `distance`
+    /// in `duration`. Matching the on-screen speed avoids a lurch at release.
+    public static func settleCurve(speed: Double, distance: Double, duration: Double) -> (Double, Double, Double, Double) {
+        guard speed.isFinite, distance > 0, duration > 0 else { return (0, 0, 0.58, 1) }
+        // Initial slope of the normalised curve; ease-out's is about 1.7.
+        let slope = min(4, max(0, speed * duration / distance))
+        let x1 = 0.25
+        return (x1, min(1, x1 * slope), 0.4, 1)
+    }
+
+    /// Duration for a settle that starts at `speed` and stops: about twice
+    /// distance / speed, within the usual settle bounds.
+    public static func settleDuration(distance: Double, speed: Double, base: Double) -> Double {
+        let usual = settleDuration(distance: distance, base: base)
+        guard speed.isFinite, speed > 0.01, distance > 0 else { return usual }
+        return min(usual, max(0.12, 1.8 * distance / speed, 2 * distance / maximumVisualSpeed))
+    }
+
     /// The ease-out curve peaks below twice its average speed. Budget enough
     /// time for that peak too, so releasing cannot bypass the tracking limit.
     public static func settleDuration(distance: Double, base: Double) -> Double {
@@ -126,9 +162,14 @@ public struct SlotSwipe: Equatable, Sendable {
                         state = .cancelled
                         return .cancelled
                     }
+                    // Raw progress (release decisions) counts the travel
+                    // before the lock; the shown progress starts from rest
+                    // there, as one close unit is a whole window height and
+                    // the lock distance at once would jump tens of points.
                     let rawProg = newY / max(0.01, closeTravel)
                     let dt = max(1.0 / 120.0, time - start)
-                    state = .closing(rawProgress: rawProg, clampedProgress: Self.closeBand(rawProg),
+                    closeOrigin = min(0.5, rawProg)
+                    state = .closing(rawProgress: rawProg, clampedProgress: shownClose(rawProg),
                                      velocity: rawProg / dt, lastTime: time)
                     return .closeStarted
                 } else {
@@ -163,10 +204,19 @@ public struct SlotSwipe: Equatable, Sendable {
             let instantVel = deltaProg / max(1.0 / 120.0, dt)
             let weight = 1 - exp(-dt / 0.025)
             let newVel = lastVel + weight * (instantVel - lastVel)
-            let clamped = Self.closeBand(newRaw)
+            let clamped = shownClose(newRaw)
             state = .closing(rawProgress: newRaw, clampedProgress: clamped, velocity: newVel, lastTime: time)
             return .closeUpdated(progress: clamped)
         }
+    }
+
+    /// Raw close progress at the vertical lock.
+    private var closeOrigin = 0.0
+
+    /// Shown close progress: 0 at the lock, meeting raw progress at 1.
+    private func shownClose(_ raw: Double) -> Double {
+        let shown = raw >= 1 ? raw : (raw - closeOrigin) / (1 - closeOrigin)
+        return Self.closeBand(shown)
     }
 
     /// Close progress: never below the window's place, resisting past fully off.
@@ -197,10 +247,11 @@ public struct SlotSwipe: Equatable, Sendable {
             state = .completed(decision)
             return decision
 
-        case .closing(let rawProg, let clampedProg, let vel, let lastTime):
-            // A swipe dragged back below its start is not a close.
+        case .closing(let rawProg, _, let vel, let lastTime):
+            // A swipe dragged back below its start is not a close. Decide on
+            // the whole finger travel, including the lead-in to the lock.
             let decision: Decision = rawProg > 0
-                && releases(raw: rawProg, clamped: clampedProg, velocity: vel, lastTime: lastTime, at: time)
+                && releases(raw: rawProg, clamped: Self.closeBand(rawProg), velocity: vel, lastTime: lastTime, at: time)
                 ? .close : .snapBack
             state = .completed(decision)
             return decision

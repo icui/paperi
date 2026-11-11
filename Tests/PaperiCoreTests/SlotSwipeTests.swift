@@ -172,7 +172,11 @@ struct SlotSwipeTests {
         var swipe = SlotSwipe(config: .init(lockThreshold: 0.01, closeTravel: 0.2))
         swipe.begin(at: 0.0)
         #expect(swipe.move(dx: 0.001, dy: 0.02, at: 0.01) == .closeStarted)
-        #expect(swipe.move(dx: 0, dy: 0.1, at: 0.05) == .closeUpdated(progress: 0.6))
+        // Raw 0.1 at the lock, 0.6 now; shown progress starts at the lock
+        // and meets raw at 1: (0.6 - 0.1) / 0.9.
+        let action = swipe.move(dx: 0, dy: 0.1, at: 0.05)
+        guard case .closeUpdated(let shown) = action else { Issue.record("Expected update"); return }
+        #expect(abs(shown - 0.5 / 0.9) < 1e-9)
         #expect(swipe.end(at: 0.06) == .close)
     }
 
@@ -195,6 +199,41 @@ struct SlotSwipeTests {
         // Dragged below the start: progress stays at zero, release is no close.
         #expect(back.move(dx: 0, dy: -0.25, at: 0.3) == .closeUpdated(progress: 0))
         #expect(back.end(at: 0.6) == .snapBack)
+    }
+
+    @Test func closeLockStartsFromRest() {
+        var swipe = SlotSwipe(config: .init(lockThreshold: 0.015, closeTravel: 0.4))
+        swipe.begin(at: 0.0)
+        #expect(swipe.move(dx: 0, dy: 0.02, at: 0.02) == .closeStarted)
+        if case .closing(let raw, let clamped, let velocity, _) = swipe.state {
+            #expect(abs(raw - 0.05) < 1e-9 && clamped == 0)
+            #expect(velocity > 0)
+        } else { Issue.record("Expected closing state") }
+    }
+
+    @Test func followVisualProgressEasesWithoutOvershoot() {
+        // One 120 Hz frame covers part of the gap, never all of it or beyond.
+        let first = SlotSwipe.followVisualProgress(0, toward: 0.04, elapsed: 1.0 / 120)
+        #expect(first > 0.01 && first < 0.04)
+        var p = 0.0
+        for _ in 0..<60 { p = SlotSwipe.followVisualProgress(p, toward: 0.5, elapsed: 1.0 / 120) }
+        #expect(p == 0.5)
+        // The speed limit still holds for a large jump.
+        #expect(SlotSwipe.followVisualProgress(0, toward: 5, elapsed: 1.0 / 60) <= SlotSwipe.maximumVisualSpeed / 60 + 1e-9)
+    }
+
+    @Test func settleMatchesReleaseSpeed() {
+        // Slow release: gentle start, slope well under ease-out's 1.7.
+        let slowDuration = SlotSwipe.settleDuration(distance: 0.5, speed: 0.5, base: 0.22)
+        let slow = SlotSwipe.settleCurve(speed: 0.5, distance: 0.5, duration: slowDuration)
+        #expect(slow.1 / slow.0 < 1.0)
+        // Fast release: shorter, and the curve starts steep to keep the speed.
+        let fastDuration = SlotSwipe.settleDuration(distance: 0.5, speed: 6, base: 0.22)
+        #expect(fastDuration < slowDuration)
+        let fast = SlotSwipe.settleCurve(speed: 6, distance: 0.5, duration: fastDuration)
+        #expect(abs(fast.1 / fast.0 - 6 * fastDuration / 0.5) < 1e-9)
+        // Moving the other way (or not at all) starts from rest.
+        #expect(SlotSwipe.settleCurve(speed: -2, distance: 0.5, duration: 0.2).1 == 0)
     }
 
     @Test func fastUpwardFlickCloses() {
