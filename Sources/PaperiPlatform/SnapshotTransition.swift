@@ -51,8 +51,13 @@ import PaperiCore
         // Submit all screenshots together. Serial capture adds one display-frame
         // wait per window, leaving short swipes invisible until finger release.
         let fadingOverlays = content.windows.filter { Self.fading.contains($0.windowID) }
+        // Windows above the overlay's level (Dock, menu bar, ...) keep drawing
+        // live on top of it. Left in the capture, their translucent material
+        // would blur a picture of itself: a doubled, stale Dock background.
+        let above = content.windows.filter { $0.windowLayer > Self.level.rawValue }
         let background = Task {
-            try await self.capture(SCContentFilter(display: display, excludingWindows: windows + fadingOverlays), scale: scale)
+            try await self.capture(SCContentFilter(display: display, excludingWindows: windows + fadingOverlays + above),
+                                   scale: scale)
         }
         let windowCaptures = windows.reversed().map { item in
             (item, Task { try await self.capture(SCContentFilter(desktopIndependentWindow: item), scale: scale) })
@@ -91,7 +96,7 @@ import PaperiCore
         overlay.backgroundColor = .black
         overlay.hasShadow = false
         overlay.ignoresMouseEvents = true
-        overlay.level = .floating
+        overlay.level = Self.level
         overlay.animationBehavior = .none
         overlay.collectionBehavior = [.transient, .ignoresCycle]
         let view = NSView(frame: CGRect(origin: .zero, size: screen.frame.size))
@@ -346,6 +351,8 @@ import PaperiCore
             }
         })
     }
+
+    private static let level = NSWindow.Level.floating
 
     /// Overlays still fading out; later captures must not see them.
     private static var fading: Set<CGWindowID> = []
