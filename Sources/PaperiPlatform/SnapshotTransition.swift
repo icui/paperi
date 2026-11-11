@@ -11,6 +11,8 @@ import PaperiCore
     private var window: NSWindow?
     private var layers: [UInt32: CALayer] = [:]
     private var screenFrame = CGRect.zero
+    private var screen: NSScreen?
+    private var frameClock: FrameClock?
     private var mainHeight = 0.0
     /// Frames of the captured windows as ScreenCaptureKit saw them (top-left
     /// origin). The images start here, so they line up with the real windows
@@ -35,6 +37,7 @@ import PaperiCore
         let windows = content.windows.filter { ids.contains($0.windowID) }
         guard windows.count == ids.count else { throw Failure.missingWindow }
         screenFrame = screen.frame
+        self.screen = screen
         let scale = screen.backingScaleFactor
         let root = CALayer()
         root.frame = CGRect(origin: .zero, size: screen.frame.size)
@@ -205,7 +208,21 @@ import PaperiCore
         CATransaction.flush()
     }
 
+    /// Calls `tick` once per refresh of the overlay's display, just before the
+    /// frame is composed. Image moves made there land on every frame evenly;
+    /// a free-running timer beats against the refresh and moves them unevenly.
+    func startFrameClock(_ tick: @escaping @MainActor (CADisplayLink) -> Void) {
+        guard frameClock == nil, let screen else { return }
+        frameClock = FrameClock(screen: screen, tick: tick)
+    }
+
+    func stopFrameClock() {
+        frameClock?.invalidate()
+        frameClock = nil
+    }
+
     func hide() {
+        stopFrameClock()
         window?.orderOut(nil)
         window = nil
         layers.removeAll()
@@ -225,4 +242,25 @@ import PaperiCore
     private static let noActions: [String: any CAAction] = ["position": NSNull(), "bounds": NSNull(),
                                                             "contents": NSNull(), "frame": NSNull()]
     enum Failure: Error { case permission, display, missingWindow, tooManyWindows, memoryBudget }
+}
+
+/// Display link target. The link retains its target until invalidated.
+@MainActor private final class FrameClock: NSObject {
+    private var link: CADisplayLink?
+    private let tick: @MainActor (CADisplayLink) -> Void
+
+    init(screen: NSScreen, tick: @escaping @MainActor (CADisplayLink) -> Void) {
+        self.tick = tick
+        super.init()
+        let link = screen.displayLink(target: self, selector: #selector(step(_:)))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    @objc private func step(_ link: CADisplayLink) { tick(link) }
+
+    func invalidate() {
+        link?.invalidate()
+        link = nil
+    }
 }

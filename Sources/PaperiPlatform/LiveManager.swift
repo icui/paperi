@@ -1025,6 +1025,11 @@ import PaperiCore
         var progress = 0.0
         var targetProgress = 0.0
         var lastVisualTime = 0.0
+        /// Tracking frame pacing, as the display clock delivered it.
+        var lastFrameTime = 0.0
+        var frames = 0
+        var droppedFrames = 0
+        var maxFrameMS = 0.0
         var ready = false
         var tracking = true
         var failed = false
@@ -1269,7 +1274,6 @@ import PaperiCore
                 guard self.swipe != nil else {
                     self.swipeGuard?.invalidate(); self.swipeGuard = nil; return
                 }
-                self.advanceSwipeVisuals()
                 if NSEvent.pressedMouseButtons != 0 || !AXIsProcessTrusted()
                     || self.coordinator.display(forSpace: space)?.activeSpaceID != space
                     || DisplayArrangement.currentProblem() != nil {
@@ -1296,9 +1300,10 @@ import PaperiCore
                 // A quick gesture can finish before capture. Begin that release
                 // at the real windows instead of flashing a displaced snapshot.
                 overlay.place(state.starts)
-                state.lastVisualTime = ProcessInfo.processInfo.systemUptime
+                state.lastVisualTime = CACurrentMediaTime()
                 self.swipe = state
                 if state.tracking { overlay.show() }
+                overlay.startFrameClock { [weak self] link in self?.advanceSwipeVisuals(link) }
                 if let commit = state.released { state.released = nil; self.swipe = state; self.endSwipe(commit: commit, direction: state.releaseDirection) }
             } catch {
                 overlay.hide()
@@ -1322,9 +1327,18 @@ import PaperiCore
         if state.ready && !wasTracking { state.overlay.show() }
     }
 
-    private func advanceSwipeVisuals() {
+    /// One display frame: move the images to where they will be when it is shown.
+    private func advanceSwipeVisuals(_ link: CADisplayLink) {
         guard var state = swipe, state.ready, state.tracking, state.released == nil else { return }
-        let now = ProcessInfo.processInfo.systemUptime
+        let period = link.targetTimestamp - link.timestamp
+        if state.lastFrameTime > 0, period > 0 {
+            let interval = link.timestamp - state.lastFrameTime
+            state.frames += 1
+            state.maxFrameMS = max(state.maxFrameMS, interval * 1000)
+            state.droppedFrames += max(0, Int((interval / period).rounded()) - 1)
+        }
+        state.lastFrameTime = link.timestamp
+        let now = link.targetTimestamp
         let next = SlotSwipe.advanceVisualProgress(state.progress, toward: state.targetProgress,
                                                    elapsed: now - state.lastVisualTime)
         state.lastVisualTime = now
@@ -1373,6 +1387,10 @@ import PaperiCore
         state.released = commit
         swipe = state
         let generation = state.generation, space = state.space, overlay = state.overlay
+        overlay.stopFrameClock()
+        swipeMetrics["trackingFrames"] = state.frames
+        swipeMetrics["trackingDroppedFrames"] = state.droppedFrames
+        swipeMetrics["trackingMaxFrameMS"] = state.maxFrameMS
         guard commit, let wid = target, let session = coordinator.sessions[space],
               let ends = state.ends[direction] else {
             let duration = SlotSwipe.settleDuration(distance: abs(state.progress), base: settle)
@@ -1390,21 +1408,26 @@ import PaperiCore
             }
             return
         }
+        let destinationProgress = direction == .left ? -1.0 : 1.0
+        let duration = SlotSwipe.settleDuration(distance: abs(destinationProgress - state.progress), base: settle)
+        let from = state.progress, path = state
+        // Start the landing first: it runs off the main thread, so the
+        // synchronous window writes below cannot freeze it at release.
+        overlay.slide(along: { u in
+            self.swipeFrames(path, progress: from + (destinationProgress - from) * u)
+        }, to: ends, duration: duration)
+        let released = ProcessInfo.processInfo.systemUptime
         // Same logical result as `focus`; one real placement under the overlay.
         try? session.focus(windowID: wid, ownerPID: pidForWindow[wid], classification: Self.tiled, ticket: session.ticket)
         reveal(session)
         applied.removeValue(forKey: space)
         apply(space: space, byID: state.surveys)
         _ = raise(wid)
-        let destinationProgress = direction == .left ? -1.0 : 1.0
-        let duration = SlotSwipe.settleDuration(distance: abs(destinationProgress - state.progress), base: settle)
-        let from = state.progress, path = state
-        overlay.slide(along: { u in
-            self.swipeFrames(path, progress: from + (destinationProgress - from) * u)
-        }, to: ends, duration: duration)
-        let released = ProcessInfo.processInfo.systemUptime
+        let writesMS = (ProcessInfo.processInfo.systemUptime - released) * 1000
+        swipeMetrics["releaseWritesMS"] = writesMS
         swipeTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(Int(duration * 1000)))
+            // The slide began before the writes; wait out only what is left of it.
+            try? await Task.sleep(for: .milliseconds(max(0, Int(duration * 1000 - writesMS))))
             // Hand off only once the real windows have stopped moving, then
             // finish the images on the frames they actually took.
             var previous: [UInt32: Rect] = [:]
