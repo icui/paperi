@@ -61,7 +61,23 @@ New-window creation uses the app's **New Window** menu item, falling back to ⌘
 
 If macOS uses the same finger count for Mission Control, Spaces, or three-finger drag, Paperi disables its conflicting swipe and shows a warning. Change the system gesture or set `gesture.fingers` to `4`.
 
-## Keyboard and mouse
+## Drag to reorder or tile vertically
+
+Drag a window by its title bar over a neighboring column or another window in its own stack. Dashed guides show the drop zones, and a labeled preview shows where it will land. Release over the preview to apply it.
+
+| Drop location | Result |
+| --- | --- |
+| Middle of a window in a neighboring column | Swap their positions to reorder the strip. |
+| Top quarter of a window in a neighboring column | Tile the dragged window above it in the same column. |
+| Bottom quarter of a window in a neighboring column | Tile the dragged window below it in the same column. |
+| Middle of another window in the same stack | Swap their vertical order. |
+| Left / right quarter of another window in the same stack | Move the dragged window out into its own column on that side. |
+
+For example, drag an editor onto the bottom zone of a browser window to tile the browser above the editor. They share a column and scroll together. To return the editor to a separate column, drag it onto the left or right zone of the browser.
+
+Move windows between Spaces and displays with Mission Control; Paperi follows their destination.
+
+## Keyboard shortcuts
 
 All default shortcuts below use **⌥⌘ (Option–Command)**.
 
@@ -75,8 +91,6 @@ All default shortcuts below use **⌥⌘ (Option–Command)**.
 | S | Split the available width with the left neighbor. |
 | I / O | Stack into the left column / move out into a separate column. |
 | F | Toggle floating for the focused window. |
-
-Drag a window over another to see the available drop zones. In another column, drop at the top or bottom to stack, or in the middle to swap. Within a stack, drop at the left or right edge to move the window into its own column. Move windows between Spaces and displays with Mission Control; Paperi follows their destination.
 
 Dialogs, sheets, menus, and popovers stay outside the strip. Utility windows without a fullscreen button float by default. Native macOS tab groups share one position in the layout.
 
