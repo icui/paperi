@@ -87,15 +87,16 @@ public struct SlotSwipe: Equatable, Sendable {
         return current + min(step, max(-step, target - current))
     }
 
-    /// Visual time constant for closes: absorbs uneven touch reports (one
-    /// close unit is a whole window height) at the cost of ~16 ms of lag.
-    public static let closeSmoothing = 0.016
+    /// Visual time constant: absorbs touch reports that beat against the
+    /// display (one unit is a whole column or window height) at the cost of
+    /// ~16 ms of lag.
+    public static let visualSmoothing = 0.016
 
     /// Like `advanceVisualProgress`, but approaches the target exponentially
     /// so frames without new input still move a little and the next one does
     /// not jump. The speed limit still applies.
     public static func followVisualProgress(_ current: Double, toward target: Double, elapsed: Double,
-                                            timeConstant: Double = closeSmoothing) -> Double {
+                                            timeConstant: Double = visualSmoothing) -> Double {
         guard current.isFinite, target.isFinite, elapsed.isFinite, elapsed > 0, timeConstant > 0 else { return current }
         let dt = min(elapsed, 1.0 / 30.0)
         let eased = current + (target - current) * (1 - exp(-dt / timeConstant))
@@ -148,10 +149,12 @@ public struct SlotSwipe: Equatable, Sendable {
             let absY = abs(newY)
             if max(absX, absY) >= config.lockThreshold {
                 if absX > 1.2 * absY {
-                    // Locked horizontal!
+                    // Locked horizontal! As for closes, the shown progress
+                    // starts from rest here instead of jumping the lead-in.
                     let dirFactor = config.invert ? 1.0 : -1.0
                     let rawProg = (newX * dirFactor) / max(0.01, config.travel)
-                    let clamped = Self.rubberBand(rawProg)
+                    origin = max(-0.5, min(0.5, rawProg))
+                    let clamped = Self.rubberBand(Self.shown(rawProg, origin: origin))
                     let dt = max(1.0 / 120.0, time - start)
                     let vel = rawProg / dt
                     state = .active(rawProgress: rawProg, clampedProgress: clamped, velocity: vel, lastTime: time)
@@ -168,7 +171,7 @@ public struct SlotSwipe: Equatable, Sendable {
                     // the lock distance at once would jump tens of points.
                     let rawProg = newY / max(0.01, closeTravel)
                     let dt = max(1.0 / 120.0, time - start)
-                    closeOrigin = min(0.5, rawProg)
+                    origin = min(0.5, rawProg)
                     state = .closing(rawProgress: rawProg, clampedProgress: shownClose(rawProg),
                                      velocity: rawProg / dt, lastTime: time)
                     return .closeStarted
@@ -186,7 +189,7 @@ public struct SlotSwipe: Equatable, Sendable {
             let dirFactor = config.invert ? 1.0 : -1.0
             let deltaProg = (dx * dirFactor) / max(0.01, config.travel)
             let newRaw = rawProg + deltaProg
-            let clamped = Self.rubberBand(newRaw)
+            let clamped = Self.rubberBand(Self.shown(newRaw, origin: origin))
             guard time > lastTime else { return nil }
             let dt = time - lastTime
             let instantVel = deltaProg / max(1.0 / 120.0, dt)
@@ -210,14 +213,19 @@ public struct SlotSwipe: Equatable, Sendable {
         }
     }
 
-    /// Raw close progress at the vertical lock.
-    private var closeOrigin = 0.0
+    /// Raw progress at the axis lock.
+    private var origin = 0.0
 
-    /// Shown close progress: 0 at the lock, meeting raw progress at 1.
-    private func shownClose(_ raw: Double) -> Double {
-        let shown = raw >= 1 ? raw : (raw - closeOrigin) / (1 - closeOrigin)
-        return Self.closeBand(shown)
+    /// Shown progress: 0 at the lock (`origin`), meeting raw progress at
+    /// ±1 and beyond, linear in between on each side. Removes the lead-in
+    /// jump without changing where a full step lands, in either direction.
+    public static func shown(_ raw: Double, origin: Double) -> Double {
+        guard raw.isFinite, origin.isFinite, abs(origin) < 1 else { return raw }
+        if abs(raw) >= 1 { return raw }
+        return raw >= origin ? (raw - origin) / (1 - origin) : (raw - origin) / (1 + origin)
     }
+
+    private func shownClose(_ raw: Double) -> Double { Self.closeBand(Self.shown(raw, origin: origin)) }
 
     /// Close progress: never below the window's place, resisting past fully off.
     public static func closeBand(_ progress: Double) -> Double {
@@ -241,8 +249,9 @@ public struct SlotSwipe: Equatable, Sendable {
 
     public mutating func end(at time: Double) -> Decision {
         switch state {
-        case .active(let rawProg, let clampedProg, let vel, let lastTime):
-            let decision: Decision = releases(raw: rawProg, clamped: clampedProg, velocity: vel, lastTime: lastTime, at: time)
+        case .active(let rawProg, _, let vel, let lastTime):
+            // Decide on the whole finger travel, including the lead-in.
+            let decision: Decision = releases(raw: rawProg, clamped: Self.rubberBand(rawProg), velocity: vel, lastTime: lastTime, at: time)
                 ? (rawProg > 0 ? .commit(.right) : .commit(.left)) : .snapBack
             state = .completed(decision)
             return decision

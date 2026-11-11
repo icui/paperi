@@ -1394,9 +1394,7 @@ import PaperiCore
         state.lastFrameTime = link.timestamp
         let now = link.targetTimestamp
         let elapsed = now - state.lastVisualTime
-        let next = state.closing
-            ? SlotSwipe.followVisualProgress(state.progress, toward: state.targetProgress, elapsed: elapsed)
-            : SlotSwipe.advanceVisualProgress(state.progress, toward: state.targetProgress, elapsed: elapsed)
+        let next = SlotSwipe.followVisualProgress(state.progress, toward: state.targetProgress, elapsed: elapsed)
         if elapsed > 0 {
             let instant = (next - state.progress) / elapsed
             state.visualVelocity += (1 - exp(-elapsed / 0.03)) * (instant - state.visualVelocity)
@@ -1613,12 +1611,10 @@ import PaperiCore
         if commit && state.closing { finishClose(state, settle: settle); return }
         guard commit, let wid = target, let session = coordinator.sessions[space],
               let ends = state.ends[direction] else {
-            // A close drops back from the speed it had on screen.
-            let back = -state.visualVelocity
-            let duration = state.closing
-                ? SlotSwipe.settleDuration(distance: abs(state.progress), speed: back, base: settle)
-                : SlotSwipe.settleDuration(distance: abs(state.progress), base: settle)
-            let curve = state.closing ? SlotSwipe.settleCurve(speed: back, distance: abs(state.progress), duration: duration) : nil
+            // Drop back from the speed the images had on screen.
+            let back = state.progress < 0 ? state.visualVelocity : -state.visualVelocity
+            let duration = SlotSwipe.settleDuration(distance: abs(state.progress), speed: back, base: settle)
+            let curve = SlotSwipe.settleCurve(speed: back, distance: abs(state.progress), duration: duration)
             // Follow the tracking path back so every image keeps the strip's speed.
             let from = state.progress, path = state
             overlay.slide(along: { u in self.swipeFrames(path, progress: from * (1 - u)) },
@@ -1635,13 +1631,16 @@ import PaperiCore
             return
         }
         let destinationProgress = direction == .left ? -1.0 : 1.0
-        let duration = SlotSwipe.settleDuration(distance: abs(destinationProgress - state.progress), base: settle)
+        // Land from the speed the strip had on screen, then slow onto the column.
+        let distance = abs(destinationProgress - state.progress)
+        let speed = destinationProgress > state.progress ? state.visualVelocity : -state.visualVelocity
+        let duration = SlotSwipe.settleDuration(distance: distance, speed: speed, base: settle)
         let from = state.progress, path = state
         // Start the landing first: it runs off the main thread, so the
         // synchronous window writes below cannot freeze it at release.
         overlay.slide(along: { u in
             self.swipeFrames(path, progress: from + (destinationProgress - from) * u)
-        }, to: ends, duration: duration)
+        }, to: ends, duration: duration, curve: SlotSwipe.settleCurve(speed: speed, distance: distance, duration: duration))
         let released = ProcessInfo.processInfo.systemUptime
         // Same logical result as `focus`; one real placement under the overlay.
         try? session.focus(windowID: wid, ownerPID: pidForWindow[wid], classification: Self.tiled, ticket: session.ticket)

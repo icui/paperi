@@ -46,11 +46,42 @@ struct SlotSwipeTests {
         #expect(action == .started)
         if case .active(let raw, let clamped, _, _) = swipe.state {
             #expect(raw > 0)
-            #expect(clamped > 0)
+            // Shown progress starts from rest at the lock.
+            #expect(clamped == 0)
             #expect(abs(raw - (0.025 / 0.2)) < 0.001)
         } else {
             Issue.record("Expected active state")
         }
+    }
+
+    @Test func shownProgressMeetsRawAtBothNeighbours() {
+        for origin in [0.0375, -0.0375] {
+            #expect(SlotSwipe.shown(origin, origin: origin) == 0)
+            #expect(abs(SlotSwipe.shown(1, origin: origin) - 1) < 1e-12)
+            #expect(abs(SlotSwipe.shown(-1, origin: origin) + 1) < 1e-12)
+            #expect(SlotSwipe.shown(1.2, origin: origin) == 1.2)
+            // Monotonic and continuous through the start.
+            var previous = -Double.infinity
+            for step in -120...120 {
+                let value = SlotSwipe.shown(Double(step) / 100, origin: origin)
+                #expect(value > previous)
+                if previous.isFinite { #expect(value - previous < 0.02) }
+                previous = value
+            }
+        }
+    }
+
+    @Test func reversalPastStartShowsTheOtherNeighbour() {
+        var swipe = SlotSwipe(config: .init(travel: 0.2, lockThreshold: 0.01))
+        swipe.begin(at: 0)
+        #expect(swipe.move(dx: -0.012, dy: 0, at: 0.01) == .started) // right, raw 0.06
+        // Back past the start: shown goes negative (left neighbour) and
+        // reaches -1 exactly where raw does.
+        guard case .updated(let back) = swipe.move(dx: 0.05, dy: 0, at: 0.05) else { Issue.record("update"); return }
+        #expect(back < 0)
+        guard case .updated(let full) = swipe.move(dx: 0.162, dy: 0, at: 0.1) else { Issue.record("update"); return }
+        #expect(abs(full + 1) < 1e-9)
+        #expect(swipe.end(at: 0.2) == .commit(.left))
     }
 
     @Test func invertConfigurationReversesSign() {
