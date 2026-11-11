@@ -11,8 +11,7 @@ import Foundation
 /// With `pullTravel` set, a downward lock tracks a pull the same way
 /// (progress grows as the fingers move down); the caller decides what a
 /// pull does (minimize, new window).
-/// With `turnTravel` set too, a pull held past the commit threshold that
-/// then turns right becomes a turn: progress grows as the fingers move
+/// With `turnTravel` set too, a pull that then turns right becomes a turn: progress grows as the fingers move
 /// right from there (closing a tab), and the pull no longer acts.
 public struct SlotSwipe: Equatable, Sendable {
     public enum State: Equatable, Sendable {
@@ -235,8 +234,8 @@ public struct SlotSwipe: Equatable, Sendable {
             state = .closing(rawProgress: next.raw, clampedProgress: next.shown, velocity: next.velocity, lastTime: time)
             return .closeUpdated(progress: next.shown)
 
-        case .pulling(let rawProg, let shownProg, let lastVel, let lastTime):
-            if let turnTravel = config.turnTravel, let turn = turnLock(dx: dx, dy: dy, armed: shownProg >= config.commitThreshold) {
+        case .pulling(let rawProg, _, let lastVel, let lastTime):
+            if let turnTravel = config.turnTravel, let turn = turnLock(dx: dx, dy: dy) {
                 // Shown from rest at the turn, like the other locks.
                 let raw = turn / max(0.01, turnTravel)
                 origin = min(0.5, raw)
@@ -270,18 +269,17 @@ public struct SlotSwipe: Equatable, Sendable {
     /// Raw progress at the axis lock.
     private var origin = 0.0
 
-    /// Finger travel since an armed pull last moved mostly down.
+    /// Finger travel since a pull last moved mostly down.
     private var turnX = 0.0, turnY = 0.0
 
     /// Rightward travel a turn needs: a deliberate move, well past a drift.
-    public static let turnLockMultiple = 3.0
+    public static let turnLockMultiple = 2.0
 
-    /// While a pull is armed, collects motion until it turns clearly right;
+    /// Collects pull motion until it turns clearly right;
     /// returns the rightward travel then. Downward motion (still pulling)
-    /// or a disarmed pull starts the collection over, and leftward drift
+    /// starts the collection over, and leftward drift
     /// does not build up a debt.
-    private mutating func turnLock(dx: Double, dy: Double, armed: Bool) -> Double? {
-        guard armed else { turnX = 0; turnY = 0; return nil }
+    private mutating func turnLock(dx: Double, dy: Double) -> Double? {
         turnX = max(0, turnX + dx)
         turnY += dy
         let lock = config.lockThreshold * Self.turnLockMultiple

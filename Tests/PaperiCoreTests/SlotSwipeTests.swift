@@ -325,12 +325,21 @@ struct SlotSwipeTests {
         #expect(swipe.end(at: 0.7) == .snapBack)
     }
 
-    @Test func unarmedOrDisabledPullDoesNotTurn() {
+    @Test func earlyRightTurnCannotFallBackToNewWindow() {
         var early = SlotSwipe(config: .init(lockThreshold: 0.01, pullTravel: 0.2, turnTravel: 0.2))
         early.begin(at: 0)
         _ = early.move(dx: 0, dy: -0.02, at: 0.01)
         _ = early.move(dx: 0, dy: -0.02, at: 0.05) // shown progress well below 0.5
-        if case .pullUpdated = early.move(dx: 0.06, dy: 0, at: 0.1) {} else { Issue.record("still pulling") }
+        #expect(early.move(dx: 0.025, dy: 0, at: 0.1) == .turnStarted)
+        // Releasing a short turn must never run the original new-window action.
+        #expect(early.end(at: 0.3) == .snapBack)
+
+        var completed = SlotSwipe(config: .init(lockThreshold: 0.01, pullTravel: 0.2, turnTravel: 0.2))
+        completed.begin(at: 0)
+        _ = completed.move(dx: 0, dy: -0.02, at: 0.01)
+        #expect(completed.move(dx: 0.025, dy: -0.002, at: 0.05) == .turnStarted)
+        _ = completed.move(dx: 0.12, dy: 0, at: 0.2)
+        #expect(completed.end(at: 0.4) == .turn)
 
         var off = SlotSwipe(config: .init(lockThreshold: 0.01, pullTravel: 0.2))
         off.begin(at: 0)
