@@ -139,6 +139,9 @@ import PaperiCore
 
     var isShown: Bool { window != nil }
 
+    /// Top edge of the overlay's display, in top-left (AX) coordinates.
+    var screenTop: Double { mainHeight - Double(screenFrame.maxY) }
+
     func show() {
         // Submit the fully composed layer tree before exposing the opaque window.
         // Otherwise its first display can briefly show the black backing store.

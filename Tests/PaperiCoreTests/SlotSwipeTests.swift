@@ -167,4 +167,41 @@ struct SlotSwipeTests {
         #expect(swipe.move(dx: -0.01, dy: 0, at: 0.03) != nil)
     }
 
+
+    @Test func upwardSwipeTracksCloseWhenEnabled() {
+        var swipe = SlotSwipe(config: .init(lockThreshold: 0.01, closeTravel: 0.2))
+        swipe.begin(at: 0.0)
+        #expect(swipe.move(dx: 0.001, dy: 0.02, at: 0.01) == .closeStarted)
+        #expect(swipe.move(dx: 0, dy: 0.1, at: 0.05) == .closeUpdated(progress: 0.6))
+        #expect(swipe.end(at: 0.06) == .close)
+    }
+
+    @Test func downwardSwipeCancelsEvenWithCloseEnabled() {
+        var swipe = SlotSwipe(config: .init(lockThreshold: 0.01, closeTravel: 0.2))
+        swipe.begin(at: 0.0)
+        #expect(swipe.move(dx: 0, dy: -0.02, at: 0.01) == .cancelled)
+    }
+
+    @Test func shortOrReturnedCloseSnapsBack() {
+        var short = SlotSwipe(config: .init(lockThreshold: 0.01, closeTravel: 0.2))
+        short.begin(at: 0.0)
+        _ = short.move(dx: 0, dy: 0.02, at: 0.01)
+        _ = short.move(dx: 0, dy: 0.01, at: 0.2)
+        #expect(short.end(at: 0.5) == .snapBack)
+
+        var back = SlotSwipe(config: .init(lockThreshold: 0.01, closeTravel: 0.2))
+        back.begin(at: 0.0)
+        _ = back.move(dx: 0, dy: 0.15, at: 0.05)
+        // Dragged below the start: progress stays at zero, release is no close.
+        #expect(back.move(dx: 0, dy: -0.25, at: 0.3) == .closeUpdated(progress: 0))
+        #expect(back.end(at: 0.6) == .snapBack)
+    }
+
+    @Test func fastUpwardFlickCloses() {
+        var swipe = SlotSwipe(config: .init(lockThreshold: 0.01, closeTravel: 0.4))
+        swipe.begin(at: 0.0)
+        _ = swipe.move(dx: 0, dy: 0.02, at: 0.01)
+        _ = swipe.move(dx: 0, dy: 0.04, at: 0.03)
+        #expect(swipe.end(at: 0.035) == .close)
+    }
 }

@@ -252,6 +252,11 @@ import PaperiCore
     private func receive(_ event: [String: Any]) {
         guard running, let name = event["event"] as? String else { return }
         if name == kAXUIElementDestroyedNotification, let wid = event["windowID"] as? UInt32, wid > 0 {
+            // The window a swipe-up is closing: its release finishes the overlay.
+            if let state = swipe, state.closing, state.released == true, state.closeWindow == wid {
+                destroyedNotified.insert(wid)
+                return
+            }
             cancelMotion(); motionFrames.removeAll()
             destroyedNotified.insert(wid)
         }
@@ -1021,6 +1026,10 @@ import PaperiCore
         let ends: [Direction: [UInt32: Rect]]
         let neighbours: [Direction: UInt32]
         let canvas: Rect
+        /// The focused window a swipe up would close, if it is on screen.
+        let closeWindow: UInt32?
+        /// The fingers locked upwards: images track a close, not the strip.
+        var closing = false
         var starts: [UInt32: Rect] = [:]
         var progress = 0.0
         var targetProgress = 0.0
@@ -1144,7 +1153,8 @@ import PaperiCore
                 travel: options.config.gesture.travel,
                 commitThreshold: options.config.gesture.commitThreshold,
                 flickVelocity: options.config.gesture.flickVelocity,
-                invert: options.config.gesture.invert
+                invert: options.config.gesture.invert,
+                closeTravel: options.config.gesture.swipeUpToClose ? options.config.gesture.travel : nil
             )
             var swipeReducer = SlotSwipe(config: cfg)
             swipeReducer.begin(at: time)
@@ -1166,6 +1176,18 @@ import PaperiCore
                     }
                 case .updated(let progress):
                     updateSwipe(progress)
+                case .closeStarted:
+                    let res: [String: Any] = swipe != nil ? ["ok": true] : beginSwipe()
+                    guard res["ok"] as? Bool == true, startClosing() else {
+                        cancelSwipe()
+                        slotSwipe = nil
+                        return
+                    }
+                    if case .closing(_, let progress, _, _) = swipeReducer.state {
+                        updateSwipe(progress)
+                    }
+                case .closeUpdated(let progress):
+                    updateSwipe(progress)
                 case .cancelled:
                     cancelSwipe()
                     slotSwipe = nil
@@ -1183,6 +1205,8 @@ import PaperiCore
             switch decision {
             case .commit(let direction):
                 endSwipe(commit: true, direction: direction)
+            case .close:
+                endSwipe(commit: true)
             case .snapBack:
                 endSwipe(commit: false)
             }
@@ -1263,8 +1287,11 @@ import PaperiCore
         }
         let generation = motionGeneration
         let overlay = SnapshotTransition()
+        // Only the focused tiled window closes, and only if its image is captured.
+        let closeWindow = session.state.layout.focused == nil || surveys[ctx.window] == nil ? nil : ctx.window
         swipe = Swipe(space: space, generation: generation, overlay: overlay, surveys: surveys,
-                      ends: ends, neighbours: neighbours, canvas: session.canvas, tracking: !pendingLock)
+                      ends: ends, neighbours: neighbours, canvas: session.canvas, closeWindow: closeWindow,
+                      tracking: !pendingLock)
         motionSpace = space
         swipeBegan = ProcessInfo.processInfo.systemUptime
         swipeMetrics = ["state": "capturing", "windows": surveys.count]
@@ -1317,12 +1344,20 @@ import PaperiCore
         return ["ok": true, "neighbours": neighbours.count]
     }
 
+    /// Switches a tracking swipe to closing its focused window.
+    private func startClosing() -> Bool {
+        guard var state = swipe, state.released == nil, state.closeWindow != nil else { return false }
+        state.closing = true
+        swipe = state
+        return true
+    }
+
     /// Keep only the newest finger target; the visual clock limits travel speed.
     func updateSwipe(_ progress: Double) {
         guard var state = swipe, state.released == nil, progress.isFinite else { return }
         let wasTracking = state.tracking
         state.tracking = true
-        state.targetProgress = min(1.3, max(-1.3, progress))
+        state.targetProgress = state.closing ? min(1.3, max(0, progress)) : min(1.3, max(-1.3, progress))
         swipe = state
         if state.ready && !wasTracking { state.overlay.show() }
     }
@@ -1351,6 +1386,7 @@ import PaperiCore
     private func swipeFrames(_ state: Swipe) -> [UInt32: Rect] { swipeFrames(state, progress: state.progress) }
 
     private func swipeFrames(_ state: Swipe, progress: Double) -> [UInt32: Rect] {
+        if state.closing { return closeFrames(state, progress: progress) }
         let direction: Direction = progress < 0 ? .left : .right
         guard let ends = state.ends[direction] else {
             // Strip end: resist, moving at most a few points.
@@ -1367,13 +1403,78 @@ import PaperiCore
         }
     }
 
+    /// Swipe up: only the window being closed moves, straight up. At 1 it
+    /// (and its shadow) is just past the top of its display.
+    private func closeFrames(_ state: Swipe, progress: Double) -> [UInt32: Rect] {
+        guard let wid = state.closeWindow, var frame = state.starts[wid] else { return state.starts }
+        let distance = frame.y + frame.height - state.overlay.screenTop + Self.closeShadowClearance
+        let absP = min(1, progress)
+        frame.y -= distance * absP + max(0, progress - 1) * Self.swipeEdgeResistance
+        var frames = state.starts
+        frames[wid] = frame
+        return frames
+    }
+
+    /// Room for the active window shadow (radius 16, offset 8) above the display.
+    private static let closeShadowClearance = 32.0
+
+    /// Presses the window's close button. False when it has none.
+    private func pressClose(_ wid: UInt32) -> Bool {
+        guard let pid = pidForWindow[wid], let element = references[wid] ?? findWindow(wid, pid: pid),
+              let value = Diagnostics.attribute(element, kAXCloseButtonAttribute),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return false }
+        return AXUIElementPerformAction(value as! AXUIElement, kAXPressAction as CFString) == .success
+    }
+
+    /// Whether WindowServer still shows the window.
+    private static func windowOnScreen(_ wid: UInt32) -> Bool {
+        let rows = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(wid)) as? [[String: Any]] ?? []
+        return rows.contains { ($0[kCGWindowIsOnscreen as String] as? Bool) == true }
+    }
+
+    /// Committed swipe up: the image leaves through the top while the app
+    /// closes the window underneath. The overlay goes once the window has
+    /// gone, so the survivors' gap animation plays on the real windows. A
+    /// window that stays (an unsaved-changes prompt) is revealed again.
+    private func finishClose(_ state: Swipe, settle: Double) {
+        guard let wid = state.closeWindow else { return }
+        let generation = state.generation, overlay = state.overlay
+        let from = state.progress, path = state
+        let duration = SlotSwipe.settleDuration(distance: max(0, 1 - from), base: settle)
+        overlay.slide(along: { u in self.closeFrames(path, progress: from + (1 - from) * u) },
+                      to: closeFrames(path, progress: 1), duration: duration)
+        let released = ProcessInfo.processInfo.systemUptime
+        let pressed = pressClose(wid)
+        swipeMetrics["closePressed"] = pressed
+        swipeTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
+            var gone = false
+            if pressed {
+                // Apps may finish their own work first; wait at most a second.
+                for _ in 0..<40 {
+                    guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
+                    if self.destroyedNotified.contains(wid) || !Self.windowOnScreen(wid) { gone = true; break }
+                    try? await Task.sleep(for: .milliseconds(25))
+                }
+            }
+            guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
+            if !gone { overlay.slide(to: path.starts, duration: 0.18); try? await Task.sleep(for: .milliseconds(190)) }
+            guard self.swipe?.generation == generation, !Task.isCancelled else { return }
+            overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
+            self.swipeMetrics["state"] = gone ? "closed" : (pressed ? "closeRefused" : "noCloseButton")
+            self.swipeMetrics["closeMS"] = (ProcessInfo.processInfo.systemUptime - released) * 1000
+            self.swipeMetrics["totalMS"] = (ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 1000
+            self.scheduleRefresh()
+        }
+    }
+
     /// Release towards the reducer’s chosen neighbour, or the progress side
     /// for simulations. A rejected commit slides back with no writes.
     func endSwipe(commit requested: Bool, direction requestedDirection: Direction? = nil) {
         guard var state = swipe, state.released == nil else { return }
         let direction: Direction = requestedDirection ?? (state.targetProgress < 0 ? .left : .right)
-        let target = state.neighbours[direction]
-        let commit = requested && (requestedDirection != nil || state.targetProgress != 0) && target != nil
+        let target = state.closing ? state.closeWindow : state.neighbours[direction]
+        let commit = requested && (state.closing || requestedDirection != nil || state.targetProgress != 0) && target != nil
         state.releaseDirection = direction
         let settle = max(0.12, options.config.focusScrollDuration ?? 0.22)
         if !state.ready && !state.failed { state.released = commit; swipe = state; return }
@@ -1381,7 +1482,8 @@ import PaperiCore
             swipe = nil
             swipeTask = nil
             scheduleRefresh()
-            if commit { _ = handle(["focus", direction == .left ? "left" : "right"]) }
+            if commit, state.closing, let wid = target { _ = pressClose(wid) }
+            else if commit { _ = handle(["focus", direction == .left ? "left" : "right"]) }
             return
         }
         state.released = commit
@@ -1391,6 +1493,7 @@ import PaperiCore
         swipeMetrics["trackingFrames"] = state.frames
         swipeMetrics["trackingDroppedFrames"] = state.droppedFrames
         swipeMetrics["trackingMaxFrameMS"] = state.maxFrameMS
+        if commit && state.closing { finishClose(state, settle: settle); return }
         guard commit, let wid = target, let session = coordinator.sessions[space],
               let ends = state.ends[direction] else {
             let duration = SlotSwipe.settleDuration(distance: abs(state.progress), base: settle)
@@ -1469,12 +1572,16 @@ import PaperiCore
         }
     }
 
-    /// `paperi msg swipe left|right [travel]`: the gesture without a trackpad.
+    /// `paperi msg swipe left|right|up [travel]`: the gesture without a trackpad.
     /// Fingers move `travel` (fraction of one slot) over 0.25 s, then lift;
     /// at least half a slot commits.
     private func simulateSwipe(_ direction: Direction, travel: Double) -> [String: Any] {
         let reply = beginSwipe(isSimulation: true)
         guard reply["ok"] as? Bool == true else { return reply }
+        if direction == .up && !startClosing() {
+            cancelSwipe()
+            return ["ok": false, "error": "no focused window on screen to close"]
+        }
         let sign = direction == .left ? -1.0 : 1.0
         let started = ProcessInfo.processInfo.systemUptime
         let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
@@ -1696,7 +1803,7 @@ import PaperiCore
             animateFocus(space: ctx.space, byID: latestSurvey)
             return ["ok": raise(wid), "windowID": wid]
         case "swipe":
-            guard let dir = direction(rest.first), dir == .left || dir == .right else { return fail("usage: swipe left|right [travel]") }
+            guard let dir = direction(rest.first), dir != .down else { return fail("usage: swipe left|right|up [travel]") }
             return simulateSwipe(dir, travel: rest.count > 1 ? Double(rest[1]) ?? 1 : 1)
         case "swap", "move":
             guard let dir = direction(rest.first) else { return fail("usage: swap left|right|up|down") }

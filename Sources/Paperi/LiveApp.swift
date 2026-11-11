@@ -508,6 +508,8 @@ import PaperiPlatform
               copy: "\(gesture.flickVelocity)", tip: "\"gesture.flickVelocity\": release speed that moves regardless of distance")
         value(sub, "Invert: \(gesture.invert ? "on" : "off")\(origin(gesture.invert == defaults.invert))",
               copy: "\(gesture.invert)", tip: "\"gesture.invert\": reverse the swipe direction")
+        value(sub, "Swipe up to close: \(gesture.swipeUpToClose ? "on" : "off")\(origin(gesture.swipeUpToClose == defaults.swipeUpToClose))",
+              copy: "\(gesture.swipeUpToClose)", tip: "\"gesture.swipeUpToClose\": swiping up closes the focused window")
         item.submenu = sub
     }
 

@@ -24,15 +24,36 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public var commitThreshold: Double
         public var flickVelocity: Double
         public var invert: Bool
+        /// Swiping up closes the focused window.
+        public var swipeUpToClose: Bool
 
         public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.4,
-                    commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false) {
+                    commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false,
+                    swipeUpToClose: Bool = true) {
             self.enabled = enabled
             self.fingers = fingers
             self.travel = travel
             self.commitThreshold = commitThreshold
             self.flickVelocity = flickVelocity
             self.invert = invert
+            self.swipeUpToClose = swipeUpToClose
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case enabled, fingers, travel, commitThreshold, flickVelocity, invert, swipeUpToClose
+        }
+
+        /// Omitted keys keep their defaults.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let d = GestureConfig()
+            enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? d.enabled
+            fingers = try c.decodeIfPresent(Int.self, forKey: .fingers) ?? d.fingers
+            travel = try c.decodeIfPresent(Double.self, forKey: .travel) ?? d.travel
+            commitThreshold = try c.decodeIfPresent(Double.self, forKey: .commitThreshold) ?? d.commitThreshold
+            flickVelocity = try c.decodeIfPresent(Double.self, forKey: .flickVelocity) ?? d.flickVelocity
+            invert = try c.decodeIfPresent(Bool.self, forKey: .invert) ?? d.invert
+            swipeUpToClose = try c.decodeIfPresent(Bool.self, forKey: .swipeUpToClose) ?? d.swipeUpToClose
         }
     }
 
@@ -164,7 +185,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         "travel": 0.4,
         "commitThreshold": 0.5,
         "flickVelocity": 1.5,
-        "invert": false
+        "invert": false,
+        "swipeUpToClose": true
       },
       "hotkeys": {
         "alt-cmd-j": "focus left",

@@ -31,6 +31,15 @@ struct LiveConfigTests {
         }
     }
 
+    @Test func swipeUpToClose() throws {
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).gesture.swipeUpToClose)
+        // Omitted gesture keys keep their defaults.
+        let off = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"swipeUpToClose":false}}"#.utf8))
+        #expect(off.gesture == LiveConfig.GestureConfig(swipeUpToClose: false))
+        let template = try JSONDecoder().decode(LiveConfig.self, from: Data(LiveConfig.template.utf8))
+        #expect(template.gesture == LiveConfig.GestureConfig())
+    }
+
     @Test func focusAfterClose() throws {
         #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).focusAfterClose == .left)
         #expect(LiveConfig().focusAfterClose == .left)

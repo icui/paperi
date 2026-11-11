@@ -5,23 +5,30 @@ import Foundation
 /// A three-finger horizontal swipe moves the strip by at most one slot either
 /// way. Progress is signed: positive progress moves toward `.right` (revealing
 /// the right neighbour), negative moves toward `.left`.
+///
+/// With `closeTravel` set, an upward vertical lock instead tracks a close:
+/// progress runs from 0 (in place) to 1 (the focused window off the top).
 public struct SlotSwipe: Equatable, Sendable {
     public enum State: Equatable, Sendable {
         case idle
         case detecting(accDx: Double, accDy: Double, startTime: Double)
         case active(rawProgress: Double, clampedProgress: Double, velocity: Double, lastTime: Double)
+        case closing(rawProgress: Double, clampedProgress: Double, velocity: Double, lastTime: Double)
         case completed(Decision)
         case cancelled
     }
 
     public enum Decision: Equatable, Sendable {
         case commit(Direction)
+        case close
         case snapBack
     }
 
     public enum Action: Equatable, Sendable {
         case started
         case updated(progress: Double)
+        case closeStarted
+        case closeUpdated(progress: Double)
         case finished(Decision)
         case cancelled
     }
@@ -32,17 +39,22 @@ public struct SlotSwipe: Equatable, Sendable {
         public var flickVelocity: Double
         public var lockThreshold: Double
         public var invert: Bool
+        /// Upward finger travel (fraction of the trackpad height) that takes
+        /// the focused window fully off screen. `nil`: vertical swipes cancel.
+        public var closeTravel: Double?
 
         public init(travel: Double = 0.4,
                     commitThreshold: Double = 0.5,
                     flickVelocity: Double = 1.5,
                     lockThreshold: Double = 0.015,
-                    invert: Bool = false) {
+                    invert: Bool = false,
+                    closeTravel: Double? = nil) {
             self.travel = travel
             self.commitThreshold = commitThreshold
             self.flickVelocity = flickVelocity
             self.lockThreshold = lockThreshold
             self.invert = invert
+            self.closeTravel = closeTravel
         }
     }
 
@@ -109,8 +121,16 @@ public struct SlotSwipe: Equatable, Sendable {
                     state = .active(rawProgress: rawProg, clampedProgress: clamped, velocity: vel, lastTime: time)
                     return .started
                 } else if absY > 1.2 * absX {
-                    state = .cancelled
-                    return .cancelled
+                    // Touch y grows upwards. Only an upward swipe closes.
+                    guard let closeTravel = config.closeTravel, newY > 0 else {
+                        state = .cancelled
+                        return .cancelled
+                    }
+                    let rawProg = newY / max(0.01, closeTravel)
+                    let dt = max(1.0 / 120.0, time - start)
+                    state = .closing(rawProgress: rawProg, clampedProgress: Self.closeBand(rawProg),
+                                     velocity: rawProg / dt, lastTime: time)
+                    return .closeStarted
                 } else {
                     // Keep accumulating ambiguous diagonal motion until an axis wins.
                     state = .detecting(accDx: newX, accDy: newY, startTime: start)
@@ -134,30 +154,54 @@ public struct SlotSwipe: Equatable, Sendable {
             let newVel = lastVel + weight * (instantVel - lastVel)
             state = .active(rawProgress: newRaw, clampedProgress: clamped, velocity: newVel, lastTime: time)
             return .updated(progress: clamped)
+
+        case .closing(let rawProg, _, let lastVel, let lastTime):
+            let deltaProg = dy / max(0.01, config.closeTravel ?? 1)
+            let newRaw = rawProg + deltaProg
+            guard time > lastTime else { return nil }
+            let dt = time - lastTime
+            let instantVel = deltaProg / max(1.0 / 120.0, dt)
+            let weight = 1 - exp(-dt / 0.025)
+            let newVel = lastVel + weight * (instantVel - lastVel)
+            let clamped = Self.closeBand(newRaw)
+            state = .closing(rawProgress: newRaw, clampedProgress: clamped, velocity: newVel, lastTime: time)
+            return .closeUpdated(progress: clamped)
         }
+    }
+
+    /// Close progress: never below the window's place, resisting past fully off.
+    public static func closeBand(_ progress: Double) -> Double {
+        guard progress.isFinite else { return 0 }
+        return max(0, rubberBand(progress))
+    }
+
+    /// Shared release rule: a long enough aligned flick, or enough travel
+    /// without a fast retreat.
+    private func releases(raw: Double, clamped: Double, velocity: Double, lastTime: Double, at time: Double) -> Bool {
+        // Stationary touches produce no move events. Fade stale velocity out
+        // over 100 ms so a hold before release cannot act as a flick.
+        let releaseVelocity = velocity * max(0, 1 - max(0, time - lastTime) / 0.1)
+        let aligned = releaseVelocity * raw > 0
+        // Require intentional travel as well as speed. A tiny twitch must
+        // not jump a whole slot, nor should reversing select an unseen slot.
+        let flick = abs(raw) >= 0.12 && aligned && abs(releaseVelocity) >= config.flickVelocity
+        let retreating = releaseVelocity * raw < 0 && abs(releaseVelocity) >= config.flickVelocity
+        return flick || (abs(clamped) >= config.commitThreshold && !retreating)
     }
 
     public mutating func end(at time: Double) -> Decision {
         switch state {
         case .active(let rawProg, let clampedProg, let vel, let lastTime):
-            let decision: Decision
-            // Stationary touches produce no move events. Fade stale velocity out
-            // over 100 ms so a hold before release cannot act as a flick.
-            let releaseVelocity = vel * max(0, 1 - max(0, time - lastTime) / 0.1)
-            let distance = abs(rawProg)
-            let aligned = releaseVelocity * rawProg > 0
-            // Require intentional travel as well as speed. A tiny twitch must
-            // not jump a whole slot, nor should reversing select an unseen slot.
-            let flick = distance >= 0.12 && aligned
-                && abs(releaseVelocity) >= config.flickVelocity
-            let retreating = releaseVelocity * rawProg < 0
-                && abs(releaseVelocity) >= config.flickVelocity
-            if flick || (abs(clampedProg) >= config.commitThreshold && !retreating) {
-                decision = rawProg > 0 ? .commit(.right) : .commit(.left)
-            } else {
-                decision = .snapBack
-            }
+            let decision: Decision = releases(raw: rawProg, clamped: clampedProg, velocity: vel, lastTime: lastTime, at: time)
+                ? (rawProg > 0 ? .commit(.right) : .commit(.left)) : .snapBack
+            state = .completed(decision)
+            return decision
 
+        case .closing(let rawProg, let clampedProg, let vel, let lastTime):
+            // A swipe dragged back below its start is not a close.
+            let decision: Decision = rawProg > 0
+                && releases(raw: rawProg, clamped: clampedProg, velocity: vel, lastTime: lastTime, at: time)
+                ? .close : .snapBack
             state = .completed(decision)
             return decision
 
