@@ -1185,6 +1185,11 @@ import PaperiCore
             return
         }
         let source = EventTapTouchSource(fingers: options.config.gesture.fingers, verbose: options.verbose)
+        let tapConflicts = GestureConflict.checkLiveTap(fingers: options.config.gesture.fingers)
+        source.recognizesTaps = options.config.gesture.tap != .none && tapConflicts.isEmpty
+        if !tapConflicts.isEmpty, options.config.gesture.tap != .none {
+            log("trackpad tap disabled due to conflicts: \(tapConflicts.joined(separator: ", "))")
+        }
         source.onEvent = { [weak self] event in
             MainActor.assumeIsolated {
                 self?.handleTouchEvent(event)
@@ -1196,6 +1201,7 @@ import PaperiCore
 
     func checkGestureSettings() {
         let conflicts = GestureConflict.checkLive(fingers: options.config.gesture.fingers)
+            + GestureConflict.checkLiveTap(fingers: options.config.gesture.fingers)
         if conflicts != lastGestureConflicts {
             lastGestureConflicts = conflicts
             updateTouchSource()
@@ -1354,6 +1360,14 @@ import PaperiCore
             case .snapBack:
                 endSwipe(commit: false)
             }
+
+        case .tap:
+            guard options.config.gesture.tap == .tray else { return }
+            guard options.config.bottom == .thumbnail else { log("tap: tray needs bottom = thumbnail"); return }
+            guard let display = pointerDisplay() else { return }
+            let shown = windowIndicators.summon(display: display.displayUUID, at: NSEvent.mouseLocation,
+                                                coordinator: coordinator, mode: options.config.bottom)
+            log(shown ? "tap: tray at pointer" : "tap: no tray on this display")
 
         case .cancel:
             // Only a sequence we are tracking may cancel; an ignored one must

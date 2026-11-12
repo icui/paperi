@@ -89,6 +89,46 @@ struct TouchSourceTests {
         #expect(events == [.begin(time: 1), .cancel])
     }
 
+    @Test func tapEndsSequenceAtOnceThenReportsTap() {
+        let source = EventTapTouchSource()
+        source.recognizesTaps = true
+        var events: [TouchEvent] = []
+        source.onEvent = { events.append($0) }
+        source.processContacts(contacts([1], x: 0.3), at: 1, clicked: false)
+        source.processContacts(contacts([1, 2, 3], x: 0.3), at: 1.02, clicked: false)
+        source.processContacts(contacts([1, 2, 3], x: 0.3, phase: .ended), at: 1.1, clicked: false)
+        #expect(events == [.begin(time: 1.02), .end(time: 1.1), .tap(time: 1.1)])
+        source.stop()
+    }
+
+    @Test func swipeIsNotATapAndTapsCanBeOff() {
+        for recognizes in [true, false] {
+            let source = EventTapTouchSource()
+            source.recognizesTaps = recognizes
+            var events: [TouchEvent] = []
+            source.onEvent = { events.append($0) }
+            let x = recognizes ? 0.2 : 0
+            source.processContacts(contacts([1, 2, 3]), at: 1, clicked: false)
+            source.processContacts(contacts([1, 2, 3], x: x), at: 1.05, clicked: false)
+            source.processContacts(contacts([1, 2, 3], x: x, phase: .ended), at: 1.1, clicked: false)
+            source.finishPendingRelease(at: 1.2)
+            #expect(!events.contains(.tap(time: 1.1)))
+            #expect(events.last == .end(time: 1.1))
+            source.stop()
+        }
+    }
+
+    @Test func clickIsNotATap() {
+        let source = EventTapTouchSource()
+        source.recognizesTaps = true
+        var events: [TouchEvent] = []
+        source.onEvent = { events.append($0) }
+        source.processContacts(contacts([1, 2, 3]), at: 1, clicked: true)
+        source.processContacts(contacts([1, 2, 3], phase: .ended), at: 1.1, clicked: false)
+        source.finishPendingRelease(at: 1.2)
+        #expect(events == [.begin(time: 1), .end(time: 1.1)])
+        source.stop()
+    }
 }
 
 struct AppGestureFilterTests {

@@ -3,6 +3,16 @@ import Testing
 @testable import PaperiPlatform
 
 struct LiveConfigTests {
+    @Test func tapAction() throws {
+        #expect(LiveConfig.GestureConfig().tap == .tray)
+        let config = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"tap":"none"}}"#.utf8))
+        #expect(config.gesture.tap == .none)
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: JSONEncoder().encode(config)) == config)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"tap":"lookUp"}}"#.utf8))
+        }
+    }
+
     @Test func openAppGesture() throws {
         #expect(LiveConfig.GestureConfig().swipeDownApp == nil)
         let config = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"swipeDown":"openApp","swipeDownApp":"com.apple.Terminal"}}"#.utf8))

@@ -25,6 +25,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
     "swipeDown": "newWindow",
     "swipeDownRight": "closeTab",
     "swipeDownLeft": "minimize",
+    "tap": "tray",
     "tabCloseApps": ["com.google.Chrome"]
   },
   "hotkeys": {
@@ -88,6 +89,18 @@ Omit `swipeDownApp` to keep the existing `newWindow` action targeting the focuse
 swipe up show the tab-close pill and send ⌘W instead of closing the entire window.
 Native macOS tab groups are handled automatically. ⌘W can close the window when
 it has no tabs remaining.
+
+A quick tap with all gesture fingers (`tap`, default `tray`) shows the thumbnail
+tray centred on the pointer, on the display under it; click a thumbnail to focus that
+window. The tray stays while hovered and fades two seconds after the pointer leaves;
+later reveals return to the bottom edge. It needs `bottom` set to `thumbnail`. Only a
+deliberate tap counts: fingers landing and lifting within 100 ms of each other, down
+for at most 250 ms, each moving at most 2.5 mm, without a physical click, a fourth
+finger, or another multi-finger gesture in the preceding 250 ms. Set `tap` to `none`
+to turn it off. With three fingers, macOS's Look Up tap
+(**Trackpad → Look up & data detectors → Tap with three fingers**) takes precedence
+and disables Paperi's tap. Running with `--verbose` logs each tap's measurements
+and why any was rejected.
 
 Set `swipeUpToClose` to `false` to disable upward closing, or `enabled` to `false`
 to disable all Paperi swipes. Two-finger scrolling remains available. If macOS

@@ -18,6 +18,14 @@ struct GestureConflictTests {
         ]
     ]
 
+    @Test func lookUpTapConflictsOnlyWithThreeFingerTaps() {
+        #expect(GestureConflict.tapConflicts(in: cleanThreeFinger, fingers: 3).count == 2)
+        #expect(GestureConflict.tapConflicts(in: cleanThreeFinger, fingers: 4).isEmpty)
+        let off: [String: [String: Any]] = ["com.apple.AppleMultitouchTrackpad": ["TrackpadThreeFingerTapGesture": 0]]
+        #expect(GestureConflict.tapConflicts(in: off, fingers: 3).isEmpty)
+        #expect(GestureConflict.tapConflicts(in: ["com.apple.AppleMultitouchTrackpad": [:]], fingers: 3).isEmpty)
+    }
+
     @Test func cleanSettingsHaveNoConflicts() {
         let conflicts = GestureConflict.conflicts(in: cleanThreeFinger, fingers: 3)
         #expect(conflicts.isEmpty)

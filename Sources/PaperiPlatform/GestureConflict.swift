@@ -53,6 +53,30 @@ public enum GestureConflict {
         return blocked
     }
 
+    /// macOS's own tap for the finger count: three-finger tap can be Look Up
+    /// & data detectors (`TrackpadThreeFingerTapGesture` = 2). A missing key
+    /// is the default (off). There is no four-finger tap.
+    public static let tapKey = "TrackpadThreeFingerTapGesture"
+
+    public static func tapConflicts(in domains: [String: [String: Any]], fingers: Int = 3) -> [String] {
+        guard fingers == 3 else { return [] }
+        return domains.sorted { $0.key < $1.key }.compactMap { name, prefs in
+            guard let value = prefs[tapKey] as? NSNumber, value.intValue != 0 else { return nil }
+            return "Look up & data detectors (three-finger tap) (\(tapKey) = \(value.intValue) in \(name))"
+        }
+    }
+
+    public static func checkLiveTap(fingers: Int = 3) -> [String] {
+        var domains: [String: [String: Any]] = [:]
+        for domain in trackpadDomains {
+            CFPreferencesAppSynchronize(domain as CFString)
+            if let value = CFPreferencesCopyAppValue(tapKey as CFString, domain as CFString) {
+                domains[domain] = [tapKey: value]
+            }
+        }
+        return tapConflicts(in: domains, fingers: fingers)
+    }
+
     /// Reads live preferences using CFPreferencesCopyAppValue after synchronizing.
     public static func checkLive(fingers: Int = 3) -> [String] {
         var domains: [String: [String: Any]] = [:]

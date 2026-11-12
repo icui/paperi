@@ -1,11 +1,15 @@
 import AppKit
 import CoreGraphics
+import PaperiCore
 
 public enum TouchEvent: Equatable, Sendable {
     case begin(time: Double)
     case move(dx: Double, dy: Double, time: Double)
     case end(time: Double)
     case cancel
+    /// A quick tap of all `fingers`, reported after every finger has lifted
+    /// (and after the sequence's `.end`, if it began).
+    case tap(time: Double)
 }
 
 @MainActor
@@ -32,10 +36,14 @@ public final class EventTapTouchSource: TouchSource {
     private var releaseTask: Task<Void, Never>?
     private var appGestureBlocker: AppGestureBlocker?
     private static var activeInstance: EventTapTouchSource?
+    /// Report `.tap` for quick taps of all `fingers`.
+    public var recognizesTaps = false
+    private var taps: TapRecognizer<AnyHashable>
 
     public init(fingers: Int = 3, verbose: Bool = false) {
         self.fingers = fingers
         self.verbose = verbose
+        self.taps = TapRecognizer(fingers: fingers)
     }
 
     private func touchID(_ identity: any NSCopying) -> AnyHashable {
@@ -115,6 +123,10 @@ public final class EventTapTouchSource: TouchSource {
         let id: AnyHashable
         let position: CGPoint
         let phase: NSTouch.Phase
+        /// Trackpad size in points (1/72 inch); converts positions to millimetres.
+        var deviceSize = Self.typicalDeviceSize
+        /// A 14-inch MacBook Pro trackpad, about 160 × 100 mm.
+        static let typicalDeviceSize = CGSize(width: 454, height: 283)
     }
 
     private func clearPendingRelease() {
@@ -148,13 +160,34 @@ public final class EventTapTouchSource: TouchSource {
 
     func processTouches(_ touches: Set<NSTouch>, at timestamp: Double) {
         processContacts(touches.map {
-            Contact(id: touchID($0.identity), position: $0.normalizedPosition, phase: $0.phase)
+            Contact(id: touchID($0.identity), position: $0.normalizedPosition, phase: $0.phase,
+                    deviceSize: $0.deviceSize.width > 0 && $0.deviceSize.height > 0 ? $0.deviceSize : Contact.typicalDeviceSize)
         }, at: timestamp)
     }
 
-    func processContacts(_ contacts: [Contact], at timestamp: Double) {
+    func processContacts(_ contacts: [Contact], at timestamp: Double, clicked: Bool = NSEvent.pressedMouseButtons != 0) {
         // Empty generic gesture frames are not evidence of a lift.
         guard !contacts.isEmpty else { return }
+        guard recognizesTaps else { trackSwipe(contacts, at: timestamp); return }
+        let mm = 25.4 / 72
+        let tap = taps.observe(contacts.map {
+            .init(id: $0.id, x: $0.position.x * $0.deviceSize.width * mm, y: $0.position.y * $0.deviceSize.height * mm,
+                  down: $0.phase != .ended && $0.phase != .cancelled)
+        }, at: timestamp, clicked: clicked, cancelled: contacts.contains { $0.phase == .cancelled })
+        trackSwipe(contacts, at: timestamp)
+        guard let (sample, verdict) = tap else { return }
+        if verbose {
+            let outcome = verdict == .tap ? "accepted" : { if case .rejected(let why) = verdict { return "rejected (\(why))" }; return "" }()
+            FileHandle.standardError.write(Data("[paperi] tap \(outcome): \(sample.summary)\n".utf8))
+        }
+        guard verdict == .tap else { return }
+        // Every finger is up: end the sequence now rather than after the
+        // dropout grace, so the tap's effect follows the swipe's cleanup.
+        if tracking, let liftedAt = pendingReleaseTime { finish(.end(time: liftedAt)) }
+        onEvent?(.tap(time: timestamp))
+    }
+
+    private func trackSwipe(_ contacts: [Contact], at timestamp: Double) {
         // Once motion establishes a swipe, newly appearing contacts are not
         // participants. Remember them through lifts so their cancellation or
         // continued presence cannot affect the original fingers' release.

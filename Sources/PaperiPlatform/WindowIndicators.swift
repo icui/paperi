@@ -19,6 +19,25 @@ import ScreenCaptureKit
     private var tasks: [String: Task<Void, Never>] = [:]
     private var requestedCaptureAccess = false
     private var horizontalSwipeSpace: UInt64?
+    /// Displays whose thumbnail tray was summoned to a point (AppKit screen
+    /// coordinates). The tray stays there until it fades out.
+    private var anchors: [String: CGPoint] = [:]
+
+    /// Shows the thumbnail tray of `displayUUID`'s current Space centred on
+    /// `point`. Returns false when that display has no tray to show.
+    @discardableResult
+    func summon(display displayUUID: String, at point: CGPoint,
+                coordinator: DisplaySpaceCoordinator, mode: LiveConfig.Bottom) -> Bool {
+        guard mode == .thumbnail,
+              let space = coordinator.displays.first(where: { $0.displayUUID == displayUUID })?.activeSpaceID else { return false }
+        anchors[displayUUID] = point
+        update(coordinator, mode: mode, revealSpace: space)
+        guard presentations[displayUUID]?.space == space else {
+            anchors[displayUUID] = nil
+            return false
+        }
+        return true
+    }
 
     func activateHorizontalSwipe(in space: UInt64, coordinator: DisplaySpaceCoordinator, mode: LiveConfig.Bottom) {
         guard mode == .thumbnail else { return }
@@ -34,6 +53,7 @@ import ScreenCaptureKit
 
     func hide() {
         horizontalSwipeSpace = nil
+        anchors.removeAll()
         for task in tasks.values { task.cancel() }
         tasks.removeAll()
         presentations.removeAll()
@@ -66,9 +86,16 @@ import ScreenCaptureKit
             panel.ignoresMouseEvents = !thumbnail
             let width = min(CGFloat(slots.count) * (thumbnail ? 116 : 14) + 20,
                             max(28, display.canvas.width - 32))
-            let frame = NSRect(x: display.canvas.x + (display.canvas.width - width) / 2,
-                               y: primaryTop - display.canvas.y - display.canvas.height + 12,
-                               width: width, height: thumbnail ? 96 : 28)
+            let height: CGFloat = thumbnail ? 96 : 28
+            let screen = NSRect(x: display.canvas.x, y: primaryTop - display.canvas.y - display.canvas.height,
+                                width: display.canvas.width, height: display.canvas.height)
+            var frame = NSRect(x: screen.minX + (screen.width - width) / 2, y: screen.minY + 12,
+                               width: width, height: height)
+            if thumbnail, let anchor = anchors[id] {
+                // Centred on the pointer, kept on its display.
+                frame.origin.x = min(max(anchor.x - width / 2, screen.minX + 8), screen.maxX - 8 - width)
+                frame.origin.y = min(max(anchor.y - height / 2, screen.minY + 8), screen.maxY - 8 - height)
+            }
             panel.setFrame(frame, display: false)
             guard let glass = panel.contentView else { continue }
             let cachedImages = (glass.subviews.first as? WindowPreviews)?.images ?? [:]
@@ -94,7 +121,8 @@ import ScreenCaptureKit
                         self.requestedCaptureAccess = true
                         allowed = CGRequestScreenCaptureAccess()
                     }
-                    guard allowed, !Task.isCancelled else { return }
+                    guard allowed else { self.anchors[id] = nil; return }
+                    guard !Task.isCancelled else { return }
                     do {
                         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
                         for wid in previews.ids {
@@ -126,6 +154,8 @@ import ScreenCaptureKit
                         }) { panel?.alphaValue = $0 }
                         try Task.checkCancellation()
                         panel?.orderOut(nil)
+                        // The next reveal returns to the bottom of the display.
+                        self.anchors[id] = nil
                     } catch {
                         // Cancellation leaves presentation to the newer refresh;
                         // unavailable captures never get replaced with fake previews.
@@ -143,6 +173,7 @@ import ScreenCaptureKit
         for (id, panel) in panels where !visible.contains(id) {
             tasks.removeValue(forKey: id)?.cancel()
             presentations.removeValue(forKey: id)
+            anchors.removeValue(forKey: id)
             panel.orderOut(nil)
         }
     }

@@ -35,11 +35,14 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public var swipeDown: SwipeDownAction
         public var swipeDownRight: SwipeDownAction
         public var swipeDownLeft: SwipeDownAction
+        /// What a quick tap with all `fingers` does.
+        public var tap: TapAction
 
         public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.4,
                     commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false,
                     swipeUpToClose: Bool = true, tabCloseApps: [String] = [], swipeDown: SwipeDownAction = .newWindow,
-                    swipeDownRight: SwipeDownAction = .closeTab, swipeDownLeft: SwipeDownAction = .minimize, swipeDownApp: String? = nil) {
+                    swipeDownRight: SwipeDownAction = .closeTab, swipeDownLeft: SwipeDownAction = .minimize, swipeDownApp: String? = nil,
+                    tap: TapAction = .tray) {
             self.enabled = enabled
             self.fingers = fingers
             self.travel = travel
@@ -52,11 +55,12 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             self.swipeDown = swipeDown
             self.swipeDownRight = swipeDownRight
             self.swipeDownLeft = swipeDownLeft
+            self.tap = tap
         }
 
         enum CodingKeys: String, CodingKey {
             case swipeDownApp
-            case enabled, fingers, travel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDown, swipeDownRight, swipeDownLeft
+            case enabled, fingers, travel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDown, swipeDownRight, swipeDownLeft, tap
             /// Legacy boolean: `false` reads as `swipeDown: "none"`.
             case swipeDownToMinimize
         }
@@ -79,6 +83,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             tabCloseApps = try c.decodeIfPresent([String].self, forKey: .tabCloseApps) ?? d.tabCloseApps
             swipeDownRight = try c.decodeIfPresent(SwipeDownAction.self, forKey: .swipeDownRight) ?? d.swipeDownRight
             swipeDownLeft = try c.decodeIfPresent(SwipeDownAction.self, forKey: .swipeDownLeft) ?? d.swipeDownLeft
+            tap = try c.decodeIfPresent(TapAction.self, forKey: .tap) ?? d.tap
             if let raw = try c.decodeIfPresent(String.self, forKey: .swipeDown) {
                 guard let action = SwipeDownAction(rawValue: raw) else {
                     throw DecodingError.dataCorruptedError(forKey: .swipeDown, in: c,
@@ -105,12 +110,17 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             try c.encode(swipeDown.rawValue, forKey: .swipeDown)
             try c.encode(swipeDownRight, forKey: .swipeDownRight)
             try c.encode(swipeDownLeft, forKey: .swipeDownLeft)
+            try c.encode(tap, forKey: .tap)
         }
     }
 
     /// Actions shared by the three downward gestures. New window uses the
     /// app's New Window menu item, falling back to ⌘N.
     public enum SwipeDownAction: String, Codable, Equatable, Sendable, CaseIterable { case closeTab, minimize, newWindow, openApp, none }
+
+    /// A gesture-finger tap shows the thumbnail tray centred on the pointer
+    /// (`tray`), or does nothing (`none`).
+    public enum TapAction: String, Codable, Equatable, Sendable, CaseIterable { case tray, none }
 
     /// Where focus goes when the focused tiled window closes: the column to
     /// the `left` (else right), to the `right` (else left), or wherever macOS
@@ -249,7 +259,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         "tabCloseApps": [],
         "swipeDown": "newWindow",
         "swipeDownRight": "closeTab",
-        "swipeDownLeft": "minimize"
+        "swipeDownLeft": "minimize",
+        "tap": "tray"
       },
       "hotkeys": {
         "alt-cmd-j": "focus left",
