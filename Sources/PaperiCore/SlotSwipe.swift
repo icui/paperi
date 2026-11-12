@@ -9,10 +9,9 @@ import Foundation
 /// With `closeTravel` set, an upward vertical lock instead tracks a close:
 /// progress runs from 0 (in place) to 1 (the focused window off the top).
 /// With `pullTravel` set, a downward lock tracks a pull the same way
-/// (progress grows as the fingers move down); the caller decides what a
-/// pull does (minimize, new window).
-/// With `turnTravel` set too, a pull that then turns right becomes a turn: progress grows as the fingers move
-/// right from there (closing a tab), and the pull no longer acts.
+/// (progress grows as the fingers move down); the caller chooses the action.
+/// With `turnTravel` set too, a pull can turn left or right. Progress then
+/// follows that direction, and the pull no longer acts.
 public struct SlotSwipe: Equatable, Sendable {
     public enum State: Equatable, Sendable {
         case idle
@@ -58,7 +57,7 @@ public struct SlotSwipe: Equatable, Sendable {
         /// Downward finger travel for a full pull (e.g. the focused window off
         /// the bottom). `nil`: downward swipes cancel.
         public var pullTravel: Double?
-        /// Rightward finger travel for a full turn out of an armed pull.
+        /// Horizontal finger travel for a full turn out of a pull.
         /// `nil`: a pull cannot turn.
         public var turnTravel: Double?
 
@@ -80,6 +79,8 @@ public struct SlotSwipe: Equatable, Sendable {
             self.turnTravel = turnTravel
         }
     }
+
+    public private(set) var turnDirection: Direction = .right
 
     public var config: Configuration
     public private(set) var state: State
@@ -158,6 +159,7 @@ public struct SlotSwipe: Equatable, Sendable {
     public mutating func begin(at time: Double) {
         state = .detecting(accDx: 0, accDy: 0, startTime: time)
         turnX = 0; turnY = 0
+        turnDirection = .right
     }
 
     public mutating func move(dx: Double, dy: Double, at time: Double) -> Action? {
@@ -237,7 +239,8 @@ public struct SlotSwipe: Equatable, Sendable {
         case .pulling(let rawProg, _, let lastVel, let lastTime):
             if let turnTravel = config.turnTravel, let turn = turnLock(dx: dx, dy: dy) {
                 // Shown from rest at the turn, like the other locks.
-                let raw = turn / max(0.01, turnTravel)
+                turnDirection = turn < 0 ? .left : .right
+                let raw = abs(turn) / max(0.01, turnTravel)
                 origin = min(0.5, raw)
                 state = .turning(rawProgress: raw, clampedProgress: shownClose(raw), velocity: 0, lastTime: time)
                 return .turnStarted
@@ -248,7 +251,7 @@ public struct SlotSwipe: Equatable, Sendable {
             return .pullUpdated(progress: next.shown)
 
         case .turning(let rawProg, _, let lastVel, let lastTime):
-            guard let next = vertical(rawProg, lastVel, lastTime, delta: dx / max(0.01, config.turnTravel ?? 1), at: time)
+            guard let next = vertical(rawProg, lastVel, lastTime, delta: dx * (turnDirection == .left ? -1 : 1) / max(0.01, config.turnTravel ?? 1), at: time)
             else { return nil }
             state = .turning(rawProgress: next.raw, clampedProgress: next.shown, velocity: next.velocity, lastTime: time)
             return .turnUpdated(progress: next.shown)
@@ -272,19 +275,17 @@ public struct SlotSwipe: Equatable, Sendable {
     /// Finger travel since a pull last moved mostly down.
     private var turnX = 0.0, turnY = 0.0
 
-    /// Rightward travel a turn needs: a deliberate move, well past a drift.
+    /// Horizontal travel a turn needs: a deliberate move, well past a drift.
     public static let turnLockMultiple = 2.0
 
-    /// Collects pull motion until it turns clearly right;
-    /// returns the rightward travel then. Downward motion (still pulling)
-    /// starts the collection over, and leftward drift
-    /// does not build up a debt.
+    /// Collects pull motion until it turns clearly left or right, returning
+    /// signed horizontal travel. Mostly vertical motion resets collection.
     private mutating func turnLock(dx: Double, dy: Double) -> Double? {
-        turnX = max(0, turnX + dx)
+        turnX += dx
         turnY += dy
         let lock = config.lockThreshold * Self.turnLockMultiple
-        if abs(turnY) >= lock, abs(turnY) > 1.2 * turnX { turnX = 0; turnY = 0; return nil }
-        guard turnX >= lock, turnX > 1.2 * abs(turnY) else { return nil }
+        if abs(turnY) >= lock, abs(turnY) > 1.2 * abs(turnX) { turnX = 0; turnY = 0; return nil }
+        guard abs(turnX) >= lock, abs(turnX) > 1.2 * abs(turnY) else { return nil }
         defer { turnX = 0; turnY = 0 }
         return turnX
     }

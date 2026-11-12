@@ -21,7 +21,9 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
     "flickVelocity": 1.5,
     "invert": false,
     "swipeUpToClose": true,
-    "swipeDown": "newWindow",
+    "swipeDown": "closeTab",
+    "swipeDownRight": "newWindow",
+    "swipeDownLeft": "minimize",
     "tabCloseApps": ["com.google.Chrome"]
   },
   "hotkeys": {
@@ -53,9 +55,12 @@ is the progress needed to commit (default `0.5`). A sufficiently long, fast flic
 can also commit; `flickVelocity` controls that speed threshold. `invert` reverses
 horizontal navigation.
 
-`swipeDown` accepts `newWindow` (default), `minimize`, or `none`. The down-then-right
-tab-close gesture is available with `newWindow`. A turn can begin before the
-new-window action is armed; releasing a short turn cancels both actions.
+`swipeDown`, `swipeDownRight`, and `swipeDownLeft` each accept `closeTab`,
+`newWindow`, `minimize`, or `none`. Their defaults are close tab, new window,
+and minimize respectively. Turn right or left after moving down without lifting;
+a turn can begin before the downward action is armed. Releasing a short turn
+cancels both actions. Downward gestures also show hints when a popup or the
+desktop has focus; actions target the frontmost app. Minimizing requires a window.
 
 `tabCloseApps` defaults to an empty array. Add apps such as Chrome here to make
 swipe up show the tab-close pill and send ⌘W instead of closing the entire window.

@@ -1056,17 +1056,22 @@ import PaperiCore
         var closing = false
         var pulling = false
         var pullAction: LiveConfig.SwipeDownAction = .minimize
-        /// An armed new-window pull turned right: it closes a tab instead.
+        /// A downward pull that has turned left or right.
         var turned = false
+        var turnDirection: Direction = .right
         /// The close-tab indicator replaces moving the window.
-        var showsTabClose: Bool { closing && tabCloseMode != nil && (!pulling || turned) }
-        /// How the tab closes. A turn always closes one: without a known
-        /// tab group it sends ⌘W (the app's own close-tab shortcut).
-        var tabCloseMode: TabClose? { turned ? tabClose ?? .app : tabClose }
+        var showsTabClose: Bool { closing && (pulling ? pullAction == .closeTab : tabCloseMode != nil) }
+        /// Without a known native tab group, a downward close-tab action
+        /// sends the app's own close-tab shortcut, ⌘W.
+        var tabCloseMode: TabClose? { pulling ? tabClose ?? .app : tabClose }
         /// The new-window indicator replaces moving the window.
-        var showsNewWindow: Bool { closing && pulling && !turned && pullAction == .newWindow }
-        var showsIndicator: Bool { showsTabClose || showsNewWindow }
-        var indicatorStyle: GestureIndicatorStyle { showsNewWindow ? .newWindow : turned ? .closeTabTurn : .closeTab }
+        var showsNewWindow: Bool { closing && pulling && pullAction == .newWindow }
+        var showsIndicator: Bool { showsTabClose || showsNewWindow || (closing && pulling && pullAction == .minimize) }
+        var indicatorStyle: GestureIndicatorStyle {
+            var style: GestureIndicatorStyle = pullAction == .minimize && pulling ? .minimize : showsNewWindow ? .newWindow : .closeTab
+            if pulling { style.direction = turned ? CGVector(dx: turnDirection == .left ? -1 : 1, dy: 0) : CGVector(dx: 0, dy: -1) }
+            return style
+        }
         /// When the indicator may first appear (media time). A fast flick
         /// releases before then and acts without flashing the indicator.
         var indicatorDue = 0.0
@@ -1118,6 +1123,8 @@ import PaperiCore
     private var gestureBlockedByAnimation: Bool { motionTimer != nil || swipe?.released != nil }
 
     private func cancelSwipe() {
+        standaloneOverlay?.fadeOut(); standaloneOverlay = nil
+        standalonePull = false
         swipeGuard?.invalidate(); swipeGuard = nil
         swipeSimulation?.invalidate(); swipeSimulation = nil
         swipeTask?.cancel(); swipeTask = nil
@@ -1184,6 +1191,32 @@ import PaperiCore
         }
     }
 
+    private var standaloneOverlay: SnapshotTransition?
+    private var standaloneAction: LiveConfig.SwipeDownAction = .none
+    private var standalonePull = false
+
+    private func updateStandaloneHint(_ progress: Double, direction: Direction? = nil) {
+        guard standalonePull else { return }
+        let config = options.config.gesture
+        let action = direction.map { $0 == .left ? config.swipeDownLeft : config.swipeDownRight } ?? standaloneAction
+        if standaloneOverlay == nil {
+            let overlay = SnapshotTransition()
+            overlay.prepareStandaloneIndicator()
+            standaloneOverlay = overlay
+        }
+        if action != standaloneAction || direction != nil {
+            standaloneOverlay?.replaceIndicator(duration: 0.14)
+        }
+        standaloneAction = action
+        guard action != .none else { return }
+        var style: GestureIndicatorStyle = action == .newWindow ? .newWindow : action == .minimize ? .minimize : .closeTab
+        style.direction = direction.map { CGVector(dx: $0 == .left ? -1 : 1, dy: 0) } ?? standaloneHintDirection
+        standaloneHintDirection = style.direction
+        standaloneOverlay?.trackIndicator(style, window: 0, progress: progress, threshold: config.commitThreshold)
+    }
+
+    private var standaloneHintDirection = CGVector(dx: 0, dy: -1)
+
     private func handleTouchEvent(_ event: TouchEvent) {
         guard running, !paused, DisplayArrangement.currentProblem() == nil else {
             cancelSwipe()
@@ -1199,6 +1232,7 @@ import PaperiCore
             guard !gestureBlockedByAnimation else { return }
             // Capture while determining the axis, but keep the overlay hidden
             // until horizontal movement locks. This overlaps input with capture.
+            standalonePull = false
             let started = beginSwipe(pendingLock: true)
             // Nothing to swipe on a full-screen Space; a retry on horizontal
             // lock would refuse again (and refresh again).
@@ -1209,7 +1243,8 @@ import PaperiCore
                 flickVelocity: options.config.gesture.flickVelocity,
                 invert: options.config.gesture.invert,
                 closeTravel: options.config.gesture.swipeUpToClose ? options.config.gesture.travel : nil,
-                pullTravel: options.config.gesture.swipeDown == .none ? nil : options.config.gesture.travel
+                pullTravel: options.config.gesture.travel,
+                turnTravel: options.config.gesture.travel
             )
             var swipeReducer = SlotSwipe(config: cfg)
             swipeReducer.begin(at: time)
@@ -1243,31 +1278,36 @@ import PaperiCore
                     }
                 case .closeUpdated(let progress), .pullUpdated(let progress):
                     updateSwipe(progress)
+                    updateStandaloneHint(progress)
                 case .pullStarted:
-                    let res: [String: Any] = swipe != nil ? ["ok": true] : beginSwipe()
-                    guard res["ok"] as? Bool == true, startClosing(pull: true) else {
+                    if swipe == nil { _ = beginSwipe() }
+                    if swipe == nil {
+                        standalonePull = true
+                    } else if !startClosing(pull: true) {
                         cancelSwipe()
-                        slotSwipe = nil
-                        return
+                        standalonePull = true
                     }
-                    // Down then right closes a tab.
-                    if let state = swipe, state.showsNewWindow {
-                        swipeReducer.config.turnTravel = options.config.gesture.travel
+                    if standalonePull {
+                        standaloneAction = options.config.gesture.swipeDown
+                        standaloneHintDirection = CGVector(dx: 0, dy: -1)
                     }
                     if case .pulling(_, let progress, _, _) = swipeReducer.state {
+                        updateStandaloneHint(progress)
                         updateSwipe(progress)
                     }
                 case .turnStarted:
-                    guard startTurn() else {
+                    guard standalonePull || startTurn(direction: swipeReducer.turnDirection) else {
                         cancelSwipe()
                         slotSwipe = nil
                         return
                     }
                     if case .turning(_, let progress, _, _) = swipeReducer.state {
+                        updateStandaloneHint(progress, direction: swipeReducer.turnDirection)
                         updateSwipe(progress)
                     }
                 case .turnUpdated(let progress):
                     updateSwipe(progress)
+                    updateStandaloneHint(progress)
                 case .cancelled:
                     cancelSwipe()
                     slotSwipe = nil
@@ -1282,6 +1322,16 @@ import PaperiCore
             guard var swipeReducer = slotSwipe else { return }
             let decision = swipeReducer.end(at: time)
             slotSwipe = nil
+            if standalonePull {
+                standaloneOverlay?.fadeOut(); standaloneOverlay = nil
+                standalonePull = false
+                if decision == .pull || decision == .turn {
+                    let cfg = options.config.gesture
+                    let action = decision == .pull ? cfg.swipeDown : (swipeReducer.turnDirection == .left ? cfg.swipeDownLeft : cfg.swipeDownRight)
+                    performStandalonePull(action)
+                }
+                return
+            }
             switch decision {
             case .commit(let direction):
                 endSwipe(commit: true, direction: direction)
@@ -1298,6 +1348,35 @@ import PaperiCore
             cancelSwipe()
             slotSwipe?.cancel()
             slotSwipe = nil
+        }
+    }
+
+    /// App actions remain available when no tiled window can supply a strip.
+    private func performStandalonePull(_ action: LiveConfig.SwipeDownAction) {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return }
+        let pid = app.processIdentifier
+        let application = AXUIElementCreateApplication(pid)
+        let focused = Diagnostics.attribute(application, kAXFocusedWindowAttribute)
+        let window = focused.flatMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil }
+        switch action {
+        case .none: break
+        case .minimize:
+            if let window { _ = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue) }
+        case .newWindow:
+            if let item = Self.newWindowMenuItem(pid: pid),
+               AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { return }
+            Self.postAppCommand(Self.keyN, pid: pid)
+        case .closeTab: Self.postAppCommand(Self.keyW, pid: pid)
+        }
+        scheduleRefresh()
+    }
+
+    private static func postAppCommand(_ key: CGKeyCode, pid: pid_t) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        for down in [true, false] {
+            guard let event = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down) else { return }
+            event.flags = .maskCommand
+            event.postToPid(pid)
         }
     }
 
@@ -1429,11 +1508,11 @@ import PaperiCore
         return ["ok": true, "neighbours": neighbours.count]
     }
 
-    /// Switches a tracking swipe to closing its focused window, or to a pull
-    /// (down: minimize it or open a new window, per `gesture.swipeDown`).
+    /// Switches a tracking swipe to closing its focused window, or to the
+    /// configured downward action.
     private func startClosing(pull: Bool = false) -> Bool {
         guard var state = swipe, state.released == nil, state.closeWindow != nil else { return false }
-        if pull, options.config.gesture.swipeDown == .none { return false }
+
         state.closing = true
         state.pulling = pull
         state.pullAction = options.config.gesture.swipeDown
@@ -1447,12 +1526,13 @@ import PaperiCore
         return true
     }
 
-    /// Switches an armed new-window pull to closing the front tab: the
-    /// New Window pill slips away and a Close Tab pill follows the fingers
-    /// right from rest.
-    private func startTurn() -> Bool {
-        guard var state = swipe, state.released == nil, state.showsNewWindow else { return false }
+    /// Switches a pull to the configured left or right action, with a fresh
+    /// indicator following the fingers from rest.
+    private func startTurn(direction: Direction) -> Bool {
+        guard var state = swipe, state.released == nil, state.pulling else { return false }
         state.turned = true
+        state.turnDirection = direction
+        state.pullAction = direction == .left ? options.config.gesture.swipeDownLeft : options.config.gesture.swipeDownRight
         state.progress = 0
         state.targetProgress = 0
         state.visualVelocity = 0
@@ -1620,6 +1700,7 @@ import PaperiCore
     /// window that stays (an unsaved-changes prompt) is revealed again.
     private func finishClose(_ state: Swipe, settle: Double) {
         guard let wid = state.closeWindow else { return }
+        if state.pulling && state.pullAction == .none { cancelSwipe(); return }
         if state.showsTabClose, let mode = state.tabCloseMode { finishTabClose(state, window: wid, mode: mode); return }
         if state.showsNewWindow { finishNewWindow(state, window: wid); return }
         if state.pulling { finishMinimize(state, window: wid, settle: settle); return }
@@ -1910,8 +1991,8 @@ import PaperiCore
             scheduleRefresh()
             if commit, state.showsNewWindow, let wid = target, let pid = pidForWindow[wid] {
                 _ = Self.openNewWindow(pid: pid, window: wid)
-            } else if commit, state.pulling, !state.turned, let wid = target { _ = minimize(wid) }
-            else if commit, state.closing, let wid = target {
+            } else if commit, state.pulling, state.pullAction == .minimize, let wid = target { _ = minimize(wid) }
+            else if commit, state.closing, (!state.pulling || state.pullAction == .closeTab), let wid = target {
                 if state.showsTabClose && state.tabCloseMode == .app, let pid = pidForWindow[wid] { _ = Self.sendCommandW(to: pid, window: wid) }
                 else { _ = pressClose(wid) }
             }

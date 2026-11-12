@@ -2,6 +2,16 @@ import Testing
 @testable import PaperiCore
 
 struct SlotSwipeTests {
+    @Test func pullTurnsLeftAndCommits() {
+        var swipe = SlotSwipe(config: .init(pullTravel: 0.4, turnTravel: 0.4))
+        swipe.begin(at: 0)
+        #expect(swipe.move(dx: 0, dy: -0.04, at: 0.01) == .pullStarted)
+        #expect(swipe.move(dx: -0.04, dy: 0, at: 0.02) == .turnStarted)
+        #expect(swipe.turnDirection == .left)
+        _ = swipe.move(dx: -0.24, dy: 0, at: 0.2)
+        #expect(swipe.end(at: 0.21) == .turn)
+    }
+
     @Test func rubberBandResistanceIsContinuousAndBounded() {
         #expect(SlotSwipe.rubberBand(0) == 0)
         #expect(SlotSwipe.rubberBand(0.5) == 0.5)

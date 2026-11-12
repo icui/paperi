@@ -32,10 +32,13 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public var tabCloseApps: [String]
         /// What swiping down does to the focused window.
         public var swipeDown: SwipeDownAction
+        public var swipeDownRight: SwipeDownAction
+        public var swipeDownLeft: SwipeDownAction
 
         public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.4,
                     commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false,
-                    swipeUpToClose: Bool = true, tabCloseApps: [String] = [], swipeDown: SwipeDownAction = .newWindow) {
+                    swipeUpToClose: Bool = true, tabCloseApps: [String] = [], swipeDown: SwipeDownAction = .closeTab,
+                    swipeDownRight: SwipeDownAction = .newWindow, swipeDownLeft: SwipeDownAction = .minimize) {
             self.enabled = enabled
             self.fingers = fingers
             self.travel = travel
@@ -45,10 +48,12 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             self.swipeUpToClose = swipeUpToClose
             self.tabCloseApps = tabCloseApps
             self.swipeDown = swipeDown
+            self.swipeDownRight = swipeDownRight
+            self.swipeDownLeft = swipeDownLeft
         }
 
         enum CodingKeys: String, CodingKey {
-            case enabled, fingers, travel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDown
+            case enabled, fingers, travel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDown, swipeDownRight, swipeDownLeft
             /// Legacy boolean: `false` reads as `swipeDown: "none"`.
             case swipeDownToMinimize
         }
@@ -65,10 +70,12 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             invert = try c.decodeIfPresent(Bool.self, forKey: .invert) ?? d.invert
             swipeUpToClose = try c.decodeIfPresent(Bool.self, forKey: .swipeUpToClose) ?? d.swipeUpToClose
             tabCloseApps = try c.decodeIfPresent([String].self, forKey: .tabCloseApps) ?? d.tabCloseApps
+            swipeDownRight = try c.decodeIfPresent(SwipeDownAction.self, forKey: .swipeDownRight) ?? d.swipeDownRight
+            swipeDownLeft = try c.decodeIfPresent(SwipeDownAction.self, forKey: .swipeDownLeft) ?? d.swipeDownLeft
             if let raw = try c.decodeIfPresent(String.self, forKey: .swipeDown) {
                 guard let action = SwipeDownAction(rawValue: raw) else {
                     throw DecodingError.dataCorruptedError(forKey: .swipeDown, in: c,
-                        debugDescription: "expected minimize, newWindow or none, got \(raw)")
+                        debugDescription: "expected closeTab, minimize, newWindow or none, got \(raw)")
                 }
                 swipeDown = action
             } else if try c.decodeIfPresent(Bool.self, forKey: .swipeDownToMinimize) == false {
@@ -85,13 +92,14 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             try c.encode(flickVelocity, forKey: .flickVelocity); try c.encode(invert, forKey: .invert)
             try c.encode(swipeUpToClose, forKey: .swipeUpToClose); try c.encode(tabCloseApps, forKey: .tabCloseApps)
             try c.encode(swipeDown.rawValue, forKey: .swipeDown)
+            try c.encode(swipeDownRight, forKey: .swipeDownRight)
+            try c.encode(swipeDownLeft, forKey: .swipeDownLeft)
         }
     }
 
-    /// What swiping down does: open a new window of the focused window's app
-    /// (the default; its "New Window" menu item, else ⌘N), minimize it, or
-    /// nothing.
-    public enum SwipeDownAction: String, Codable, Equatable, Sendable, CaseIterable { case minimize, newWindow, none }
+    /// Actions shared by the three downward gestures. New window uses the
+    /// app's New Window menu item, falling back to ⌘N.
+    public enum SwipeDownAction: String, Codable, Equatable, Sendable, CaseIterable { case closeTab, minimize, newWindow, none }
 
     /// Where focus goes when the focused tiled window closes: the column to
     /// the `left` (else right), to the `right` (else left), or wherever macOS
@@ -224,7 +232,9 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         "invert": false,
         "swipeUpToClose": true,
         "tabCloseApps": [],
-        "swipeDown": "newWindow"
+        "swipeDown": "closeTab",
+        "swipeDownRight": "newWindow",
+        "swipeDownLeft": "minimize"
       },
       "hotkeys": {
         "alt-cmd-j": "focus left",

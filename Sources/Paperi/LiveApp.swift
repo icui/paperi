@@ -491,7 +491,7 @@ import PaperiPlatform
     private func gestureRows(_ menu: NSMenu, _ gesture: LiveConfig.GestureConfig) {
         let defaults = LiveConfig.GestureConfig()
         func origin(_ isDefault: Bool) -> String { isDefault ? "  (default)" : "" }
-        let down = ["minimize": "minimize", "newWindow": "new window", "none": "off"][gesture.swipeDown.rawValue] ?? ""
+        let down = ["closeTab": "close tab", "minimize": "minimize", "newWindow": "new window", "none": "off"][gesture.swipeDown.rawValue] ?? ""
         let summary = gesture.enabled
             ? "\(gesture.fingers) fingers" + (gesture.invert ? ", inverted" : "")
               + " · up: \(gesture.swipeUpToClose ? "close" : "off") · down: \(down)"
@@ -520,7 +520,14 @@ import PaperiPlatform
               tip: "\"gesture.tabCloseApps\": bundle IDs whose swipe up closes the current tab with ⌘W")
         value(sub, "Swipe down: \(down) (\(gesture.swipeDown.rawValue))\(origin(gesture.swipeDown == defaults.swipeDown))",
               copy: gesture.swipeDown.rawValue,
-              tip: "\"gesture.swipeDown\": newWindow (the app's New Window menu item, else ⌘N), minimize, or none")
+              tip: "\"gesture.swipeDown\": closeTab, newWindow (the app's New Window menu item, else ⌘N), minimize, or none")
+        for (label, key, action, defaultAction) in [
+            ("Swipe down-right", "swipeDownRight", gesture.swipeDownRight, defaults.swipeDownRight),
+            ("Swipe down-left", "swipeDownLeft", gesture.swipeDownLeft, defaults.swipeDownLeft)
+        ] {
+            value(sub, "\(label): \(action.rawValue)\(origin(action == defaultAction))",
+                  copy: action.rawValue, tip: "gesture.\(key): closeTab, newWindow, minimize, or none")
+        }
         item.submenu = sub
     }
 

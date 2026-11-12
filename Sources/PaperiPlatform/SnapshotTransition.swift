@@ -108,6 +108,45 @@ import PaperiCore
         captureMS = (ProcessInfo.processInfo.systemUptime - began) * 1000
     }
 
+    /// A live hint for popups and the desktop, without capturing a tiled strip.
+    func prepareStandaloneIndicator() {
+        let point = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main else { return }
+        self.screen = screen
+        screenFrame = screen.frame
+        mainHeight = Double(NSScreen.screens.first?.frame.height ?? 0)
+        let root = CALayer()
+        root.frame = CGRect(origin: .zero, size: screen.frame.size)
+        root.actions = Self.noActions
+        self.root = root
+        let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let rows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let frame = rows.first(where: {
+            ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid
+                && ($0[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) }?.contains(
+                    CGPoint(x: point.x, y: mainHeight - point.y)) == true
+        }).flatMap { ($0[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) } }
+        let anchor = frame ?? CGRect(x: screen.visibleFrame.minX, y: mainHeight - screen.visibleFrame.maxY,
+                                     width: screen.visibleFrame.width, height: screen.visibleFrame.height)
+        captured[0] = Rect(x: anchor.minX, y: anchor.minY, width: anchor.width, height: anchor.height)
+        layers[0] = CALayer()
+        let overlay = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        overlay.isReleasedWhenClosed = false
+        overlay.isOpaque = false
+        overlay.backgroundColor = .clear
+        overlay.hasShadow = false
+        overlay.ignoresMouseEvents = true
+        overlay.level = .popUpMenu
+        overlay.animationBehavior = .none
+        overlay.collectionBehavior = [.transient, .ignoresCycle]
+        let view = NSView(frame: root.frame)
+        view.wantsLayer = true
+        view.layer = root
+        overlay.contentView = view
+        window = overlay
+        show()
+    }
+
     private func capture(_ filter: SCContentFilter, scale: Double) async throws -> CGImage {
         let config = SCStreamConfiguration()
         config.width = max(1, Int(filter.contentRect.width * scale))
@@ -421,8 +460,10 @@ struct GestureIndicatorStyle {
     let armedColor: CGColor
     /// The way the pill moves into place with the fingers, in layer space
     /// (y up): (0, 1) rises, (0, -1) comes down, (1, 0) slides right.
-    let direction: CGVector
+    var direction: CGVector
 
+    static let minimize = GestureIndicatorStyle(label: "Minimize", armedLabel: "Release to Minimize",
+        plus: false, armedColor: NSColor.systemBlue.cgColor, direction: CGVector(dx: -1, dy: 0))
     static let closeTab = GestureIndicatorStyle(label: "Close Tab", armedLabel: "Release to Close",
                                                 plus: false, armedColor: NSColor.systemRed.withAlphaComponent(0.95).cgColor,
                                                 direction: CGVector(dx: 0, dy: 1))
