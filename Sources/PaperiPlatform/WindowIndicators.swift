@@ -22,6 +22,50 @@ import ScreenCaptureKit
     /// Displays whose thumbnail tray was summoned to a point (AppKit screen
     /// coordinates). The tray stays there until it fades out.
     private var anchors: [String: CGPoint] = [:]
+    /// Mouse-down monitors that dismiss the thumbnail tray on outside clicks.
+    private var clickMonitors: [Any] = []
+    /// When an outside click last dismissed the tray.
+    private var clickDismissedAt = -Double.infinity
+    /// After an outside click dismisses the tray, layout changes in this
+    /// window (seconds) do not bring it back: the click itself usually
+    /// focuses another window, and that must not re-reveal the tray.
+    static let clickDismissalHold = 1.0
+
+    private func installClickMonitors() {
+        guard clickMonitors.isEmpty else { return }
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        // Clicks in other apps. Global monitors run on the main thread.
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.dismissOnClick(at: NSEvent.mouseLocation) }
+        }) { clickMonitors.append(monitor) }
+        // Clicks in Paperi's own windows other than the tray (e.g. its menu).
+        if let monitor = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            MainActor.assumeIsolated {
+                guard let self, !self.panels.values.contains(where: { $0 === event.window }) else { return }
+                self.dismissOnClick(at: NSEvent.mouseLocation)
+            }
+            return event
+        }) { clickMonitors.append(monitor) }
+    }
+
+    private func removeClickMonitors() {
+        clickMonitors.forEach(NSEvent.removeMonitor)
+        clickMonitors.removeAll()
+    }
+
+    /// Hides visible thumbnail trays at once when a click lands outside them.
+    /// Presentations are kept, so the once-a-second refresh does not revive them.
+    private func dismissOnClick(at point: CGPoint) {
+        guard horizontalSwipeSpace == nil else { return }
+        for (id, panel) in panels where panel.isVisible && presentations[id]?.mode == .thumbnail {
+            guard !panel.frame.contains(point),
+                  (panel.contentView?.subviews.first as? WindowPreviews)?.isDragging != true else { continue }
+            tasks.removeValue(forKey: id)?.cancel()
+            anchors[id] = nil
+            panel.orderOut(nil)
+            clickDismissedAt = ProcessInfo.processInfo.systemUptime
+        }
+    }
 
     /// Shows the thumbnail tray of `displayUUID`'s current Space centred on
     /// `point`. Returns false when that display has no tray to show.
@@ -54,6 +98,7 @@ import ScreenCaptureKit
     func hide() {
         horizontalSwipeSpace = nil
         anchors.removeAll()
+        removeClickMonitors()
         for task in tasks.values { task.cancel() }
         tasks.removeAll()
         presentations.removeAll()
@@ -78,6 +123,11 @@ import ScreenCaptureKit
             // Refresh polls unchanged layouts once a second. They must not revive
             // the thumbnail strip or restart its dismissal deadline.
             guard presentations[id] != presentation || space == revealSpace else { continue }
+            if mode == .thumbnail, space != revealSpace, presentations[id]?.mode == .thumbnail,
+               ProcessInfo.processInfo.systemUptime - clickDismissedAt < Self.clickDismissalHold {
+                presentations[id] = presentation
+                continue
+            }
             presentations[id] = presentation
             tasks[id]?.cancel()
             let panel = panels[id] ?? makePanel()
@@ -101,6 +151,7 @@ import ScreenCaptureKit
             let cachedImages = (glass.subviews.first as? WindowPreviews)?.images ?? [:]
             glass.subviews.forEach { $0.removeFromSuperview() }
             if thumbnail {
+                installClickMonitors()
                 let previews = WindowPreviews(frame: NSRect(origin: .zero, size: frame.size))
                 previews.ids = slots.map(\.activeMember)
                 previews.onSelect = { [weak self] window in self?.onSelect?(window, space) }

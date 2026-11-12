@@ -47,7 +47,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 | `gap`, `outerGap` | Space between windows and around the layout, in points. |
 | `focusAfterClose` | `left` (default), `right`, or `system`. A surviving tab or stacked window keeps the column focused. |
 | `focusScrollDuration` | Focus animation in seconds, default `0.22`; `0` disables it. |
-| `bottom` | `none`, `dot`, or `thumbnail` (default). Dots stay visible; actual window thumbnails appear for two seconds after layout changes, including focus, window creation/removal, and rearrangement. Click a thumbnail to focus and reveal that window. Hovering anywhere in the strip keeps it visible; leaving restarts the two-second dismissal delay. Thumbnails also appear immediately when a horizontal swipe activates and stay visible through the gesture. Both hide with one window. Thumbnails require Screen Recording permission. Choose from **Show Config → Bottom** or edit this key. |
+| `bottom` | `none`, `dot`, or `thumbnail` (default). Dots stay visible; actual window thumbnails appear for two seconds after layout changes, including focus, window creation/removal, and rearrangement. Click a thumbnail to focus and reveal that window. Hovering anywhere in the strip keeps it visible; leaving restarts the two-second dismissal delay. Clicking anywhere outside the strip hides it at once, and the focus change that click causes does not bring it back. Thumbnails also appear immediately when a horizontal swipe activates and stay visible through the gesture. Both hide with one window. Thumbnails require Screen Recording permission. Choose from **Show Config → Bottom** or edit this key. |
 | `swapHighlight` | Drag preview color as `#RRGGBB` or `#RRGGBBAA`. |
 
 ## Gestures
@@ -92,7 +92,8 @@ it has no tabs remaining.
 
 A quick tap with all gesture fingers (`tap`, default `tray`) shows the thumbnail
 tray centred on the pointer, on the display under it; click a thumbnail to focus that
-window. The tray stays while hovered and fades two seconds after the pointer leaves;
+window. The tray stays while hovered, fades two seconds after the pointer leaves, and
+hides at once on a click outside it;
 later reveals return to the bottom edge. It needs `bottom` set to `thumbnail`. Only a
 deliberate tap counts: fingers landing and lifting within 100 ms of each other, down
 for at most 250 ms, each moving at most 2.5 mm, without a physical click, a fourth
