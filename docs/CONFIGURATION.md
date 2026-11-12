@@ -11,7 +11,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
   "exclude": ["us.zoom.xos"],
   "float": [{"app": "com.apple.finder", "titleContains": "Copy"}],
   "tile": [{"app": "com.apple.systempreferences"}],
-  "focusAfterClose": "system",
+  "focusAfterClose": "left",
   "focusScrollDuration": 0.22,
   "gesture": {
     "enabled": true,
@@ -43,7 +43,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 | `tile` | Allow matching windows without a fullscreen button to tile. Dialogs and panels still stay outside the strip. |
 | `singleton` | Array of app bundle IDs whose in-content tab bars should be treated as a plain window. |
 | `gap`, `outerGap` | Space between windows and around the layout, in points. |
-| `focusAfterClose` | `left`, `right`, or `system` (default). A surviving tab or stacked window keeps the column focused. |
+| `focusAfterClose` | `left` (default), `right`, or `system`. A surviving tab or stacked window keeps the column focused. |
 | `focusScrollDuration` | Focus animation in seconds, default `0.22`; `0` disables it. |
 | `swapHighlight` | Drag preview color as `#RRGGBB` or `#RRGGBBAA`. |
 

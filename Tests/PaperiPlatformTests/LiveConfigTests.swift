@@ -57,8 +57,8 @@ struct LiveConfigTests {
     }
 
     @Test func focusAfterClose() throws {
-        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).focusAfterClose == .system)
-        #expect(LiveConfig().focusAfterClose == .system)
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).focusAfterClose == .left)
+        #expect(LiveConfig().focusAfterClose == .left)
         for value in LiveConfig.FocusAfterClose.allCases {
             let config = try JSONDecoder().decode(LiveConfig.self, from: Data("{\"focusAfterClose\":\"\(value.rawValue)\"}".utf8))
             #expect(config.focusAfterClose == value)

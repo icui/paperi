@@ -142,7 +142,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         self.include = include; self.exclude = exclude; self.singleton = singleton
         self.float = float; self.tile = tile; self.gap = gap; self.outerGap = outerGap
         self.hotkeys = [:]
-        self.focusAfterClose = .system
+        self.focusAfterClose = .left
         self.gesture = gesture ?? GestureConfig()
     }
 
@@ -168,7 +168,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             }
             focusAfterClose = value
         } else {
-            focusAfterClose = .system
+            focusAfterClose = .left
         }
         gap = try c.decodeIfPresent(Double.self, forKey: .gap)
         outerGap = try c.decodeIfPresent(Double.self, forKey: .outerGap)
@@ -219,7 +219,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "tile": [],
       "singleton": [],
       "focusScrollDuration": 0.22,
-      "focusAfterClose": "system",
+      "focusAfterClose": "left",
       "gap": 8,
       "outerGap": 8,
       "swapHighlight": "#0A84FF4D",

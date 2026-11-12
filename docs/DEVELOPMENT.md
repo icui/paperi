@@ -162,8 +162,8 @@ Focus scrolling uses `focusScrollDuration` in config.json (seconds, default
 `0.22`; set `0` for immediate placement). Keyboard focus scrolling is
 animated, plus columns closing the gap left by a closed window. When the
 focused window closes with its column, `focusAfterClose` picks the next
-focus: `"left"` (the column to the left, else the right), `"right"`
-(the reverse), or `"system"` (default; whatever macOS focuses). A surviving tab or
+focus: `"left"` (default; the column to the left, else the right), `"right"`
+(the reverse), or `"system"` (whatever macOS focuses). A surviving tab or
 stacked window keeps the column focused instead. New commands retarget the
 in-flight positions; mouse input and Space/display/lifecycle changes cancel
 the scheduler.

@@ -1697,7 +1697,8 @@ import PaperiCore
     /// Committed swipe up: the image leaves through the top while the app
     /// closes the window underneath. The overlay goes once the window has
     /// gone, so the survivors' gap animation plays on the real windows. A
-    /// window that stays (an unsaved-changes prompt) is revealed again.
+    /// window that stays (an unsaved-changes prompt) is revealed by fading
+    /// the overlay, without bringing its old snapshot back on screen.
     private func finishClose(_ state: Swipe, settle: Double) {
         guard let wid = state.closeWindow else { return }
         if state.pulling && state.pullAction == .none { cancelSwipe(); return }
@@ -1729,12 +1730,10 @@ import PaperiCore
                 }
             }
             guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
-            if !gone {
-                overlay.slide(to: path.starts, duration: 0.18)
-                overlay.fade(wid, to: 1, duration: 0.18)
-                try? await Task.sleep(for: .milliseconds(190))
-            }
-            guard self.swipe?.generation == generation, !Task.isCancelled else { return }
+            // A timeout is not a refusal: the app may still be closing, or
+            // WindowServer may still report its closing animation. Returning
+            // the snapshot here can resurrect a successfully closed window.
+            // Reveal any surviving window or save prompt under the overlay.
             overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
             self.swipeMetrics["state"] = gone ? "closed" : (pressed ? "closeRefused" : "noCloseButton")
             self.swipeMetrics["closeMS"] = (ProcessInfo.processInfo.systemUptime - released) * 1000
