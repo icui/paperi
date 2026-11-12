@@ -95,6 +95,9 @@ import PaperiCore
     public init(options: Options) {
         self.options = options
         coordinator = DisplaySpaceCoordinator(ownerPIDs: [], displays: [])
+        windowIndicators.onSelect = { [weak self] window, space in
+            self?.focusThumbnail(window, in: space)
+        }
     }
 
     // MARK: lifecycle
@@ -2279,6 +2282,23 @@ import PaperiCore
         let wid = paperi_window_id(focusedElement)
         guard let space = coordinator.spaceForWindow[wid], let session = coordinator.sessions[space] else { return nil }
         return (session, space, pid, wid)
+    }
+
+    private func focusThumbnail(_ wid: UInt32, in space: UInt64) {
+        guard running, !paused, DisplayArrangement.currentProblem() == nil,
+              coordinator.spaceForWindow[wid] == space,
+              coordinator.display(forSpace: space)?.activeSpaceID == space,
+              let session = coordinator.sessions[space], !session.state.interactionSuppressed,
+              isActiveRepresentative(wid), let pid = pidForWindow[wid] else { return }
+        cancelMotion(); motionFrames.removeAll()
+        commandStarted = ProcessInfo.processInfo.systemUptime
+        firstWriteMS = nil; finalWriteMS = nil; confirmedMS = nil
+        try? session.focus(windowID: wid, ownerPID: pid, classification: Self.tiled, ticket: session.ticket)
+        reveal(session)
+        animateFocus(space: space, byID: latestSurvey)
+        _ = raise(wid)
+        windowIndicators.update(coordinator, mode: options.config.bottom, revealSpace: space)
+        scheduleRefresh()
     }
 
     private func raise(_ wid: UInt32) -> Bool {

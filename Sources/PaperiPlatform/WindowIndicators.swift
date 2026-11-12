@@ -2,7 +2,7 @@ import AppKit
 import PaperiCore
 import ScreenCaptureKit
 
-/// Passive bottom UI, above gesture overlays, without intercepting clicks or focus.
+/// Bottom UI above gesture overlays. Thumbnail clicks never activate the panel.
 @MainActor final class WindowIndicators {
     private struct Presentation: Equatable {
         let space: UInt64
@@ -10,6 +10,7 @@ import ScreenCaptureKit
         let canvas: Rect
         let mode: LiveConfig.Bottom
     }
+    var onSelect: ((UInt32, UInt64) -> Void)?
     private var panels: [String: NSPanel] = [:]
     private var presentations: [String: Presentation] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
@@ -59,6 +60,7 @@ import ScreenCaptureKit
             let panel = panels[id] ?? makePanel()
             panels[id] = panel
             let thumbnail = mode == .thumbnail
+            panel.ignoresMouseEvents = !thumbnail
             let width = min(CGFloat(slots.count) * (thumbnail ? 116 : 14) + 20,
                             max(28, display.canvas.width - 32))
             let frame = NSRect(x: display.canvas.x + (display.canvas.width - width) / 2,
@@ -71,6 +73,7 @@ import ScreenCaptureKit
             if thumbnail {
                 let previews = WindowPreviews(frame: NSRect(origin: .zero, size: frame.size))
                 previews.ids = slots.map(\.activeMember)
+                previews.onSelect = { [weak self] window in self?.onSelect?(window, space) }
                 previews.images = cachedImages.filter { previews.ids.contains($0.key) }
                 previews.selected = slots.firstIndex { $0.id == layout.focused }
                 glass.addSubview(previews)
@@ -164,6 +167,27 @@ import ScreenCaptureKit
     var ids: [UInt32] = []
     var selected: Int?
     var images: [UInt32: NSImage] = [:]
+    var onSelect: ((UInt32) -> Void)?
+    private var pressedWindow: UInt32?
+
+    private func window(at point: NSPoint) -> UInt32? {
+        guard !ids.isEmpty else { return nil }
+        let width = (bounds.width - 20) / CGFloat(ids.count)
+        return ids.enumerated().first { index, _ in
+            NSRect(x: 10 + CGFloat(index) * width + 3, y: 10,
+                   width: max(1, width - 6), height: bounds.height - 20).contains(point)
+        }?.element
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        pressedWindow = window(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer { pressedWindow = nil }
+        guard let id = pressedWindow, window(at: convert(event.locationInWindow, from: nil)) == id else { return }
+        onSelect?(id)
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard !ids.isEmpty else { return }
