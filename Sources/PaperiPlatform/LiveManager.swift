@@ -1383,24 +1383,35 @@ import PaperiCore
         scheduleRefresh()
     }
 
-    /// Launching an app normally creates its initial window. For an already
-    /// running app, request a new window after activation completes.
+    /// Always opens a new window of the configured app. Launching an app
+    /// creates its initial window. A running app is never reopened through
+    /// `NSWorkspace`: that sends a reopen event, which apps answer by
+    /// restoring a minimized window instead. It is activated directly and
+    /// asked for a new window (menu item, else ⌘N once it is frontmost).
     @discardableResult private func openConfiguredApp() -> Bool {
-        guard let bundleID = options.config.gesture.swipeDownApp,
-              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return false }
-        let wasRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
+        guard let bundleID = options.config.gesture.swipeDownApp else { return false }
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .first(where: { !$0.isTerminated }) {
+            let pid = app.processIdentifier
+            let pressed = Self.newWindowMenuItem(pid: pid)
+                .map { AXUIElementPerformAction($0, kAXPressAction as CFString) == .success } ?? false
+            app.activate(options: [])
+            if !pressed {
+                Task { @MainActor in
+                    // ⌘N needs keyboard focus; wait briefly for activation.
+                    for _ in 0..<20 where NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
+                        try? await Task.sleep(for: .milliseconds(25))
+                    }
+                    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
+                    Self.postAppCommand(Self.keyN, pid: pid)
+                }
+            }
+            return true
+        }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return false }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { app, error in
-            Task { @MainActor in
-                guard error == nil, let app, wasRunning else { return }
-                let pid = app.processIdentifier
-                if let item = Self.newWindowMenuItem(pid: pid),
-                   AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { return }
-                guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
-                Self.postAppCommand(Self.keyN, pid: pid)
-            }
-        }
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in }
         return true
     }
 
