@@ -10,7 +10,7 @@ import PaperiBridge
 /// stays claimed until every finger has lifted, so lifting fingers one at a
 /// time does not leak a two-finger scroll at the end of a swipe.
 ///
-/// A sequence that ever has more than `fingers` contacts belongs to the
+/// Before swipe motion is established, more than `fingers` contacts belongs to the
 /// system (four-finger Spaces/Mission Control swipes, four- and five-finger
 /// pinches, delivered to the Dock as these same gesture events). It is
 /// released at once and left alone until every finger lifts. Fingers land a
@@ -49,6 +49,7 @@ struct AppGestureFilter: Equatable {
 
     let fingers: Int
     private(set) var claimed = false
+    var swipeEstablished = false
     /// More fingers than the swipe uses were down in this sequence.
     private(set) var systemSequence = false
     /// Momentum from a scroll that was cut off by a claimed sequence.
@@ -67,7 +68,7 @@ struct AppGestureFilter: Equatable {
             if down == 0 {
                 claimed = false
                 systemSequence = false
-            } else if down > fingers {
+            } else if down > fingers, !swipeEstablished {
                 claimed = false
                 systemSequence = true
             } else if down == fingers, !claimed, !systemSequence {
@@ -130,6 +131,7 @@ final class AppGestureBlocker: @unchecked Sendable {
     private let verbose: Bool
     private let lock = NSLock()
     // Accessed only on the tap thread once started.
+    private var establishedSwipe = false
     private var filter: AppGestureFilter
     private var machPort: CFMachPort?
     private var runLoop: CFRunLoop?
@@ -150,6 +152,12 @@ final class AppGestureBlocker: @unchecked Sendable {
         self.fingers = fingers
         self.verbose = verbose
         self.filter = AppGestureFilter(fingers: fingers)
+    }
+
+    func setSwipeEstablished(_ established: Bool) {
+        lock.lock()
+        establishedSwipe = established
+        lock.unlock()
     }
 
     func start() {
@@ -247,6 +255,9 @@ final class AppGestureBlocker: @unchecked Sendable {
         } else {
             return Unmanaged.passUnretained(event)
         }
+        lock.lock()
+        filter.swipeEstablished = establishedSwipe
+        lock.unlock()
         let wasClaimed = filter.claimed
         _ = filter.shouldDrop(.fingers(down: Int(paperi_mt_fingers_down())))
         let drop = filter.shouldDrop(input)

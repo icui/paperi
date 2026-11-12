@@ -24,6 +24,12 @@ public final class EventTapTouchSource: TouchSource {
     private var runLoopSource: CFRunLoopSource?
     private var activeTouches: [AnyHashable: CGPoint] = [:]
     private var tracking = false
+    private var swipeTravel = 0.0
+    private var ignoredContacts: Set<AnyHashable> = []
+    private var establishedSwipe = false
+    static let fingerUpGrace = 0.060
+    private var pendingReleaseTime: Double?
+    private var releaseTask: Task<Void, Never>?
     private var appGestureBlocker: AppGestureBlocker?
     private static var activeInstance: EventTapTouchSource?
 
@@ -93,6 +99,8 @@ public final class EventTapTouchSource: TouchSource {
             CFMachPortInvalidate(port)
             self.machPort = nil
         }
+        clearPendingRelease()
+        resetSwipeOwnership()
         if tracking {
             tracking = false
             activeTouches.removeAll()
@@ -103,74 +111,120 @@ public final class EventTapTouchSource: TouchSource {
         }
     }
 
-    static func termination(phases: [NSTouch.Phase], fingers: Int, at time: Double) -> TouchEvent? {
-        // Gesture events without contacts can be interleaved with touch frames.
-        // They do not mean the tracked fingers lifted.
-        if phases.isEmpty { return nil }
-        if phases.contains(.cancelled) { return .cancel }
-        // An extra finger makes this a system gesture (e.g. a four-finger
-        // Spaces swipe passing through three contacts): drop the swipe
-        // without a release decision.
-        if phases.count > fingers { return .cancel }
-        if phases.count != fingers || phases.contains(.ended) { return .end(time: time) }
-        return nil
+    struct Contact {
+        let id: AnyHashable
+        let position: CGPoint
+        let phase: NSTouch.Phase
+    }
+
+    private func clearPendingRelease() {
+        releaseTask?.cancel()
+        releaseTask = nil
+        pendingReleaseTime = nil
+    }
+
+    // Keep the original lift time for release velocity, rather than the timer's
+    // delayed delivery time. No further touch frames are required to finish.
+    func finishPendingRelease(at timestamp: Double) {
+        guard let liftedAt = pendingReleaseTime,
+              timestamp >= liftedAt + Self.fingerUpGrace else { return }
+        finish(.end(time: liftedAt))
+    }
+
+    private func resetSwipeOwnership() {
+        establishedSwipe = false
+        swipeTravel = 0
+        ignoredContacts.removeAll()
+        appGestureBlocker?.setSwipeEstablished(false)
+    }
+
+    private func finish(_ event: TouchEvent) {
+        resetSwipeOwnership()
+        clearPendingRelease()
+        tracking = false
+        activeTouches.removeAll()
+        onEvent?(event)
     }
 
     func processTouches(_ touches: Set<NSTouch>, at timestamp: Double) {
+        processContacts(touches.map {
+            Contact(id: touchID($0.identity), position: $0.normalizedPosition, phase: $0.phase)
+        }, at: timestamp)
+    }
+
+    func processContacts(_ contacts: [Contact], at timestamp: Double) {
+        // Empty generic gesture frames are not evidence of a lift.
+        guard !contacts.isEmpty else { return }
+        // Once motion establishes a swipe, newly appearing contacts are not
+        // participants. Remember them through lifts so their cancellation or
+        // continued presence cannot affect the original fingers' release.
+        if tracking, establishedSwipe {
+            for contact in contacts where activeTouches[contact.id] == nil && pendingReleaseTime == nil {
+                ignoredContacts.insert(contact.id)
+            }
+        }
+        let participants = contacts.filter { !ignoredContacts.contains($0.id) }
+        let down = participants.filter { $0.phase != .ended && $0.phase != .cancelled }
         if tracking {
-            if let termination = Self.termination(phases: touches.map(\.phase), fingers: fingers, at: timestamp) {
-                tracking = false
-                activeTouches.removeAll()
-                if verbose { FileHandle.standardError.write(Data("[paperi] touch gesture ended (touches=\(touches.count), termination=\(termination))\n".utf8)) }
-                onEvent?(termination)
+            if participants.contains(where: { $0.phase == .cancelled }) || down.count > fingers {
+                finish(.cancel)
+                return
+            }
+            if let liftedAt = pendingReleaseTime,
+               timestamp >= liftedAt + Self.fingerUpGrace {
+                finishPendingRelease(at: timestamp)
+                return
+            }
+            if down.count < fingers {
+                if pendingReleaseTime == nil {
+                    pendingReleaseTime = timestamp
+                    releaseTask = Task { @MainActor [weak self] in
+                        do { try await Task.sleep(for: .milliseconds(60)) }
+                        catch { return }
+                        self?.finishPendingRelease(at: timestamp + Self.fingerUpGrace)
+                    }
+                }
+                return
+            }
+            if pendingReleaseTime != nil {
+                // Contacts may return with new identities and positions. Resume
+                // from this frame without counting the missing interval as motion.
+                clearPendingRelease()
+                activeTouches = Dictionary(uniqueKeysWithValues: down.map { ($0.id, $0.position) })
+                if verbose { FileHandle.standardError.write(Data("[paperi] recovered brief finger dropout\n".utf8)) }
                 return
             }
 
-            var allMatch = true
+            guard down.allSatisfy({ activeTouches[$0.id] != nil }) else {
+                finish(.cancel)
+                return
+            }
             var totalDx = 0.0
             var totalDy = 0.0
             var anyMoved = false
-
-            for touch in touches {
-                let id = touchID(touch.identity)
-                guard let prev = activeTouches[id] else {
-                    allMatch = false
-                    break
-                }
-                let pos = touch.normalizedPosition
-                let dx = pos.x - prev.x
-                let dy = pos.y - prev.y
+            for contact in down {
+                let previous = activeTouches[contact.id]!
+                let dx = contact.position.x - previous.x
+                let dy = contact.position.y - previous.y
                 totalDx += dx
                 totalDy += dy
-                if touch.phase == .moved || abs(dx) > 1e-5 || abs(dy) > 1e-5 {
-                    anyMoved = true
-                }
-                activeTouches[id] = pos
+                if contact.phase == .moved || abs(dx) > 1e-5 || abs(dy) > 1e-5 { anyMoved = true }
+                activeTouches[contact.id] = contact.position
             }
-
-            if !allMatch {
-                tracking = false
-                activeTouches.removeAll()
-                onEvent?(.cancel)
-                return
-            }
-
             if anyMoved {
-                let count = Double(touches.count)
-                let avgDx = totalDx / count
-                let avgDy = totalDy / count
-                onEvent?(.move(dx: avgDx, dy: avgDy, time: timestamp))
-            }
-        } else {
-            if touches.count == fingers && touches.allSatisfy({ $0.phase != .ended && $0.phase != .cancelled }) {
-                activeTouches.removeAll()
-                for touch in touches {
-                    activeTouches[touchID(touch.identity)] = touch.normalizedPosition
+                swipeTravel += hypot(totalDx / Double(down.count), totalDy / Double(down.count))
+                if !establishedSwipe, swipeTravel >= 0.01 {
+                    establishedSwipe = true
+                    appGestureBlocker?.setSwipeEstablished(true)
                 }
-                tracking = true
-                if verbose { FileHandle.standardError.write(Data("[paperi] touch gesture began with \(fingers) fingers\n".utf8)) }
-                onEvent?(.begin(time: timestamp))
+                onEvent?(.move(dx: totalDx / Double(down.count), dy: totalDy / Double(down.count), time: timestamp))
             }
+        } else if down.count == fingers && down.count == contacts.count {
+            resetSwipeOwnership()
+            activeTouches = Dictionary(uniqueKeysWithValues: down.map { ($0.id, $0.position) })
+            tracking = true
+            if verbose { FileHandle.standardError.write(Data("[paperi] touch gesture began with \(fingers) fingers\n".utf8)) }
+            onEvent?(.begin(time: timestamp))
         }
     }
 }

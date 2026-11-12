@@ -4,24 +4,91 @@ import Testing
 
 @MainActor
 struct TouchSourceTests {
-    @Test func extraFingerCancelsInsteadOfReleasing() {
-        #expect(EventTapTouchSource.termination(phases: [.moved, .moved, .moved, .began], fingers: 3, at: 1) == .cancel)
+    private func contacts(_ ids: [Int], x: Double = 0, phase: NSTouch.Phase = .moved) -> [EventTapTouchSource.Contact] {
+        ids.map { .init(id: AnyHashable($0), position: CGPoint(x: x, y: 0), phase: phase) }
     }
 
-    @Test func cancellationTakesPriorityOverRelease() {
-        #expect(EventTapTouchSource.termination(phases: [.cancelled, .ended, .stationary], fingers: 3, at: 1) == .cancel)
-        #expect(EventTapTouchSource.termination(phases: [.cancelled], fingers: 3, at: 1) == .cancel)
+    @Test func briefDropoutResumesWithNewIdentitiesWithoutJump() {
+        let source = EventTapTouchSource()
+        var events: [TouchEvent] = []
+        source.onEvent = { events.append($0) }
+        source.processContacts(contacts([1, 2, 3]), at: 1)
+        source.processContacts(contacts([1]), at: 1.01)
+        source.processContacts(contacts([1, 4, 5], x: 0.5), at: 1.04)
+        #expect(events == [.begin(time: 1)])
+        source.processContacts(contacts([1, 4, 5], x: 0.75), at: 1.05)
+        #expect(events.last == .move(dx: 0.25, dy: 0, time: 1.05))
+        source.stop()
     }
 
-    @Test func emptyGestureEventsDoNotReleaseFingers() {
-        #expect(EventTapTouchSource.termination(phases: [], fingers: 3, at: 1) == nil)
+    @Test func addedPalmDoesNotMoveCancelOrHoldOpenEstablishedSwipe() {
+        let source = EventTapTouchSource()
+        var events: [TouchEvent] = []
+        source.onEvent = { events.append($0) }
+        source.processContacts(contacts([1, 2, 3]), at: 1)
+        source.processContacts(contacts([1, 2, 3], x: 0.1), at: 1.01)
+        source.processContacts(contacts([1, 2, 3], x: 0.2) + contacts([4], x: 0.9, phase: .began), at: 1.02)
+        #expect(events.count == 3)
+        if case .move(let dx, _, _) = events.last { #expect(abs(dx - 0.1) < 0.000001) }
+        else { Issue.record("Expected movement from original fingers") }
+        source.processContacts(contacts([1, 2, 3], x: 0.3) + contacts([4], phase: .cancelled), at: 1.03)
+        #expect(events.count == 4)
+        source.processContacts(contacts([1, 2, 3], phase: .ended) + contacts([4]), at: 1.04)
+        source.finishPendingRelease(at: 1.11)
+        #expect(events.last == .end(time: 1.04))
+        source.stop()
     }
 
-    @Test func ordinaryReleaseEndsAndMovementContinues() {
-        #expect(EventTapTouchSource.termination(phases: [.ended, .stationary, .stationary], fingers: 3, at: 1) == .end(time: 1))
-        #expect(EventTapTouchSource.termination(phases: [.stationary, .stationary], fingers: 3, at: 1) == .end(time: 1))
-        #expect(EventTapTouchSource.termination(phases: [.moved, .stationary, .stationary], fingers: 3, at: 1) == nil)
+    @Test func sustainedLossEndsAtOriginalLiftTime() {
+        let source = EventTapTouchSource()
+        var events: [TouchEvent] = []
+        source.onEvent = { events.append($0) }
+        source.processContacts(contacts([1, 2, 3]), at: 1)
+        source.processContacts(contacts([1, 2]), at: 1.01)
+        source.processContacts(contacts([1]), at: 1.04)
+        source.finishPendingRelease(at: 1.08)
+        #expect(events == [.begin(time: 1), .end(time: 1.01)])
+        source.stop()
     }
+
+    @Test func fullLiftFinishesWithoutFurtherFrames() async throws {
+        let source = EventTapTouchSource()
+        var events: [TouchEvent] = []
+        source.onEvent = { events.append($0) }
+        source.processContacts(contacts([1, 2, 3]), at: 1)
+        source.processContacts(contacts([1, 2, 3], phase: .ended), at: 1.01)
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(events == [.begin(time: 1), .end(time: 1.01)])
+        source.stop()
+    }
+
+    @Test func cancellationAndExtraFingersCancelImmediately() {
+        for frame in [contacts([1], phase: .cancelled), contacts([1, 2, 3, 4])] {
+            let source = EventTapTouchSource()
+            var events: [TouchEvent] = []
+            source.onEvent = { events.append($0) }
+            source.processContacts(contacts([1, 2, 3]), at: 1)
+            source.processContacts(contacts([1, 2]), at: 1.01)
+            source.processContacts(frame, at: 1.02)
+            source.finishPendingRelease(at: 2)
+            #expect(events == [.begin(time: 1), .cancel])
+            source.stop()
+        }
+    }
+
+    @Test func emptyFramesDoNotReleaseAndStopCancelsTimer() {
+        let source = EventTapTouchSource()
+        var events: [TouchEvent] = []
+        source.onEvent = { events.append($0) }
+        source.processContacts(contacts([1, 2, 3]), at: 1)
+        source.processContacts([], at: 1.01)
+        #expect(events == [.begin(time: 1)])
+        source.processContacts(contacts([1]), at: 1.02)
+        source.stop()
+        source.finishPendingRelease(at: 2)
+        #expect(events == [.begin(time: 1), .cancel])
+    }
+
 }
 
 struct AppGestureFilterTests {
@@ -118,6 +185,18 @@ struct AppGestureFilterTests {
         // The next three-finger swipe is claimed again.
         _ = drop(&f, .fingers(down: 3))
         #expect(drop(&f, .touchFrame))
+    }
+
+    @Test func establishedSwipeKeepsClaimWhenPalmAppears() {
+        var f = AppGestureFilter(fingers: 3)
+        _ = drop(&f, .fingers(down: 3))
+        f.swipeEstablished = true
+        _ = drop(&f, .fingers(down: 4))
+        #expect(f.claimed)
+        #expect(drop(&f, .touchFrame))
+        #expect(drop(&f, .scroll(phase: changed, momentum: 0, continuous: true)))
+        _ = drop(&f, .fingers(down: 0))
+        #expect(!f.claimed)
     }
 
     @Test func fiveFingerPinchPassesThrough() {
