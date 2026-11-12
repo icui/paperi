@@ -31,6 +31,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         /// swipe up closes the current tab with ⌘W instead of the window.
         public var tabCloseApps: [String]
         /// What swiping down does to the focused window.
+        public var swipeDownApp: String?
         public var swipeDown: SwipeDownAction
         public var swipeDownRight: SwipeDownAction
         public var swipeDownLeft: SwipeDownAction
@@ -38,7 +39,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.4,
                     commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false,
                     swipeUpToClose: Bool = true, tabCloseApps: [String] = [], swipeDown: SwipeDownAction = .newWindow,
-                    swipeDownRight: SwipeDownAction = .closeTab, swipeDownLeft: SwipeDownAction = .minimize) {
+                    swipeDownRight: SwipeDownAction = .closeTab, swipeDownLeft: SwipeDownAction = .minimize, swipeDownApp: String? = nil) {
             self.enabled = enabled
             self.fingers = fingers
             self.travel = travel
@@ -47,12 +48,14 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             self.invert = invert
             self.swipeUpToClose = swipeUpToClose
             self.tabCloseApps = tabCloseApps
+            self.swipeDownApp = swipeDownApp
             self.swipeDown = swipeDown
             self.swipeDownRight = swipeDownRight
             self.swipeDownLeft = swipeDownLeft
         }
 
         enum CodingKeys: String, CodingKey {
+            case swipeDownApp
             case enabled, fingers, travel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDown, swipeDownRight, swipeDownLeft
             /// Legacy boolean: `false` reads as `swipeDown: "none"`.
             case swipeDownToMinimize
@@ -62,6 +65,10 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             let d = GestureConfig()
+            swipeDownApp = try c.decodeIfPresent(String.self, forKey: .swipeDownApp)
+            if let app = swipeDownApp, app.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw DecodingError.dataCorruptedError(forKey: .swipeDownApp, in: c, debugDescription: "expected an app bundle ID")
+            }
             enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? d.enabled
             fingers = try c.decodeIfPresent(Int.self, forKey: .fingers) ?? d.fingers
             travel = try c.decodeIfPresent(Double.self, forKey: .travel) ?? d.travel
@@ -75,13 +82,16 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             if let raw = try c.decodeIfPresent(String.self, forKey: .swipeDown) {
                 guard let action = SwipeDownAction(rawValue: raw) else {
                     throw DecodingError.dataCorruptedError(forKey: .swipeDown, in: c,
-                        debugDescription: "expected closeTab, minimize, newWindow or none, got \(raw)")
+                        debugDescription: "expected closeTab, minimize, newWindow, openApp or none, got \(raw)")
                 }
                 swipeDown = action
             } else if try c.decodeIfPresent(Bool.self, forKey: .swipeDownToMinimize) == false {
                 swipeDown = .none
             } else {
                 swipeDown = d.swipeDown
+            }
+            if [swipeDown, swipeDownRight, swipeDownLeft].contains(.openApp), swipeDownApp == nil {
+                throw DecodingError.dataCorruptedError(forKey: .swipeDownApp, in: c, debugDescription: "openApp requires swipeDownApp (an app bundle ID)")
             }
         }
 
@@ -91,6 +101,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             try c.encode(travel, forKey: .travel); try c.encode(commitThreshold, forKey: .commitThreshold)
             try c.encode(flickVelocity, forKey: .flickVelocity); try c.encode(invert, forKey: .invert)
             try c.encode(swipeUpToClose, forKey: .swipeUpToClose); try c.encode(tabCloseApps, forKey: .tabCloseApps)
+            try c.encodeIfPresent(swipeDownApp, forKey: .swipeDownApp)
             try c.encode(swipeDown.rawValue, forKey: .swipeDown)
             try c.encode(swipeDownRight, forKey: .swipeDownRight)
             try c.encode(swipeDownLeft, forKey: .swipeDownLeft)
@@ -99,7 +110,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
 
     /// Actions shared by the three downward gestures. New window uses the
     /// app's New Window menu item, falling back to ⌘N.
-    public enum SwipeDownAction: String, Codable, Equatable, Sendable, CaseIterable { case closeTab, minimize, newWindow, none }
+    public enum SwipeDownAction: String, Codable, Equatable, Sendable, CaseIterable { case closeTab, minimize, newWindow, openApp, none }
 
     /// Where focus goes when the focused tiled window closes: the column to
     /// the `left` (else right), to the `right` (else left), or wherever macOS

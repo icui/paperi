@@ -58,7 +58,7 @@ can also commit; `flickVelocity` controls that speed threshold. `invert` reverse
 horizontal navigation.
 
 `swipeDown`, `swipeDownRight`, and `swipeDownLeft` each accept `closeTab`,
-`newWindow`, `minimize`, or `none`. Their defaults are new window, close tab,
+`newWindow`, `openApp`, `minimize`, or `none`. Their defaults are new window, close tab,
 and minimize respectively. Turn right or left after moving down without lifting;
 a turn can begin before the downward action is armed. A turn needs a clearly
 sideways move (about 6% of the trackpad width, within roughly 27° of
@@ -66,6 +66,23 @@ horizontal), so drift while lifting keeps the downward action. Releasing a short
 turn cancels both actions; a quick sideways flick commits only after moving
 past the point where the turn began. Downward gestures also show hints when a popup or the
 desktop has focus; actions target the frontmost app. Minimizing requires a window.
+
+To open a window of a specific app, set `swipeDown` to `openApp` and
+`swipeDownApp` to its bundle ID, for example:
+
+```json
+"gesture": {
+  "swipeDown": "openApp",
+  "swipeDownApp": "com.apple.Terminal"
+}
+```
+
+`openApp` also works for down-right and down-left; all three share the same
+`swipeDownApp` target. Paperi launches the app if needed (using its normal initial
+window). If already running, it activates the app and invokes New Window,
+falling back to ⌘N. Window creation depends on the app's support for these actions.
+The target must be installed; an unavailable target leaves the current app alone.
+Omit `swipeDownApp` to keep the existing `newWindow` action targeting the focused app.
 
 `tabCloseApps` defaults to an empty array. Add apps such as Chrome here to make
 swipe up show the tab-close pill and send ⌘W instead of closing the entire window.

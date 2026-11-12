@@ -499,13 +499,22 @@ import PaperiPlatform
     private func gestureRows(_ menu: NSMenu, _ gesture: LiveConfig.GestureConfig) {
         let defaults = LiveConfig.GestureConfig()
         func origin(_ isDefault: Bool) -> String { isDefault ? "  (default)" : "" }
-        let down = ["closeTab": "close tab", "minimize": "minimize", "newWindow": "new window", "none": "off"][gesture.swipeDown.rawValue] ?? ""
+        func actionDescription(_ action: LiveConfig.SwipeDownAction) -> String {
+            switch action {
+            case .closeTab: return "close tab"
+            case .minimize: return "minimize"
+            case .newWindow: return "new window"
+            case .openApp: return "open window of \(gesture.swipeDownApp ?? "unconfigured app")"
+            case .none: return "off"
+            }
+        }
+        let down = actionDescription(gesture.swipeDown)
         let summary = gesture.enabled
             ? "\(gesture.fingers) fingers" + (gesture.invert ? ", inverted" : "")
               + " · up: \(gesture.swipeUpToClose ? "close" : "off") · down: \(down)"
             : "off"
         let item = menu.addItem(withTitle: "Trackpad swipe: \(summary)", action: nil, keyEquivalent: "")
-        item.toolTip = "\"gesture\": sideways scrolls the strip by one column, up closes the focused window (or tab), down opens a new window or minimizes, down then right closes a tab"
+        item.toolTip = "\"gesture\": sideways scrolls the strip by one column, up closes the focused window (or tab), down: \(down), down then right: \(actionDescription(gesture.swipeDownRight)), down then left: \(actionDescription(gesture.swipeDownLeft))"
         let sub = NSMenu()
         value(sub, "Enabled: \(gesture.enabled ? "on" : "off")\(origin(gesture.enabled == defaults.enabled))",
               copy: "\(gesture.enabled)", tip: "\"gesture.enabled\"")
@@ -528,13 +537,16 @@ import PaperiPlatform
               tip: "\"gesture.tabCloseApps\": bundle IDs whose swipe up closes the current tab with ⌘W")
         value(sub, "Swipe down: \(down) (\(gesture.swipeDown.rawValue))\(origin(gesture.swipeDown == defaults.swipeDown))",
               copy: gesture.swipeDown.rawValue,
-              tip: "\"gesture.swipeDown\": closeTab, newWindow (the app's New Window menu item, else ⌘N), minimize, or none")
+              tip: "\"gesture.swipeDown\": closeTab, newWindow (the app's New Window menu item, else ⌘N), minimize, openApp, or none")
+        value(sub, "Swipe app: \(gesture.swipeDownApp ?? "not configured")",
+              copy: gesture.swipeDownApp ?? "",
+              tip: "gesture.swipeDownApp: bundle ID of the app whose window openApp opens; launches the app if needed")
         for (label, key, action, defaultAction) in [
             ("Swipe down-right", "swipeDownRight", gesture.swipeDownRight, defaults.swipeDownRight),
             ("Swipe down-left", "swipeDownLeft", gesture.swipeDownLeft, defaults.swipeDownLeft)
         ] {
-            value(sub, "\(label): \(action.rawValue)\(origin(action == defaultAction))",
-                  copy: action.rawValue, tip: "gesture.\(key): closeTab, newWindow, minimize, or none")
+            value(sub, "\(label): \(actionDescription(action)) (\(action.rawValue))\(origin(action == defaultAction))",
+                  copy: action.rawValue, tip: "gesture.\(key): closeTab, newWindow, minimize, openApp, or none")
         }
         item.submenu = sub
     }

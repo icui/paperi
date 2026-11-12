@@ -1072,7 +1072,7 @@ import PaperiCore
         /// sends the app's own close-tab shortcut, ⌘W.
         var tabCloseMode: TabClose? { pulling ? tabClose ?? .app : tabClose }
         /// The new-window indicator replaces moving the window.
-        var showsNewWindow: Bool { closing && pulling && pullAction == .newWindow }
+        var showsNewWindow: Bool { closing && pulling && (pullAction == .newWindow || pullAction == .openApp) }
         var showsIndicator: Bool { showsTabClose || showsNewWindow || (closing && pulling && pullAction == .minimize) }
         var indicatorStyle: GestureIndicatorStyle {
             var style: GestureIndicatorStyle = pullAction == .minimize && pulling ? .minimize : showsNewWindow ? .newWindow : .closeTab
@@ -1217,7 +1217,7 @@ import PaperiCore
         }
         standaloneAction = action
         guard action != .none else { return }
-        var style: GestureIndicatorStyle = action == .newWindow ? .newWindow : action == .minimize ? .minimize : .closeTab
+        var style: GestureIndicatorStyle = (action == .newWindow || action == .openApp) ? .newWindow : action == .minimize ? .minimize : .closeTab
         style.direction = direction.map { CGVector(dx: $0 == .left ? -1 : 1, dy: 0) } ?? standaloneHintDirection
         standaloneHintDirection = style.direction
         standaloneOverlay?.trackIndicator(style, window: 0, progress: progress, threshold: config.commitThreshold)
@@ -1364,13 +1364,14 @@ import PaperiCore
 
     /// App actions remain available when no tiled window can supply a strip.
     private func performStandalonePull(_ action: LiveConfig.SwipeDownAction) {
+        if action == .openApp { _ = openConfiguredApp(); return }
         guard let app = NSWorkspace.shared.frontmostApplication else { return }
         let pid = app.processIdentifier
         let application = AXUIElementCreateApplication(pid)
         let focused = Diagnostics.attribute(application, kAXFocusedWindowAttribute)
         let window = focused.flatMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil }
         switch action {
-        case .none: break
+        case .none, .openApp: break
         case .minimize:
             if let window { _ = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue) }
         case .newWindow:
@@ -1380,6 +1381,27 @@ import PaperiCore
         case .closeTab: Self.postAppCommand(Self.keyW, pid: pid)
         }
         scheduleRefresh()
+    }
+
+    /// Launching an app normally creates its initial window. For an already
+    /// running app, request a new window after activation completes.
+    @discardableResult private func openConfiguredApp() -> Bool {
+        guard let bundleID = options.config.gesture.swipeDownApp,
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return false }
+        let wasRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { app, error in
+            Task { @MainActor in
+                guard error == nil, let app, wasRunning else { return }
+                let pid = app.processIdentifier
+                if let item = Self.newWindowMenuItem(pid: pid),
+                   AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { return }
+                guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
+                Self.postAppCommand(Self.keyN, pid: pid)
+            }
+        }
+        return true
     }
 
     private static func postAppCommand(_ key: CGKeyCode, pid: pid_t) {
@@ -1886,7 +1908,7 @@ import PaperiCore
         try? await Task.sleep(for: .milliseconds(34))
     }
 
-    enum NewWindowMethod: String { case menu, key, none }
+    enum NewWindowMethod: String { case menu, key, launch, none }
 
     /// Opens a new window of the app: its "New Window" menu item when it has
     /// one (it means a window even where ⌘N opens a document or message, and
@@ -1934,7 +1956,9 @@ import PaperiCore
     /// admitted to the strip like any other.
     private func finishNewWindow(_ state: Swipe, window wid: UInt32) {
         let generation = state.generation, overlay = state.overlay
-        let method = pidForWindow[wid].map { Self.openNewWindow(pid: $0, window: wid) } ?? .none
+        let method: NewWindowMethod = state.pullAction == .openApp
+            ? (openConfiguredApp() ? .launch : .none)
+            : (pidForWindow[wid].map { Self.openNewWindow(pid: $0, window: wid) } ?? .none)
         let sent = method != .none
         if !sent { overlay.retractIndicator(duration: 0.18) }
         swipeMetrics["newWindow"] = method.rawValue
@@ -2010,7 +2034,9 @@ import PaperiCore
             swipe = nil
             swipeTask = nil
             scheduleRefresh()
-            if commit, state.showsNewWindow, let wid = target, let pid = pidForWindow[wid] {
+            if commit, state.pulling, state.pullAction == .openApp {
+                _ = openConfiguredApp()
+            } else if commit, state.showsNewWindow, let wid = target, let pid = pidForWindow[wid] {
                 _ = Self.openNewWindow(pid: pid, window: wid)
             } else if commit, state.pulling, state.pullAction == .minimize, let wid = target { _ = minimize(wid) }
             else if commit, state.closing, (!state.pulling || state.pullAction == .closeTab), let wid = target {

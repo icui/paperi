@@ -61,9 +61,9 @@ The window follows your fingers. Move far enough, or flick, to close it on relea
 
 ![Animated illustration of a downward gesture changing from New Window to Close Tab after turning right](assets/demos/close-tab.gif)
 
-Swipe down to **New Window**, down then right for **Close Tab**, or down then left to **Minimize**. Turn without lifting, then continue in that direction and release to commit; a short turn cancels. Configure each with `gesture.swipeDown`, `gesture.swipeDownRight`, and `gesture.swipeDownLeft`: `closeTab`, `newWindow`, `minimize`, or `none`. Downward gestures also work when a popup or the desktop has focus; actions target the frontmost app, and minimizing requires a window.
+Swipe down to **New Window**, down then right for **Close Tab**, or down then left to **Minimize**. Turn without lifting, then continue in that direction and release to commit; a short turn cancels. Configure each with `gesture.swipeDown`, `gesture.swipeDownRight`, and `gesture.swipeDownLeft`: `closeTab`, `newWindow`, `openApp`, `minimize`, or `none`. Downward gestures also work when a popup or the desktop has focus; actions target the frontmost app unless `openApp` selects a specific app, and minimizing requires a window.
 
-New-window creation uses the app's **New Window** menu item, falling back to ⌘N when no matching item is available. You can change swipe down to minimize, or disable it.
+New-window creation uses the app's **New Window** menu item, falling back to ⌘N when no matching item is available. To open a window of a specific app, set `gesture.swipeDown` to `openApp` and `gesture.swipeDownApp` to its bundle ID (for example, `com.apple.Terminal`). Paperi launches the app if needed or requests a new window if it is running. You can also change swipe down to minimize, or disable it.
 
 If macOS uses the same finger count for Mission Control, Spaces, or three-finger drag, Paperi disables its conflicting swipe and shows a warning. Change the system gesture or set `gesture.fingers` to `4`.
 
