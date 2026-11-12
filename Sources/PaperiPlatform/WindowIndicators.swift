@@ -112,12 +112,13 @@ import ScreenCaptureKit
                         previews.needsDisplay = true
                         panel?.alphaValue = 1
                         panel?.orderFrontRegardless()
-                        try await Task.sleep(for: .seconds(2))
-                        try Task.checkCancellation()
-                        guard self.horizontalSwipeSpace != space else { return }
-                        // Run opacity updates in this task so a new show request
-                        // cancels the fade itself, not just its completion handler.
-                        try await ThumbnailFade.run { panel?.alphaValue = $0 }
+                        // Hovering anywhere in the strip holds it open, including
+                        // its padding. Entering during a fade restores visibility;
+                        // leaving starts a fresh two-second dismissal delay.
+                        try await ThumbnailFade.run(delay: 2, shouldStayVisible: {
+                            self.horizontalSwipeSpace == space ||
+                                panel.map { $0.frame.contains(NSEvent.mouseLocation) } == true
+                        }) { panel?.alphaValue = $0 }
                         try Task.checkCancellation()
                         panel?.orderOut(nil)
                     } catch {
@@ -234,12 +235,16 @@ import ScreenCaptureKit
 /// A task-owned fade. AppKit animator animations continue after task cancellation;
 /// explicit opacity updates stop at the next suspension when a reveal supersedes them.
 @MainActor enum ThumbnailFade {
-    static func run(duration: TimeInterval = 0.2, setOpacity: (Double) -> Void) async throws {
-        let started = ProcessInfo.processInfo.systemUptime
+    static func run(duration: TimeInterval = 0.2, delay: TimeInterval = 0,
+                    shouldStayVisible: () -> Bool = { false }, setOpacity: (Double) -> Void) async throws {
+        var started = ProcessInfo.processInfo.systemUptime
         while true {
             try Task.checkCancellation()
-            let elapsed = ProcessInfo.processInfo.systemUptime - started
-            let progress = duration > 0 ? min(1, elapsed / duration) : 1
+            let now = ProcessInfo.processInfo.systemUptime
+            let held = shouldStayVisible()
+            if held { started = now }
+            let elapsed = max(0, now - started - delay)
+            let progress = held || now - started < delay ? 0 : duration > 0 ? min(1, elapsed / duration) : 1
             setOpacity(1 - progress)
             if progress >= 1 { return }
             try await Task.sleep(for: .milliseconds(8))

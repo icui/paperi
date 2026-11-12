@@ -23,6 +23,30 @@ import Testing
         }
     }
 
+    @Test func hoverDuringFadeRestoresFullVisibility() async throws {
+        var hovered = false
+        var restored = false
+        var opacity = 1.0
+        let fade = Task { @MainActor in
+            try await ThumbnailFade.run(shouldStayVisible: { hovered }) { value in
+                opacity = value
+                if hovered {
+                    restored = value == 1
+                    withUnsafeCurrentTask { $0?.cancel() }
+                } else if value < 1 {
+                    hovered = true
+                }
+            }
+        }
+        do {
+            try await fade.value
+            Issue.record("The test should cancel after hover restores visibility")
+        } catch is CancellationError {
+            #expect(restored)
+            #expect(opacity == 1)
+        }
+    }
+
     @Test func completedFadeReachesZero() async throws {
         var opacity = 1.0
         try await ThumbnailFade.run(duration: 0) { opacity = $0 }
