@@ -65,6 +65,7 @@ import PaperiCore
     private var dragging: UInt32? { drag?.windowID }
     private var dragTimer: Timer?
     private let highlight = DropHighlight()
+    private let windowIndicators = WindowIndicators()
     private var mouseUpWatch = false
     /// Last off-slot frame acted on per window, so an app that clamps its
     /// position is rewritten once rather than on every refresh.
@@ -206,6 +207,7 @@ import PaperiCore
             NotificationCenter.default.removeObserver(token)
         }
         workspaceTokens.removeAll()
+        windowIndicators.hide()
         coordinator.stop()
         let teardown = recorder.stop()
         if keepJournal { return ["stopped": true, "sourcesStillInstalled": teardown["sourcesStillInstalled"] ?? 0] }
@@ -284,6 +286,7 @@ import PaperiCore
     }
 
     private func activeSpaceChanged() {
+        windowIndicators.hide()
         cancelMotion(); motionFrames.removeAll()
         forceUntil = ProcessInfo.processInfo.systemUptime + 1.6
         scheduleRefresh()
@@ -463,6 +466,7 @@ import PaperiCore
     /// topology → admissions → focus → observed resizes → effects.
     public func refresh() {
         guard running, !busy else { return }
+        defer { windowIndicators.update(coordinator, mode: options.config.bottom) }
         if motionActive { return }
         motionFrames.removeAll()
         if animateCachedFocus() { return }
@@ -1383,6 +1387,7 @@ import PaperiCore
     /// Captures the strip of the focused window's Space and shows it frozen
     /// in place. Updates and a release may arrive before the capture finishes.
     @discardableResult func beginSwipe(isSimulation: Bool = false, pendingLock: Bool = false) -> [String: Any] {
+        defer { if running { windowIndicators.update(coordinator, mode: options.config.bottom) } }
         func fail(_ reason: String) -> [String: Any] {
             swipeMetrics = ["state": "refused", "reason": reason]
             return ["ok": false, "error": reason]
@@ -1977,6 +1982,7 @@ import PaperiCore
     /// Release towards the reducer’s chosen neighbour, or the progress side
     /// for simulations. A rejected commit slides back with no writes.
     func endSwipe(commit requested: Bool, direction requestedDirection: Direction? = nil) {
+        defer { if running { windowIndicators.update(coordinator, mode: options.config.bottom) } }
         guard var state = swipe, state.released == nil else { return }
         let direction: Direction = requestedDirection ?? (state.targetProgress < 0 ? .left : .right)
         let target = state.closing ? state.closeWindow : state.neighbours[direction]

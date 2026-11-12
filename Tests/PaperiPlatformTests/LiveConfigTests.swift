@@ -3,6 +3,20 @@ import Testing
 @testable import PaperiPlatform
 
 struct LiveConfigTests {
+    @Test func bottomModes() throws {
+        #expect(LiveConfig().bottom == .thumbnail)
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).bottom == .thumbnail)
+        for mode in LiveConfig.Bottom.allCases {
+            let data = Data("{\"bottom\":\"\(mode.rawValue)\"}".utf8)
+            let config = try JSONDecoder().decode(LiveConfig.self, from: data)
+            #expect(config.bottom == mode)
+            #expect(try JSONDecoder().decode(LiveConfig.self, from: JSONEncoder().encode(config)) == config)
+        }
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"bottom":"invalid"}"#.utf8))
+        }
+    }
+
     @Test func edgeHintColor() throws {
         let defaults = try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8))
         #expect(defaults.edgeHintColor == LiveConfig().edgeHintColor)

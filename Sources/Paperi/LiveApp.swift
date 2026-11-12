@@ -439,6 +439,14 @@ import PaperiPlatform
               tip: "\"gap\": space between columns and between stacked windows")
         value(menu, "Outer gap: \(number(manager.options.outerGap))\(origin(config.outerGap != nil))",
               copy: "\(manager.options.outerGap)", tip: "\"outerGap\": inset from the screen edges")
+        let bottom = menu.addItem(withTitle: "Bottom: \(config.bottom.rawValue)", action: nil, keyEquivalent: "")
+        let bottomMenu = NSMenu()
+        for mode in LiveConfig.Bottom.allCases {
+            let item = add(bottomMenu, mode.rawValue.capitalized, #selector(setBottom(_:)))
+            item.representedObject = mode.rawValue
+            item.state = config.bottom == mode ? .on : .off
+        }
+        bottom.submenu = bottomMenu
         let color = config.swapHighlight ?? LiveConfig.defaultSwapHighlight
         let swatch = value(menu, "Swap highlight: \(color)\(origin(config.swapHighlight != nil))", copy: color,
                            tip: "\"swapHighlight\": drop overlay (swap, stack, new column) over the window a drag targets, #RRGGBB[AA]")
@@ -632,6 +640,29 @@ import PaperiPlatform
 
     @objc private func togglePause() { dispatch([manager.paused ? "resume" : "pause"], source: "menu") }
     @objc private func retile() { dispatch(["retile"], source: "menu") }
+    @objc private func setBottom(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, LiveConfig.Bottom(rawValue: raw) != nil else { return }
+        do {
+            let url = LiveConfig.defaultURL
+            var object: [String: Any] = [:]
+            if FileManager.default.fileExists(atPath: url.path) {
+                let data = try Data(contentsOf: url)
+                _ = try JSONDecoder().decode(LiveConfig.self, from: data)
+                object = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            }
+            object["bottom"] = raw
+            let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            reloadConfig()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Could not save bottom setting"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
     @objc private func reloadConfig() {
         let reply = dispatch(["reload"], source: "menu")
         if reply["ok"] as? Bool != true || !(reply["hotkeyConfigErrors"] as? [String] ?? []).isEmpty {

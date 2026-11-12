@@ -121,6 +121,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public var focusScrollDuration: Double?
     public var focusAfterClose: FocusAfterClose
     public var gap: Double?
+    public enum Bottom: String, Codable, CaseIterable, Sendable { case none, dot, thumbnail }
+    public var bottom: Bottom = .thumbnail
     public var outerGap: Double?
     /// Key spec → command (as accepted by `paperi msg`), merged over the
     /// built-in PaperWM bindings; `null` removes a default binding.
@@ -147,7 +149,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight, edgeHint, focusScrollDuration, focusAfterClose, gesture
+        case bottom, include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight, edgeHint, focusScrollDuration, focusAfterClose, gesture
     }
 
     public init(from decoder: Decoder) throws {
@@ -170,6 +172,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         } else {
             focusAfterClose = .left
         }
+        bottom = try c.decodeIfPresent(Bottom.self, forKey: .bottom) ?? .thumbnail
         gap = try c.decodeIfPresent(Double.self, forKey: .gap)
         outerGap = try c.decodeIfPresent(Double.self, forKey: .outerGap)
         hotkeys = try c.decodeIfPresent([String: String?].self, forKey: .hotkeys) ?? [:]
@@ -222,6 +225,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "focusAfterClose": "left",
       "gap": 8,
       "outerGap": 8,
+      "bottom": "thumbnail",
       "swapHighlight": "#0A84FF4D",
       "gesture": {
         "enabled": true,
