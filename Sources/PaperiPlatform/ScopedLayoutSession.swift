@@ -261,8 +261,19 @@ import PaperiCore
     /// (swap, stack or new column); focus is unchanged.
     @discardableResult func drop(windowID: UInt32, on target: String, action: DropAction, ticket: UUID) -> Bool {
         guard accepts(ticket), let id = slots[windowID] else { return false }
+        return apply { $0.drop(id, on: target, action: action) }
+    }
+
+    /// Moves the slot holding `windowID` to `position` in tray order after a
+    /// thumbnail drag; focus is unchanged.
+    @discardableResult func move(windowID: UInt32, to position: Int, ticket: UUID) -> Bool {
+        guard accepts(ticket), let id = slots[windowID] else { return false }
+        return apply { $0.move(id, to: position) }
+    }
+
+    private func apply(_ edit: (inout Layout) -> Bool) -> Bool {
         var layout = state.layout
-        guard layout.drop(id, on: target, action: action) else { return false }
+        guard edit(&layout) else { return false }
         var next = LifecycleState(layout: layout, floating: state.floating)
         if let focused = state.osFocusedWindow {
             _ = try? next.reduce(.focus(windowID: focused, classification: Self.tiledClassification))

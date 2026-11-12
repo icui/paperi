@@ -213,6 +213,38 @@ public struct Layout: Codable, Equatable, Sendable {
         }
         return true
     }
+    /// Reorders the thumbnail tray: moves slot `source` so it sits at
+    /// `position` in the column-major slot order (an index into that order
+    /// after the move). Landing between two slots of one column stacks it
+    /// there, splitting the next slot's height; anywhere else it becomes its
+    /// own column. A slot alone in its column moves with that column, so its
+    /// width travels with it; a stacked slot takes its column's width.
+    /// Columns emptied by the move are removed. Focus is unchanged.
+    @discardableResult public mutating func move(_ source: String, to position: Int) -> Bool {
+        guard let s = index(of: source) else { return false }
+        let order = columns.flatMap(\.slots).map(\.id)
+        guard let from = order.firstIndex(of: source), position != from,
+              (0..<order.count).contains(position) else { return false }
+        let moved: Column
+        if columns[s.column].slots.count == 1 {
+            moved = columns.remove(at: s.column)
+        } else {
+            moved = Column(slots: [columns[s.column].slots.remove(at: s.row)], width: columns[s.column].width)
+            columns[s.column].weights.remove(at: s.row)
+        }
+        let rest = order.filter { $0 != source }
+        let before = position > 0 ? index(of: rest[position - 1]) : nil
+        let after = position < rest.count ? index(of: rest[position]) : nil
+        if let before, let after, before.column == after.column {
+            let half = columns[after.column].weights[after.row] / 2
+            columns[after.column].weights[after.row] = half
+            columns[after.column].slots.insert(moved.slots[0], at: after.row)
+            columns[after.column].weights.insert(half, at: after.row)
+        } else {
+            columns.insert(moved, at: before.map { $0.column + 1 } ?? 0)
+        }
+        return true
+    }
     public func placements(in canvas: Rect, gap: Double = 8, margin: Double = 1,
                            edgeMargin: Double? = nil) throws -> [Placement] {
         try validate()

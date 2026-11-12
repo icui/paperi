@@ -157,6 +157,41 @@ struct CoreTests {
         checkTrue(!layout.drop("1", on: "2", action: .newColumnRight) && !layout.drop("2", on: "2", action: .stackAbove))
         checkEqual(layout, base)
     }
+    @Test func testMoveReordersTrayCarryingColumnsAndStackingBetweenStackedSlots() throws {
+        // [1] [2 over 3 over 4] [5]
+        let base = Layout(columns: [Column(slots: [slot(1)], width: 300),
+                                    Column(slots: [slot(2), slot(3), slot(4)], width: 400, weights: [1, 2, 3]),
+                                    Column(slots: [slot(5)], width: 500)], focused: "3")
+        func ids(_ layout: Layout) -> [[String]] { layout.columns.map { $0.slots.map(\.id) } }
+        var layout = base
+        // A lone column moves whole, keeping its width.
+        checkTrue(layout.move("1", to: 4))
+        checkEqual(ids(layout), [["2", "3", "4"], ["5"], ["1"]])
+        checkEqual(layout.columns.map(\.width), [400, 500, 300])
+        checkEqual(layout.focused, "3")
+        try layout.validate()
+        // Between two stacked slots: joins the stack, halving the next slot.
+        layout = base
+        checkTrue(layout.move("5", to: 2))
+        checkEqual(ids(layout), [["1"], ["2", "5", "3", "4"]])
+        checkEqual(layout.columns[1].weights, [1, 1, 1, 3])
+        try layout.validate()
+        // A stacked slot leaving for a column boundary becomes its own column.
+        layout = base
+        checkTrue(layout.move("3", to: 0))
+        checkEqual(ids(layout), [["3"], ["1"], ["2", "4"], ["5"]])
+        checkEqual(layout.columns.map(\.width), [400, 300, 400, 500])
+        checkEqual(layout.columns[2].weights, [1, 3])
+        try layout.validate()
+        layout = base
+        checkTrue(layout.move("4", to: 1))
+        checkEqual(ids(layout), [["1"], ["4"], ["2", "3"], ["5"]])
+        try layout.validate()
+        // Unchanged position, out-of-range positions and unknown slots are no-ops.
+        layout = base
+        checkTrue(!layout.move("3", to: 2) && !layout.move("3", to: 5) && !layout.move("3", to: -1) && !layout.move("9", to: 0))
+        checkEqual(layout, base)
+    }
     @Test func testHexColorParsesRGBAndRGBA() {
         checkEqual(HexColor("#0A84FF4D"), HexColor("0a84ff4d"))
         checkEqual(HexColor("#FF0000")?.alpha, 1)

@@ -98,6 +98,9 @@ import PaperiCore
         windowIndicators.onSelect = { [weak self] window, space in
             self?.focusThumbnail(window, in: space)
         }
+        windowIndicators.onMove = { [weak self] window, position, space in
+            self?.moveThumbnail(window, to: position, in: space)
+        }
     }
 
     // MARK: lifecycle
@@ -2336,6 +2339,24 @@ import PaperiCore
         _ = raise(wid)
         windowIndicators.update(coordinator, mode: options.config.bottom, revealSpace: space)
         scheduleRefresh()
+    }
+
+    /// Reorders the strip after a thumbnail drag and places windows in the
+    /// new order; focus stays where it was.
+    private func moveThumbnail(_ wid: UInt32, to position: Int, in space: UInt64) {
+        guard running, !paused, DisplayArrangement.currentProblem() == nil,
+              coordinator.spaceForWindow[wid] == space,
+              let session = coordinator.sessions[space], !session.state.interactionSuppressed,
+              session.move(windowID: wid, to: position, ticket: session.ticket) else {
+            windowIndicators.update(coordinator, mode: options.config.bottom, revealSpace: space)
+            return
+        }
+        log("moved \(wid) to tray position \(position)")
+        cancelMotion(); motionFrames.removeAll()
+        forceApply = true
+        reveal(session)
+        refresh()
+        windowIndicators.update(coordinator, mode: options.config.bottom, revealSpace: space)
     }
 
     private func raise(_ wid: UInt32) -> Bool {
