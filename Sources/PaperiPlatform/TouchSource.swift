@@ -32,6 +32,18 @@ public final class EventTapTouchSource: TouchSource {
     private var ignoredContacts: Set<AnyHashable> = []
     private var establishedSwipe = false
     static let fingerUpGrace = 0.060
+    /// Longest time from the first finger touching an empty trackpad to all
+    /// swipe fingers down. One hand placing fingers lands them within about
+    /// 10–50 ms (100 ms when sloppy); a scroll or resting finger joined by
+    /// the other hand takes far longer and must not start a swipe.
+    nonisolated public static let swipeLandingSpread = 0.15
+    /// When each finger now on the trackpad was first seen down. Frames list
+    /// every current touch, so fingers missing from a frame are dropped even
+    /// if their lift was never reported.
+    private var landedAt: [AnyHashable: Double] = [:]
+    /// This sequence's fingers came together too slowly; no swipe starts
+    /// until every finger lifts.
+    private var staggered = false
     private var pendingReleaseTime: Double?
     private var releaseTask: Task<Void, Never>?
     private var appGestureBlocker: AppGestureBlocker?
@@ -188,6 +200,9 @@ public final class EventTapTouchSource: TouchSource {
     }
 
     private func trackSwipe(_ contacts: [Contact], at timestamp: Double) {
+        let downIDs = contacts.filter { $0.phase != .ended && $0.phase != .cancelled }.map(\.id)
+        landedAt = Dictionary(uniqueKeysWithValues: downIDs.map { ($0, landedAt[$0] ?? timestamp) })
+        if downIDs.isEmpty { staggered = false }
         // Once motion establishes a swipe, newly appearing contacts are not
         // participants. Remember them through lifts so their cancellation or
         // continued presence cannot affect the original fingers' release.
@@ -252,7 +267,15 @@ public final class EventTapTouchSource: TouchSource {
                 }
                 onEvent?(.move(dx: totalDx / Double(down.count), dy: totalDy / Double(down.count), time: timestamp))
             }
-        } else if down.count == fingers && down.count == contacts.count {
+        } else if down.count == fingers && down.count == contacts.count && !staggered {
+            if let first = landedAt.values.min(), timestamp - first > Self.swipeLandingSpread {
+                staggered = true
+                if verbose {
+                    let ms = Int((timestamp - first) * 1000)
+                    FileHandle.standardError.write(Data("[paperi] swipe ignored: fingers joined over \(ms) ms\n".utf8))
+                }
+                return
+            }
             resetSwipeOwnership()
             activeTouches = Dictionary(uniqueKeysWithValues: down.map { ($0.id, $0.position) })
             tracking = true

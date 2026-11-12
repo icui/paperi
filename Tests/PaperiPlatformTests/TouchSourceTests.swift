@@ -89,6 +89,37 @@ struct TouchSourceTests {
         #expect(events == [.begin(time: 1), .cancel])
     }
 
+    @Test func scrollJoinedByAnotherHandDoesNotStartSwipe() {
+        let source = EventTapTouchSource()
+        var events: [TouchEvent] = []
+        source.onEvent = { events.append($0) }
+        // Two-finger scroll, then a finger of the other hand lands.
+        for i in 0..<10 { source.processContacts(contacts([1, 2], x: Double(i) * 0.01), at: 1 + Double(i) * 0.05) }
+        source.processContacts(contacts([1, 2], x: 0.1) + contacts([9], x: 0.9, phase: .began), at: 1.5)
+        source.processContacts(contacts([1, 2, 9], x: 0.3), at: 1.55)
+        // Lifting the scroll fingers and landing them again does not reset it.
+        source.processContacts(contacts([9]), at: 1.6)
+        source.processContacts(contacts([3, 4, 9]), at: 1.65)
+        #expect(events.isEmpty)
+        // After every finger lifts, a real swipe starts as usual.
+        source.processContacts(contacts([3, 4, 9], phase: .ended), at: 1.7)
+        source.processContacts(contacts([5], phase: .began), at: 2)
+        source.processContacts(contacts([5, 6, 7], phase: .began), at: 2.06)
+        #expect(events == [.begin(time: 2.06)])
+        source.stop()
+    }
+
+    @Test func missedLiftDoesNotBlockNextSwipe() {
+        let source = EventTapTouchSource()
+        var events: [TouchEvent] = []
+        source.onEvent = { events.append($0) }
+        source.processContacts(contacts([1, 2]), at: 1)
+        // Contacts 1 and 2 vanish without an ended frame.
+        source.processContacts(contacts([3, 4, 5]), at: 5)
+        #expect(events == [.begin(time: 5)])
+        source.stop()
+    }
+
     @Test func tapEndsSequenceAtOnceThenReportsTap() {
         let source = EventTapTouchSource()
         source.recognizesTaps = true
@@ -156,6 +187,22 @@ struct AppGestureFilterTests {
         #expect(drop(&f, .scroll(phase: ended, momentum: 0, continuous: true)))
         #expect(drop(&f, .gesture))
         #expect(!drop(&f, .scroll(phase: 0, momentum: 0, continuous: false)))
+    }
+
+    @Test func slowlyJoinedFingersLeaveScrollToApp() {
+        var f = AppGestureFilter(fingers: 3)
+        _ = f.shouldDrop(.fingers(down: 2, landingSpread: 0.01))
+        #expect(!drop(&f, .scroll(phase: began, momentum: 0, continuous: true)))
+        _ = f.shouldDrop(.fingers(down: 3, landingSpread: 0.8))
+        #expect(!f.claimed)
+        #expect(!drop(&f, .scroll(phase: changed, momentum: 0, continuous: true)))
+        // Still the app's after a scroll finger lifts and lands again.
+        _ = f.shouldDrop(.fingers(down: 2, landingSpread: 0.8))
+        _ = f.shouldDrop(.fingers(down: 3, landingSpread: 0.9))
+        #expect(!f.claimed)
+        _ = f.shouldDrop(.fingers(down: 0))
+        _ = f.shouldDrop(.fingers(down: 3, landingSpread: 0.03))
+        #expect(f.claimed)
     }
 
     @Test func claimLastsUntilEveryFingerLifts() {

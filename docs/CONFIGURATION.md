@@ -53,6 +53,9 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 ## Gestures
 
 Gestures are on by default with three fingers. `fingers` accepts `3` or `4`.
+A swipe starts only when its fingers land together, within 150 ms of the first
+touching an empty trackpad. A two-finger scroll or resting finger joined later by
+the other hand stays an ordinary scroll until every finger lifts.
 `travel` is the fraction of trackpad travel for a full gesture; `commitThreshold`
 is the progress needed to commit (default `0.5`). A sufficiently long, fast flick
 can also commit; `flickVelocity` controls that speed threshold. `invert` reverses

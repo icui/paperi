@@ -21,3 +21,6 @@ int paperi_mt_start(void);
 void paperi_mt_stop(void);
 // Fingers touching across all observed trackpads.
 int paperi_mt_fingers_down(void);
+// Seconds from the first finger touching an empty trackpad to the latest
+// finger landing, for the trackpad with fingers down (largest if several).
+double paperi_mt_landing_spread(void);

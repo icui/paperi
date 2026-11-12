@@ -96,9 +96,13 @@ static CFArrayRef mt_list;
 static MTDeviceRef mt_devices[MT_MAX_DEVICES];
 static _Atomic int mt_down[MT_MAX_DEVICES];
 static _Atomic int mt_device_count;
+// Per device: when it last went from no fingers to some (`mt_since`), and
+// when its finger count last rose (`mt_rise`), in callback seconds.
+static _Atomic double mt_since[MT_MAX_DEVICES];
+static _Atomic double mt_rise[MT_MAX_DEVICES];
 
 static int mt_contacts(MTDeviceRef device, void *contacts, int count, double timestamp, int frame) {
-    (void)timestamp; (void)frame;
+    (void)frame;
     int down = 0;
     for (int i = 0; i < count; i++) {
         int state = *(int *)((char *)contacts + (size_t)i * MT_STRIDE + MT_STATE_OFFSET);
@@ -106,7 +110,12 @@ static int mt_contacts(MTDeviceRef device, void *contacts, int count, double tim
     }
     int n = atomic_load(&mt_device_count);
     for (int i = 0; i < n; i++) {
-        if (mt_devices[i] == device) { atomic_store(&mt_down[i], down); break; }
+        if (mt_devices[i] != device) continue;
+        int previous = atomic_load(&mt_down[i]);
+        if (down > 0 && previous == 0) atomic_store(&mt_since[i], timestamp);
+        if (down > previous) atomic_store(&mt_rise[i], timestamp);
+        atomic_store(&mt_down[i], down);
+        break;
     }
     return 0;
 }
@@ -152,6 +161,17 @@ void paperi_mt_stop(void) {
     for (int i = 0; i < MT_MAX_DEVICES; i++) { mt_devices[i] = NULL; atomic_store(&mt_down[i], 0); }
     if (mt_list) { CFRelease(mt_list); mt_list = NULL; }
     pthread_mutex_unlock(&mt_mutex);
+}
+
+double paperi_mt_landing_spread(void) {
+    int n = atomic_load(&mt_device_count);
+    double spread = 0;
+    for (int i = 0; i < n; i++) {
+        if (atomic_load(&mt_down[i]) == 0) continue;
+        double d = atomic_load(&mt_rise[i]) - atomic_load(&mt_since[i]);
+        if (d > spread) spread = d;
+    }
+    return spread;
 }
 
 int paperi_mt_fingers_down(void) {

@@ -27,8 +27,10 @@ import PaperiBridge
 /// parsing touch events, so deciding is cheap and never waits on AppKit.
 struct AppGestureFilter: Equatable {
     enum Input: Equatable {
-        /// Current number of fingers on the trackpad. Never dropped.
-        case fingers(down: Int)
+        /// Current number of fingers on the trackpad, and seconds from the
+        /// first of them touching an empty trackpad to the latest landing.
+        /// Never dropped.
+        case fingers(down: Int, landingSpread: Double = 0)
         /// A touch (NSEventTypeGesture) frame.
         case touchFrame
         /// A scroll wheel event. Phases use CGScrollPhase / CGMomentumScrollPhase values.
@@ -52,6 +54,10 @@ struct AppGestureFilter: Equatable {
     var swipeEstablished = false
     /// More fingers than the swipe uses were down in this sequence.
     private(set) var systemSequence = false
+    /// The swipe's fingers came together too slowly to be one hand placing
+    /// them (e.g. a scroll joined by the other hand). Like the touch source,
+    /// leave the sequence to apps until every finger lifts.
+    private(set) var staggeredSequence = false
     /// Momentum from a scroll that was cut off by a claimed sequence.
     private(set) var swallowMomentum = false
     /// The app has seen a scroll begin without its end.
@@ -64,14 +70,18 @@ struct AppGestureFilter: Equatable {
     /// Returns true when the event should be dropped.
     mutating func shouldDrop(_ input: Input) -> Bool {
         switch input {
-        case .fingers(let down):
+        case .fingers(let down, let landingSpread):
             if down == 0 {
                 claimed = false
                 systemSequence = false
+                staggeredSequence = false
             } else if down > fingers, !swipeEstablished {
                 claimed = false
                 systemSequence = true
-            } else if down == fingers, !claimed, !systemSequence {
+            } else if down == fingers, !claimed, !systemSequence, !staggeredSequence,
+                      landingSpread > EventTapTouchSource.swipeLandingSpread {
+                staggeredSequence = true
+            } else if down == fingers, !claimed, !systemSequence, !staggeredSequence {
                 claimed = true
                 swallowMomentum = true
             }
@@ -259,7 +269,7 @@ final class AppGestureBlocker: @unchecked Sendable {
         filter.swipeEstablished = establishedSwipe
         lock.unlock()
         let wasClaimed = filter.claimed
-        _ = filter.shouldDrop(.fingers(down: Int(paperi_mt_fingers_down())))
+        _ = filter.shouldDrop(.fingers(down: Int(paperi_mt_fingers_down()), landingSpread: paperi_mt_landing_spread()))
         let drop = filter.shouldDrop(input)
         if drop { droppedThisSequence += 1 }
         if verbose, wasClaimed != filter.claimed {
