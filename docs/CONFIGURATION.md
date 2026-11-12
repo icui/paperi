@@ -46,7 +46,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 | `gap`, `outerGap` | Space between windows and around the layout, in points. |
 | `focusAfterClose` | `left` (default), `right`, or `system`. A surviving tab or stacked window keeps the column focused. |
 | `focusScrollDuration` | Focus animation in seconds, default `0.22`; `0` disables it. |
-| `bottom` | `none`, `dot`, or `thumbnail` (default). Dots stay visible; actual window thumbnails appear for two seconds after layout changes, including focus, window creation/removal, and rearrangement. Both hide with one window. Thumbnails require Screen Recording permission. Choose from **Show Config → Bottom** or edit this key. |
+| `bottom` | `none`, `dot`, or `thumbnail` (default). Dots stay visible; actual window thumbnails appear for two seconds after layout changes, including focus, window creation/removal, and rearrangement. Thumbnails also appear immediately when a horizontal swipe activates and stay visible through the gesture. Both hide with one window. Thumbnails require Screen Recording permission. Choose from **Show Config → Bottom** or edit this key. |
 | `swapHighlight` | Drag preview color as `#RRGGBB` or `#RRGGBBAA`. |
 
 ## Gestures

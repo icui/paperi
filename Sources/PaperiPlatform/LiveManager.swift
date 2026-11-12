@@ -1127,6 +1127,7 @@ import PaperiCore
     private var gestureBlockedByAnimation: Bool { motionTimer != nil || swipe?.released != nil }
 
     private func cancelSwipe() {
+        windowIndicators.finishHorizontalSwipe(coordinator: coordinator, mode: options.config.bottom)
         standaloneOverlay?.fadeOut(); standaloneOverlay = nil
         standalonePull = false
         swipeGuard?.invalidate(); swipeGuard = nil
@@ -1264,6 +1265,9 @@ import PaperiCore
                         swipeReducer.cancel()
                         slotSwipe = nil
                         return
+                    }
+                    if let space = swipe?.space {
+                        windowIndicators.activateHorizontalSwipe(in: space, coordinator: coordinator, mode: options.config.bottom)
                     }
                     if case .active(_, let progress, _, _) = swipeReducer.state {
                         updateSwipe(progress)
@@ -1480,19 +1484,23 @@ import PaperiCore
         swipeGuard = guardTimer
         RunLoop.main.add(guardTimer, forMode: .common)
         let canvas = session.canvas
+        let starts = surveys.compactMapValues(\.frame)
+        var captureIDs = LiveReconciliation.swipeCaptureIDs(starts: starts, destinations: Array(ends.values), canvas: canvas)
+        if let closeWindow { captureIDs.insert(closeWindow) }
+        let snapshotIDs = captureIDs
         swipeTask = Task { [weak self] in
             do {
-                try await overlay.prepare(windows: Set(surveys.keys), canvas: canvas)
+                try await overlay.prepare(windows: snapshotIDs, excluding: Set(surveys.keys), canvas: canvas)
                 guard let self, var state = self.swipe, state.generation == generation else { overlay.hide(); return }
                 guard self.running, AXIsProcessTrusted(), NSEvent.pressedMouseButtons == 0,
                       self.coordinator.display(forSpace: space)?.activeSpaceID == space else {
                     self.cancelMotion(); self.scheduleRefresh(); return
                 }
-                state.starts = overlay.captured
+                state.starts = starts.merging(overlay.captured) { _, captured in captured }
                 state.ready = true
                 self.swipe = state
                 self.swipeMetrics = ["state": "tracking", "windows": surveys.count, "captureMS": overlay.captureMS,
-                                     "textureBytes": overlay.textureBytes]
+                                     "textureBytes": overlay.textureBytes, "capturedWindows": snapshotIDs.count]
                 // A quick gesture can finish before capture. Begin that release
                 // at the real windows instead of flashing a displaced snapshot.
                 overlay.place(state.starts)
@@ -1982,7 +1990,12 @@ import PaperiCore
     /// Release towards the reducer’s chosen neighbour, or the progress side
     /// for simulations. A rejected commit slides back with no writes.
     func endSwipe(commit requested: Bool, direction requestedDirection: Direction? = nil) {
-        defer { if running { windowIndicators.update(coordinator, mode: options.config.bottom) } }
+        defer {
+            if running {
+                windowIndicators.finishHorizontalSwipe(coordinator: coordinator, mode: options.config.bottom)
+                windowIndicators.update(coordinator, mode: options.config.bottom)
+            }
+        }
         guard var state = swipe, state.released == nil else { return }
         let direction: Direction = requestedDirection ?? (state.targetProgress < 0 ? .left : .right)
         let target = state.closing ? state.closeWindow : state.neighbours[direction]

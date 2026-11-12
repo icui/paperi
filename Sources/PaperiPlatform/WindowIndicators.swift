@@ -14,15 +14,29 @@ import ScreenCaptureKit
     private var presentations: [String: Presentation] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
     private var requestedCaptureAccess = false
+    private var horizontalSwipeSpace: UInt64?
+
+    func activateHorizontalSwipe(in space: UInt64, coordinator: DisplaySpaceCoordinator, mode: LiveConfig.Bottom) {
+        guard mode == .thumbnail else { return }
+        horizontalSwipeSpace = space
+        update(coordinator, mode: mode, revealSpace: space)
+    }
+
+    func finishHorizontalSwipe(coordinator: DisplaySpaceCoordinator, mode: LiveConfig.Bottom) {
+        guard let space = horizontalSwipeSpace else { return }
+        horizontalSwipeSpace = nil
+        update(coordinator, mode: mode, revealSpace: space)
+    }
 
     func hide() {
+        horizontalSwipeSpace = nil
         for task in tasks.values { task.cancel() }
         tasks.removeAll()
         presentations.removeAll()
         for panel in panels.values { panel.orderOut(nil) }
     }
 
-    func update(_ coordinator: DisplaySpaceCoordinator, mode: LiveConfig.Bottom) {
+    func update(_ coordinator: DisplaySpaceCoordinator, mode: LiveConfig.Bottom, revealSpace: UInt64? = nil) {
         guard mode != .none else { hide(); return }
         var visible = Set<String>()
         let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
@@ -39,7 +53,7 @@ import ScreenCaptureKit
             let presentation = Presentation(space: space, layout: layout, canvas: display.canvas, mode: mode)
             // Refresh polls unchanged layouts once a second. They must not revive
             // the thumbnail strip or restart its dismissal deadline.
-            guard presentations[id] != presentation else { continue }
+            guard presentations[id] != presentation || space == revealSpace else { continue }
             presentations[id] = presentation
             tasks[id]?.cancel()
             let panel = panels[id] ?? makePanel()
@@ -52,13 +66,20 @@ import ScreenCaptureKit
                                width: width, height: thumbnail ? 96 : 28)
             panel.setFrame(frame, display: false)
             guard let glass = panel.contentView else { continue }
+            let cachedImages = (glass.subviews.first as? WindowPreviews)?.images ?? [:]
             glass.subviews.forEach { $0.removeFromSuperview() }
             if thumbnail {
                 let previews = WindowPreviews(frame: NSRect(origin: .zero, size: frame.size))
                 previews.ids = slots.map(\.activeMember)
+                previews.images = cachedImages.filter { previews.ids.contains($0.key) }
                 previews.selected = slots.firstIndex { $0.id == layout.focused }
                 glass.addSubview(previews)
-                panel.orderOut(nil)
+                if previews.images.isEmpty {
+                    panel.orderOut(nil)
+                } else {
+                    panel.alphaValue = 1
+                    panel.orderFrontRegardless()
+                }
                 tasks[id] = Task { [weak self, weak panel] in
                     guard let self else { return }
                     var allowed = CGPreflightScreenCaptureAccess()
@@ -90,10 +111,10 @@ import ScreenCaptureKit
                         panel?.orderFrontRegardless()
                         try await Task.sleep(for: .seconds(2))
                         try Task.checkCancellation()
-                        await NSAnimationContext.runAnimationGroup { context in
-                            context.duration = 0.2
-                            panel?.animator().alphaValue = 0
-                        }
+                        guard self.horizontalSwipeSpace != space else { return }
+                        // Run opacity updates in this task so a new show request
+                        // cancels the fade itself, not just its completion handler.
+                        try await ThumbnailFade.run { panel?.alphaValue = $0 }
                         try Task.checkCancellation()
                         panel?.orderOut(nil)
                     } catch {
@@ -182,6 +203,22 @@ import ScreenCaptureKit
             NSBezierPath(ovalIn: NSRect(x: start + CGFloat(index) * spacing - diameter / 2,
                                        y: bounds.midY - diameter / 2,
                                        width: diameter, height: diameter)).fill()
+        }
+    }
+}
+
+/// A task-owned fade. AppKit animator animations continue after task cancellation;
+/// explicit opacity updates stop at the next suspension when a reveal supersedes them.
+@MainActor enum ThumbnailFade {
+    static func run(duration: TimeInterval = 0.2, setOpacity: (Double) -> Void) async throws {
+        let started = ProcessInfo.processInfo.systemUptime
+        while true {
+            try Task.checkCancellation()
+            let elapsed = ProcessInfo.processInfo.systemUptime - started
+            let progress = duration > 0 ? min(1, elapsed / duration) : 1
+            setOpacity(1 - progress)
+            if progress >= 1 { return }
+            try await Task.sleep(for: .milliseconds(8))
         }
     }
 }

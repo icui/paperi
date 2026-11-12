@@ -26,9 +26,8 @@ import PaperiCore
     private(set) var captureMS = 0.0
     private(set) var textureBytes = 0
 
-    func prepare(windows ids: Set<UInt32>, canvas: Rect) async throws {
+    func prepare(windows ids: Set<UInt32>, excluding stripIDs: Set<UInt32> = [], canvas: Rect) async throws {
         let began = ProcessInfo.processInfo.systemUptime
-        guard ids.count <= 12 else { throw Failure.tooManyWindows }
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else { throw Failure.permission }
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         try Task.checkCancellation()
@@ -40,6 +39,7 @@ import PaperiCore
         }), let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value,
               let display = content.displays.first(where: { $0.displayID == id }) else { throw Failure.display }
         let windows = content.windows.filter { ids.contains($0.windowID) }
+        let stripWindows = content.windows.filter { stripIDs.union(ids).contains($0.windowID) }
         guard windows.count == ids.count else { throw Failure.missingWindow }
         screenFrame = screen.frame
         self.screen = screen
@@ -56,7 +56,7 @@ import PaperiCore
         // would blur a picture of itself: a doubled, stale Dock background.
         let above = content.windows.filter { $0.windowLayer > Self.level.rawValue }
         let background = Task {
-            try await self.capture(SCContentFilter(display: display, excludingWindows: windows + fadingOverlays + above),
+            try await self.capture(SCContentFilter(display: display, excludingWindows: stripWindows + fadingOverlays + above),
                                    scale: scale)
         }
         let windowCaptures = windows.reversed().map { item in
@@ -427,7 +427,7 @@ import PaperiCore
 
     private static let noActions: [String: any CAAction] = ["position": NSNull(), "bounds": NSNull(),
                                                             "contents": NSNull(), "frame": NSNull()]
-    enum Failure: Error { case permission, display, missingWindow, tooManyWindows, memoryBudget }
+    enum Failure: Error { case permission, display, missingWindow, memoryBudget }
 }
 
 /// Display link target. The link retains its target until invalidated.

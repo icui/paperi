@@ -3,6 +3,22 @@ import PaperiCore
 
 /// Pure helpers for the live manager. No OS effects run here.
 enum LiveReconciliation {
+    /// Capture only windows whose horizontal sweep can enter the canvas.
+    /// Distant windows tucked against the physical display edge stay outside
+    /// the inset canvas; counting them made long strips disable all snapshots.
+    static func swipeCaptureIDs(starts: [UInt32: Rect], destinations: [[UInt32: Rect]],
+                                canvas: Rect) -> Set<UInt32> {
+        Set(starts.compactMap { id, start in
+            let frames = [start] + destinations.compactMap { $0[id] }
+            let left = frames.map(\.x).min() ?? start.x
+            let right = frames.map { $0.x + $0.width }.max() ?? start.x + start.width
+            let top = frames.map(\.y).min() ?? start.y
+            let bottom = frames.map { $0.y + $0.height }.max() ?? start.y + start.height
+            return right > canvas.x && left < canvas.x + canvas.width &&
+                bottom > canvas.y && top < canvas.y + canvas.height ? id : nil
+        })
+    }
+
     /// Apps such as Terminal round requested sizes to character-cell boundaries.
     /// A few points of rounding should not disable motion of the entire strip.
     static func animationSizeMatches(_ actual: Rect, _ target: Rect) -> Bool {

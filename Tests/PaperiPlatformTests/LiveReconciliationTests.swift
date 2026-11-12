@@ -4,6 +4,28 @@ import PaperiCore
 @testable import PaperiPlatform
 
 @MainActor struct LiveReconciliationTests {
+    @Test func longStripCapturesOnlyWindowsThatCanEnterView() {
+        let canvas = Rect(x: 8, y: 38, width: 1424, height: 886)
+        var starts: [UInt32: Rect] = [:]
+        var ends: [UInt32: Rect] = [:]
+        // A 30-window strip, most parked at the right edge of the screen.
+        for id in UInt32(1)...30 {
+            starts[id] = Rect(x: 1439, y: 38, width: 1000, height: 886)
+            ends[id] = starts[id]
+        }
+        starts[1] = Rect(x: 8, y: 38, width: 1000, height: 886)
+        ends[1] = Rect(x: -999, y: 38, width: 1000, height: 886)
+        ends[2] = Rect(x: 8, y: 38, width: 1000, height: 886)
+        #expect(LiveReconciliation.swipeCaptureIDs(starts: starts, destinations: [ends], canvas: canvas) == [1, 2])
+    }
+
+    @Test func capturesWindowsCrossingCanvasBetweenOffscreenEndpoints() {
+        let canvas = Rect(x: 0, y: 0, width: 1000, height: 800)
+        let starts: [UInt32: Rect] = [1: Rect(x: -600, y: 0, width: 500, height: 800)]
+        let ends: [UInt32: Rect] = [1: Rect(x: 1100, y: 0, width: 500, height: 800)]
+        #expect(LiveReconciliation.swipeCaptureIDs(starts: starts, destinations: [ends], canvas: canvas) == [1])
+    }
+
     @Test func animationAcceptsTerminalRoundingButRejectsResizing() {
         let target = Rect(x: 8, y: 38, width: 720, height: 886)
         #expect(LiveReconciliation.animationSizeMatches(Rect(x: 1439, y: 38, width: 720, height: 889), target))
