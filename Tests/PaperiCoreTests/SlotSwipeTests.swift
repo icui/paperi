@@ -6,7 +6,7 @@ struct SlotSwipeTests {
         var swipe = SlotSwipe(config: .init(pullTravel: 0.4, turnTravel: 0.4))
         swipe.begin(at: 0)
         #expect(swipe.move(dx: 0, dy: -0.04, at: 0.01) == .pullStarted)
-        #expect(swipe.move(dx: -0.04, dy: 0, at: 0.02) == .turnStarted)
+        #expect(swipe.move(dx: -0.07, dy: 0, at: 0.02) == .turnStarted)
         #expect(swipe.turnDirection == .left)
         _ = swipe.move(dx: -0.24, dy: 0, at: 0.2)
         #expect(swipe.end(at: 0.21) == .turn)
@@ -319,7 +319,7 @@ struct SlotSwipeTests {
         var swipe = armedPull()
         // A small sideways drift does not turn yet.
         #expect(swipe.move(dx: 0.01, dy: 0, at: 0.2) != .turnStarted)
-        #expect(swipe.move(dx: 0.025, dy: -0.002, at: 0.25) == .turnStarted)
+        #expect(swipe.move(dx: 0.035, dy: -0.002, at: 0.25) == .turnStarted)
         guard case .turning(_, let shown, _, _) = swipe.state else { Issue.record("turning"); return }
         #expect(shown == 0)
         guard case .turnUpdated(let progress) = swipe.move(dx: 0.12, dy: 0, at: 0.4) else { Issue.record("update"); return }
@@ -329,7 +329,7 @@ struct SlotSwipeTests {
 
     @Test func turnReleasedEarlyDoesNothing() {
         var swipe = armedPull()
-        #expect(swipe.move(dx: 0.035, dy: 0, at: 0.2) == .turnStarted)
+        #expect(swipe.move(dx: 0.045, dy: 0, at: 0.2) == .turnStarted)
         _ = swipe.move(dx: 0.01, dy: 0, at: 0.5)
         // Neither the tab close nor the pull it came from.
         #expect(swipe.end(at: 0.7) == .snapBack)
@@ -340,14 +340,14 @@ struct SlotSwipeTests {
         early.begin(at: 0)
         _ = early.move(dx: 0, dy: -0.02, at: 0.01)
         _ = early.move(dx: 0, dy: -0.02, at: 0.05) // shown progress well below 0.5
-        #expect(early.move(dx: 0.025, dy: 0, at: 0.1) == .turnStarted)
+        #expect(early.move(dx: 0.045, dy: 0, at: 0.1) == .turnStarted)
         // Releasing a short turn must never run the original new-window action.
         #expect(early.end(at: 0.3) == .snapBack)
 
         var completed = SlotSwipe(config: .init(lockThreshold: 0.01, pullTravel: 0.2, turnTravel: 0.2))
         completed.begin(at: 0)
         _ = completed.move(dx: 0, dy: -0.02, at: 0.01)
-        #expect(completed.move(dx: 0.025, dy: -0.002, at: 0.05) == .turnStarted)
+        #expect(completed.move(dx: 0.045, dy: -0.002, at: 0.05) == .turnStarted)
         _ = completed.move(dx: 0.12, dy: 0, at: 0.2)
         #expect(completed.end(at: 0.4) == .turn)
 
@@ -368,5 +368,46 @@ struct SlotSwipeTests {
             }
         }
         #expect(swipe.end(at: 0.3) == .pull)
+    }
+
+    // Default thresholds: what fingers do around the release of a plain pull.
+    private func defaultArmedPull() -> SlotSwipe {
+        var swipe = SlotSwipe(config: .init(pullTravel: 0.4, turnTravel: 0.4))
+        swipe.begin(at: 0)
+        _ = swipe.move(dx: 0, dy: -0.03, at: 0.01)
+        _ = swipe.move(dx: 0, dy: -0.25, at: 0.15)
+        return swipe
+    }
+
+    @Test func liftOffDriftKeepsThePull() {
+        var swipe = defaultArmedPull()
+        // A few percent of sideways drift as the fingers slow and lift.
+        for step in 1...4 {
+            if case .pullUpdated = swipe.move(dx: 0.01, dy: -0.002, at: 0.15 + Double(step) * 0.01) {} else {
+                Issue.record("still pulling"); return
+            }
+        }
+        #expect(swipe.end(at: 0.2) == .pull)
+    }
+
+    @Test func diagonalDriftDoesNotTurn() {
+        var swipe = defaultArmedPull()
+        // Well past the lock distance, but only 1.5x more sideways than down.
+        if case .pullUpdated = swipe.move(dx: 0.075, dy: -0.05, at: 0.2) {} else { Issue.record("still pulling") }
+        #expect(swipe.end(at: 0.25) == .pull)
+    }
+
+    @Test func turnLeadInAloneCannotFlickCommit() {
+        var swipe = defaultArmedPull()
+        // A fast sideways twitch that just locks a turn, released at once.
+        #expect(swipe.move(dx: 0.065, dy: 0, at: 0.16) == .turnStarted)
+        _ = swipe.move(dx: 0.01, dy: 0, at: 0.165)
+        #expect(swipe.end(at: 0.17) == .snapBack)
+
+        // A deliberate fast turn still commits on a flick.
+        var flick = defaultArmedPull()
+        #expect(flick.move(dx: 0.065, dy: 0, at: 0.16) == .turnStarted)
+        for step in 1...4 { _ = flick.move(dx: 0.02, dy: 0, at: 0.16 + Double(step) * 0.01) }
+        #expect(flick.end(at: 0.205) == .turn)
     }
 }

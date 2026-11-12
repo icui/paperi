@@ -40,8 +40,8 @@ struct LiveConfigTests {
         let chrome = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"tabCloseApps":["com.google.Chrome"]}}"#.utf8))
         #expect(chrome.gesture.tabCloseApps == ["com.google.Chrome"])
         #expect(chrome.gesture.swipeUpToClose)
-        #expect(chrome.gesture.swipeDown == .closeTab)
-        #expect(chrome.gesture.swipeDownRight == .newWindow)
+        #expect(chrome.gesture.swipeDown == .newWindow)
+        #expect(chrome.gesture.swipeDownRight == .closeTab)
         #expect(chrome.gesture.swipeDownLeft == .minimize)
         let legacyOff = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"swipeDownToMinimize":false}}"#.utf8))
         #expect(legacyOff.gesture.swipeDown == LiveConfig.SwipeDownAction.none)
@@ -57,8 +57,8 @@ struct LiveConfigTests {
     }
 
     @Test func focusAfterClose() throws {
-        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).focusAfterClose == .left)
-        #expect(LiveConfig().focusAfterClose == .left)
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).focusAfterClose == .system)
+        #expect(LiveConfig().focusAfterClose == .system)
         for value in LiveConfig.FocusAfterClose.allCases {
             let config = try JSONDecoder().decode(LiveConfig.self, from: Data("{\"focusAfterClose\":\"\(value.rawValue)\"}".utf8))
             #expect(config.focusAfterClose == value)

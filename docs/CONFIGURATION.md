@@ -11,7 +11,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
   "exclude": ["us.zoom.xos"],
   "float": [{"app": "com.apple.finder", "titleContains": "Copy"}],
   "tile": [{"app": "com.apple.systempreferences"}],
-  "focusAfterClose": "left",
+  "focusAfterClose": "system",
   "focusScrollDuration": 0.22,
   "gesture": {
     "enabled": true,
@@ -21,8 +21,8 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
     "flickVelocity": 1.5,
     "invert": false,
     "swipeUpToClose": true,
-    "swipeDown": "closeTab",
-    "swipeDownRight": "newWindow",
+    "swipeDown": "newWindow",
+    "swipeDownRight": "closeTab",
     "swipeDownLeft": "minimize",
     "tabCloseApps": ["com.google.Chrome"]
   },
@@ -43,7 +43,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 | `tile` | Allow matching windows without a fullscreen button to tile. Dialogs and panels still stay outside the strip. |
 | `singleton` | Array of app bundle IDs whose in-content tab bars should be treated as a plain window. |
 | `gap`, `outerGap` | Space between windows and around the layout, in points. |
-| `focusAfterClose` | `left` (default), `right`, or `system`. A surviving tab or stacked window keeps the column focused. |
+| `focusAfterClose` | `left`, `right`, or `system` (default). A surviving tab or stacked window keeps the column focused. |
 | `focusScrollDuration` | Focus animation in seconds, default `0.22`; `0` disables it. |
 | `swapHighlight` | Drag preview color as `#RRGGBB` or `#RRGGBBAA`. |
 
@@ -56,10 +56,13 @@ can also commit; `flickVelocity` controls that speed threshold. `invert` reverse
 horizontal navigation.
 
 `swipeDown`, `swipeDownRight`, and `swipeDownLeft` each accept `closeTab`,
-`newWindow`, `minimize`, or `none`. Their defaults are close tab, new window,
+`newWindow`, `minimize`, or `none`. Their defaults are new window, close tab,
 and minimize respectively. Turn right or left after moving down without lifting;
-a turn can begin before the downward action is armed. Releasing a short turn
-cancels both actions. Downward gestures also show hints when a popup or the
+a turn can begin before the downward action is armed. A turn needs a clearly
+sideways move (about 6% of the trackpad width, within roughly 27° of
+horizontal), so drift while lifting keeps the downward action. Releasing a short
+turn cancels both actions; a quick sideways flick commits only after moving
+past the point where the turn began. Downward gestures also show hints when a popup or the
 desktop has focus; actions target the frontmost app. Minimizing requires a window.
 
 `tabCloseApps` defaults to an empty array. Add apps such as Chrome here to make

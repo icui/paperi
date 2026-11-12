@@ -446,7 +446,7 @@ import PaperiPlatform
         let scroll = config.focusScrollDuration ?? 0.22
         value(menu, "Focus scroll duration: \(scroll == 0 ? "off (immediate)" : "\(scroll) s")\(origin(config.focusScrollDuration != nil))",
               copy: "\(scroll)", tip: "\"focusScrollDuration\": seconds from 0 to 1 for focus scrolls and swipe landings; 0 disables")
-        value(menu, "Focus after close: \(config.focusAfterClose.rawValue)\(origin(config.focusAfterClose != .left))",
+        value(menu, "Focus after close: \(config.focusAfterClose.rawValue)\(origin(config.focusAfterClose != .system))",
               copy: config.focusAfterClose.rawValue,
               tip: "\"focusAfterClose\": left, right or system — where focus goes when the focused column closes")
         menu.addItem(.separator())

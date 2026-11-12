@@ -275,8 +275,13 @@ public struct SlotSwipe: Equatable, Sendable {
     /// Finger travel since a pull last moved mostly down.
     private var turnX = 0.0, turnY = 0.0
 
-    /// Horizontal travel a turn needs: a deliberate move, well past a drift.
-    public static let turnLockMultiple = 2.0
+    /// Horizontal travel a turn needs: a deliberate move, well past the
+    /// sideways drift of fingers slowing down or lifting off after a pull.
+    public static let turnLockMultiple = 4.0
+
+    /// How strongly horizontal travel must dominate vertical travel to turn
+    /// (within about 27° of horizontal).
+    public static let turnDominance = 2.0
 
     /// Collects pull motion until it turns clearly left or right, returning
     /// signed horizontal travel. Mostly vertical motion resets collection.
@@ -285,7 +290,7 @@ public struct SlotSwipe: Equatable, Sendable {
         turnY += dy
         let lock = config.lockThreshold * Self.turnLockMultiple
         if abs(turnY) >= lock, abs(turnY) > 1.2 * abs(turnX) { turnX = 0; turnY = 0; return nil }
-        guard abs(turnX) >= lock, abs(turnX) > 1.2 * abs(turnY) else { return nil }
+        guard abs(turnX) >= lock, abs(turnX) > Self.turnDominance * abs(turnY) else { return nil }
         defer { turnX = 0; turnY = 0 }
         return turnX
     }
@@ -334,8 +339,13 @@ public struct SlotSwipe: Equatable, Sendable {
              .turning(let rawProg, _, let vel, let lastTime):
             // A swipe dragged back past its start does nothing. Decide on
             // the whole finger travel, including the lead-in to the lock.
+            // A turn's flick counts only travel after the turn locked: its
+            // lead-in alone already passes the flick minimum, so a sideways
+            // twitch at lift-off would otherwise commit it.
+            var flickTravel = rawProg
+            if case .turning = state { flickTravel = Self.shown(rawProg, origin: origin) }
             let commits = rawProg > 0
-                && releases(raw: rawProg, clamped: Self.closeBand(rawProg), velocity: vel, lastTime: lastTime, at: time)
+                && releases(raw: flickTravel, clamped: Self.closeBand(rawProg), velocity: vel, lastTime: lastTime, at: time)
             let decision: Decision
             switch state {
             case .closing: decision = commits ? .close : .snapBack

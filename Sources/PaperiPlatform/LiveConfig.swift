@@ -37,8 +37,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
 
         public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.4,
                     commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false,
-                    swipeUpToClose: Bool = true, tabCloseApps: [String] = [], swipeDown: SwipeDownAction = .closeTab,
-                    swipeDownRight: SwipeDownAction = .newWindow, swipeDownLeft: SwipeDownAction = .minimize) {
+                    swipeUpToClose: Bool = true, tabCloseApps: [String] = [], swipeDown: SwipeDownAction = .newWindow,
+                    swipeDownRight: SwipeDownAction = .closeTab, swipeDownLeft: SwipeDownAction = .minimize) {
             self.enabled = enabled
             self.fingers = fingers
             self.travel = travel
@@ -142,7 +142,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         self.include = include; self.exclude = exclude; self.singleton = singleton
         self.float = float; self.tile = tile; self.gap = gap; self.outerGap = outerGap
         self.hotkeys = [:]
-        self.focusAfterClose = .left
+        self.focusAfterClose = .system
         self.gesture = gesture ?? GestureConfig()
     }
 
@@ -168,7 +168,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             }
             focusAfterClose = value
         } else {
-            focusAfterClose = .left
+            focusAfterClose = .system
         }
         gap = try c.decodeIfPresent(Double.self, forKey: .gap)
         outerGap = try c.decodeIfPresent(Double.self, forKey: .outerGap)
@@ -219,7 +219,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "tile": [],
       "singleton": [],
       "focusScrollDuration": 0.22,
-      "focusAfterClose": "left",
+      "focusAfterClose": "system",
       "gap": 8,
       "outerGap": 8,
       "swapHighlight": "#0A84FF4D",
@@ -232,8 +232,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         "invert": false,
         "swipeUpToClose": true,
         "tabCloseApps": [],
-        "swipeDown": "closeTab",
-        "swipeDownRight": "newWindow",
+        "swipeDown": "newWindow",
+        "swipeDownRight": "closeTab",
         "swipeDownLeft": "minimize"
       },
       "hotkeys": {

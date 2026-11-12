@@ -61,7 +61,7 @@ The window follows your fingers. Move far enough, or flick, to close it on relea
 
 ![Animated illustration of a downward gesture changing from New Window to Close Tab after turning right](assets/demos/close-tab.gif)
 
-Swipe down to **Close Tab**, down then right for **New Window**, or down then left to **Minimize**. Turn without lifting, then continue in that direction and release to commit; a short turn cancels. Configure each with `gesture.swipeDown`, `gesture.swipeDownRight`, and `gesture.swipeDownLeft`: `closeTab`, `newWindow`, `minimize`, or `none`. Downward gestures also work when a popup or the desktop has focus; actions target the frontmost app, and minimizing requires a window.
+Swipe down to **New Window**, down then right for **Close Tab**, or down then left to **Minimize**. Turn without lifting, then continue in that direction and release to commit; a short turn cancels. Configure each with `gesture.swipeDown`, `gesture.swipeDownRight`, and `gesture.swipeDownLeft`: `closeTab`, `newWindow`, `minimize`, or `none`. Downward gestures also work when a popup or the desktop has focus; actions target the frontmost app, and minimizing requires a window.
 
 New-window creation uses the app's **New Window** menu item, falling back to ⌘N when no matching item is available. You can change swipe down to minimize, or disable it.
 
@@ -114,8 +114,8 @@ Choose **Open Config…** from the menu bar. Settings live in `~/Library/Applica
   "exclude": ["us.zoom.xos"],
   "gesture": {
     "fingers": 3,
-    "swipeDown": "closeTab",
-    "swipeDownRight": "newWindow",
+    "swipeDown": "newWindow",
+    "swipeDownRight": "closeTab",
     "swipeDownLeft": "minimize",
     "tabCloseApps": ["com.google.Chrome"]
   }
