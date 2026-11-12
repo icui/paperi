@@ -198,8 +198,8 @@ import ScreenCaptureKit
                         // Hovering anywhere in the strip holds it open, including
                         // its padding, as does a thumbnail drag that strays off it.
                         // Entering during a fade restores visibility; leaving
-                        // starts a fresh two-second dismissal delay.
-                        try await ThumbnailFade.run(delay: 2, shouldStayVisible: {
+                        // starts a fresh one-second dismissal delay.
+                        try await ThumbnailFade.run(delay: 1, shouldStayVisible: {
                             self.horizontalSwipeSpace == space || previews.isDragging ||
                                 panel.map { $0.frame.contains(NSEvent.mouseLocation) } == true
                         }) { panel?.alphaValue = $0 }
