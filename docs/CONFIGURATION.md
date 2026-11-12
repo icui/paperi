@@ -8,7 +8,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 {
   "gap": 8,
   "outerGap": 8,
-  "bottom": "thumbnail",
+  "bottom": "dot",
   "exclude": ["us.zoom.xos"],
   "float": [{"app": "com.apple.finder", "titleContains": "Copy"}],
   "tile": [{"app": "com.apple.systempreferences"}],
@@ -47,7 +47,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 | `gap`, `outerGap` | Space between windows and around the layout, in points. |
 | `focusAfterClose` | `left` (default), `right`, or `system`. A surviving tab or stacked window keeps the column focused. |
 | `focusScrollDuration` | Focus animation in seconds, default `0.22`; `0` disables it. |
-| `bottom` | `none`, `dot`, or `thumbnail` (default). Dots stay visible; actual window thumbnails appear for one second after layout changes, including focus, window creation/removal, and rearrangement. Click a thumbnail to focus and reveal that window. Hovering anywhere in the strip keeps it visible; leaving restarts the one-second dismissal delay. Clicking anywhere outside the strip hides it at once, and the focus change that click causes does not bring it back. Thumbnails also appear immediately when a horizontal swipe activates and stay visible through the gesture. Both hide with one window. Thumbnails require Screen Recording permission. Choose from **Show Config → Bottom** or edit this key. |
+| `bottom` | `dot` (default) or `none`. Dots along the bottom of each display show the strip's windows and which one is focused; they hide with one window. The former `thumbnail` value reads as `dot`: window thumbnails are now the on-demand tray (see [Gestures](#gestures)). Choose from **Show Config → Bottom** or edit this key. |
 | `swapHighlight` | Drag preview color as `#RRGGBB` or `#RRGGBBAA`. |
 
 ## Gestures
@@ -92,9 +92,10 @@ it has no tabs remaining.
 
 A quick tap with all gesture fingers (`tap`, default `tray`) shows the thumbnail
 tray centred on the pointer, on the display under it; click a thumbnail to focus that
-window. The tray stays while hovered, fades one second after the pointer leaves, and
-hides at once on a click outside it;
-later reveals return to the bottom edge. It needs `bottom` set to `thumbnail`. Only a
+window, or drag one sideways to reorder the strip. The tray stays while hovered, fades
+one second after the pointer leaves, and closes at once on a click outside it. The
+`tray` command (default ⌥⌘T) opens it the same way. Thumbnails require Screen
+Recording permission. Only a
 deliberate tap counts: fingers landing and lifting within 100 ms of each other, down
 for at most 250 ms, each moving at most 2.5 mm, without a physical click, a fourth
 finger, or another multi-finger gesture in the preceding 250 ms. Set `tap` to `none`
@@ -127,5 +128,5 @@ paperi msg status
 ```
 
 Other commands include `focus up|down`, `swap left|right|up|down`,
-`height +|-`, `center`, `split`, `slurp`, `barf`, `retile`, `pause`, `resume`,
+`height +|-`, `center`, `split`, `slurp`, `barf`, `tray`, `retile`, `pause`, `resume`,
 and `stop`. `paperi check-apps` explains which visible windows are eligible.

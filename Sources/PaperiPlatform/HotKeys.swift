@@ -23,6 +23,7 @@ public enum HotKeyBindings {
         ("alt-cmd-l", "width +"), ("alt-cmd-h", "width -"),
         ("alt-cmd-u", "height +"), ("alt-cmd-n", "height -"),
         ("alt-cmd-i", "slurp"), ("alt-cmd-o", "barf"),
+        ("alt-cmd-t", "tray"),
     ]
 
     public static var defaults: [Binding] { resolve(overrides: [:]).bindings }
@@ -117,7 +118,7 @@ public enum LiveCommand {
         guard let verb = args.first else { return "empty command" }
         let rest = Array(args.dropFirst())
         switch verb {
-        case "status", "retile", "refresh", "stop", "center", "split", "slurp", "barf", "float", "pause", "resume", "reload":
+        case "status", "retile", "refresh", "stop", "center", "split", "slurp", "barf", "float", "tray", "pause", "resume", "reload":
             return rest.isEmpty ? nil : "\(verb) takes no arguments"
         case "focus", "swap", "move":
             return rest.count == 1 && directions.contains(rest[0]) ? nil : "usage: \(verb) left|right|up|down"

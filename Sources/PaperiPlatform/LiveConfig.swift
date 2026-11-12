@@ -142,8 +142,22 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public var focusScrollDuration: Double?
     public var focusAfterClose: FocusAfterClose
     public var gap: Double?
-    public enum Bottom: String, Codable, CaseIterable, Sendable { case none, dot, thumbnail }
-    public var bottom: Bottom = .thumbnail
+    /// Indicator along the bottom of each display. The thumbnail tray is
+    /// summoned on demand instead (tap or the `tray` command); the retired
+    /// `thumbnail` value reads as `dot`.
+    public enum Bottom: String, Codable, CaseIterable, Sendable {
+        case none, dot
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.singleValueContainer()
+            let raw = try c.decode(String.self)
+            if raw == "thumbnail" { self = .dot; return }
+            guard let value = Bottom(rawValue: raw) else {
+                throw DecodingError.dataCorruptedError(in: c, debugDescription: "expected none or dot, got \(raw)")
+            }
+            self = value
+        }
+    }
+    public var bottom: Bottom = .dot
     public var outerGap: Double?
     /// Key spec → command (as accepted by `paperi msg`), merged over the
     /// built-in PaperWM bindings; `null` removes a default binding.
@@ -193,7 +207,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         } else {
             focusAfterClose = .left
         }
-        bottom = try c.decodeIfPresent(Bottom.self, forKey: .bottom) ?? .thumbnail
+        bottom = try c.decodeIfPresent(Bottom.self, forKey: .bottom) ?? .dot
         gap = try c.decodeIfPresent(Double.self, forKey: .gap)
         outerGap = try c.decodeIfPresent(Double.self, forKey: .outerGap)
         hotkeys = try c.decodeIfPresent([String: String?].self, forKey: .hotkeys) ?? [:]
@@ -246,7 +260,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "focusAfterClose": "left",
       "gap": 8,
       "outerGap": 8,
-      "bottom": "thumbnail",
+      "bottom": "dot",
       "swapHighlight": "#0A84FF4D",
       "gesture": {
         "enabled": true,

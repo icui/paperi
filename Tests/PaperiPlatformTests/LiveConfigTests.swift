@@ -31,8 +31,10 @@ struct LiveConfigTests {
     }
 
     @Test func bottomModes() throws {
-        #expect(LiveConfig().bottom == .thumbnail)
-        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).bottom == .thumbnail)
+        #expect(LiveConfig().bottom == .dot)
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).bottom == .dot)
+        // The retired bottom thumbnail strip reads as dots.
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"bottom":"thumbnail"}"#.utf8)).bottom == .dot)
         for mode in LiveConfig.Bottom.allCases {
             let data = Data("{\"bottom\":\"\(mode.rawValue)\"}".utf8)
             let config = try JSONDecoder().decode(LiveConfig.self, from: data)

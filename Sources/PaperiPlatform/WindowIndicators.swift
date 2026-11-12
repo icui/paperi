@@ -2,112 +2,61 @@ import AppKit
 import PaperiCore
 import ScreenCaptureKit
 
-/// Bottom UI above gesture overlays. Thumbnail clicks and drags never
-/// activate the panel.
+/// Window indicators above gesture overlays: page dots along the bottom of
+/// each display (`bottom: dot`), and the thumbnail tray, shown only when
+/// summoned (a gesture-finger tap or the `tray` command) centred on the
+/// pointer. Thumbnail clicks and drags never activate the panel.
 @MainActor final class WindowIndicators {
     private struct Presentation: Equatable {
         let space: UInt64
         let layout: Layout
         let canvas: Rect
-        let mode: LiveConfig.Bottom
     }
     var onSelect: ((UInt32, UInt64) -> Void)?
     /// A thumbnail was dragged to a new position in tray order.
     var onMove: ((UInt32, Int, UInt64) -> Void)?
-    private var panels: [String: NSPanel] = [:]
-    private var presentations: [String: Presentation] = [:]
-    private var tasks: [String: Task<Void, Never>] = [:]
-    private var requestedCaptureAccess = false
-    private var horizontalSwipeSpace: UInt64?
-    /// Displays whose thumbnail tray was summoned to a point (AppKit screen
-    /// coordinates). The tray stays there until it fades out.
+    private var mode: LiveConfig.Bottom = .dot
+    // Page dots, by display UUID.
+    private var dotPanels: [String: NSPanel] = [:]
+    private var dotPresentations: [String: Presentation] = [:]
+    // Open thumbnail trays, by display UUID.
+    private var trayPanels: [String: NSPanel] = [:]
+    private var trayPresentations: [String: Presentation] = [:]
+    private var trayTasks: [String: Task<Void, Never>] = [:]
+    /// Where each open tray was summoned (AppKit screen coordinates).
     private var anchors: [String: CGPoint] = [:]
-    /// Mouse-down monitors that dismiss the thumbnail tray on outside clicks.
+    private var requestedCaptureAccess = false
+    /// Mouse-down monitors that close the tray on outside clicks.
     private var clickMonitors: [Any] = []
-    /// When an outside click last dismissed the tray.
-    private var clickDismissedAt = -Double.infinity
-    /// After an outside click dismisses the tray, layout changes in this
-    /// window (seconds) do not bring it back: the click itself usually
-    /// focuses another window, and that must not re-reveal the tray.
-    static let clickDismissalHold = 1.0
-
-    private func installClickMonitors() {
-        guard clickMonitors.isEmpty else { return }
-        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        // Clicks in other apps. Global monitors run on the main thread.
-        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.dismissOnClick(at: NSEvent.mouseLocation) }
-        }) { clickMonitors.append(monitor) }
-        // Clicks in Paperi's own windows other than the tray (e.g. its menu).
-        if let monitor = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
-            MainActor.assumeIsolated {
-                guard let self, !self.panels.values.contains(where: { $0 === event.window }) else { return }
-                self.dismissOnClick(at: NSEvent.mouseLocation)
-            }
-            return event
-        }) { clickMonitors.append(monitor) }
-    }
-
-    private func removeClickMonitors() {
-        clickMonitors.forEach(NSEvent.removeMonitor)
-        clickMonitors.removeAll()
-    }
-
-    /// Hides visible thumbnail trays at once when a click lands outside them.
-    /// Presentations are kept, so the once-a-second refresh does not revive them.
-    private func dismissOnClick(at point: CGPoint) {
-        guard horizontalSwipeSpace == nil else { return }
-        for (id, panel) in panels where panel.isVisible && presentations[id]?.mode == .thumbnail {
-            guard !panel.frame.contains(point),
-                  (panel.contentView?.subviews.first as? WindowPreviews)?.isDragging != true else { continue }
-            tasks.removeValue(forKey: id)?.cancel()
-            anchors[id] = nil
-            panel.orderOut(nil)
-            clickDismissedAt = ProcessInfo.processInfo.systemUptime
-        }
-    }
 
     /// Shows the thumbnail tray of `displayUUID`'s current Space centred on
     /// `point`. Returns false when that display has no tray to show.
     @discardableResult
-    func summon(display displayUUID: String, at point: CGPoint,
-                coordinator: DisplaySpaceCoordinator, mode: LiveConfig.Bottom) -> Bool {
-        guard mode == .thumbnail,
-              let space = coordinator.displays.first(where: { $0.displayUUID == displayUUID })?.activeSpaceID else { return false }
+    func summon(display displayUUID: String, at point: CGPoint, coordinator: DisplaySpaceCoordinator) -> Bool {
         anchors[displayUUID] = point
-        update(coordinator, mode: mode, revealSpace: space)
-        guard presentations[displayUUID]?.space == space else {
+        update(coordinator, mode: mode, redrawTray: displayUUID)
+        guard trayPresentations[displayUUID] != nil else {
             anchors[displayUUID] = nil
             return false
         }
         return true
     }
 
-    func activateHorizontalSwipe(in space: UInt64, coordinator: DisplaySpaceCoordinator, mode: LiveConfig.Bottom) {
-        guard mode == .thumbnail else { return }
-        horizontalSwipeSpace = space
-        update(coordinator, mode: mode, revealSpace: space)
-    }
-
-    func finishHorizontalSwipe(coordinator: DisplaySpaceCoordinator, mode: LiveConfig.Bottom) {
-        guard let space = horizontalSwipeSpace else { return }
-        horizontalSwipeSpace = nil
-        update(coordinator, mode: mode, revealSpace: space)
-    }
-
     func hide() {
-        horizontalSwipeSpace = nil
-        anchors.removeAll()
-        removeClickMonitors()
-        for task in tasks.values { task.cancel() }
-        tasks.removeAll()
-        presentations.removeAll()
-        for panel in panels.values { panel.orderOut(nil) }
+        for id in Array(trayPanels.keys) { closeTray(id) }
+        dotPresentations.removeAll()
+        for panel in dotPanels.values { panel.orderOut(nil) }
     }
 
-    func update(_ coordinator: DisplaySpaceCoordinator, mode: LiveConfig.Bottom, revealSpace: UInt64? = nil) {
-        guard mode != .none else { hide(); return }
-        var visible = Set<String>()
+    /// Redraws dots and open trays whose Space or layout changed. Refresh
+    /// polls unchanged layouts once a second; they redraw nothing and never
+    /// restart a tray's dismissal delay. `redrawTray` (a display UUID, or
+    /// a Space's display via `redrawSpace`) forces its open tray to redraw,
+    /// e.g. to undo a rejected thumbnail drag.
+    func update(_ coordinator: DisplaySpaceCoordinator, mode: LiveConfig.Bottom,
+                redrawTray: String? = nil, redrawSpace: UInt64? = nil) {
+        self.mode = mode
+        var dots = Set<String>(), trays = Set<String>()
         let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
         for display in coordinator.displays {
             guard let space = display.activeSpaceID,
@@ -118,114 +67,158 @@ import ScreenCaptureKit
             let slots = layout.columns.flatMap(\.slots)
             guard slots.count > 1 else { continue }
             let id = display.displayUUID
-            visible.insert(id)
-            let presentation = Presentation(space: space, layout: layout, canvas: display.canvas, mode: mode)
-            // Refresh polls unchanged layouts once a second. They must not revive
-            // the thumbnail strip or restart its dismissal deadline.
-            guard presentations[id] != presentation || space == revealSpace else { continue }
-            if mode == .thumbnail, space != revealSpace, presentations[id]?.mode == .thumbnail,
-               ProcessInfo.processInfo.systemUptime - clickDismissedAt < Self.clickDismissalHold {
-                presentations[id] = presentation
-                continue
-            }
-            presentations[id] = presentation
-            tasks[id]?.cancel()
-            let panel = panels[id] ?? makePanel()
-            panels[id] = panel
-            let thumbnail = mode == .thumbnail
-            panel.ignoresMouseEvents = !thumbnail
-            let width = min(CGFloat(slots.count) * (thumbnail ? 116 : 14) + 20,
-                            max(28, display.canvas.width - 32))
-            let height: CGFloat = thumbnail ? 96 : 28
+            let presentation = Presentation(space: space, layout: layout, canvas: display.canvas)
             let screen = NSRect(x: display.canvas.x, y: primaryTop - display.canvas.y - display.canvas.height,
                                 width: display.canvas.width, height: display.canvas.height)
-            var frame = NSRect(x: screen.minX + (screen.width - width) / 2, y: screen.minY + 12,
-                               width: width, height: height)
-            if thumbnail, let anchor = anchors[id] {
-                // Centred on the pointer, kept on its display.
-                frame.origin.x = min(max(anchor.x - width / 2, screen.minX + 8), screen.maxX - 8 - width)
-                frame.origin.y = min(max(anchor.y - height / 2, screen.minY + 8), screen.maxY - 8 - height)
+            if mode == .dot {
+                dots.insert(id)
+                if dotPresentations[id] != presentation {
+                    dotPresentations[id] = presentation
+                    showDots(id, slots: slots, focused: layout.focused, screen: screen)
+                }
             }
-            panel.setFrame(frame, display: false)
-            guard let glass = panel.contentView else { continue }
-            let cachedImages = (glass.subviews.first as? WindowPreviews)?.images ?? [:]
-            glass.subviews.forEach { $0.removeFromSuperview() }
-            if thumbnail {
-                installClickMonitors()
-                let previews = WindowPreviews(frame: NSRect(origin: .zero, size: frame.size))
-                previews.ids = slots.map(\.activeMember)
-                previews.onSelect = { [weak self] window in self?.onSelect?(window, space) }
-                previews.onMove = { [weak self] window, position in self?.onMove?(window, position, space) }
-                previews.images = cachedImages.filter { previews.ids.contains($0.key) }
-                previews.selected = slots.firstIndex { $0.id == layout.focused }
-                glass.addSubview(previews)
-                if previews.images.isEmpty {
-                    panel.orderOut(nil)
-                } else {
-                    panel.alphaValue = 1
-                    panel.orderFrontRegardless()
+            if let anchor = anchors[id] {
+                trays.insert(id)
+                if trayPresentations[id] != presentation || id == redrawTray || space == redrawSpace {
+                    trayPresentations[id] = presentation
+                    showTray(id, space: space, slots: slots, focused: layout.focused, screen: screen, anchor: anchor)
                 }
-                tasks[id] = Task { [weak self, weak panel] in
-                    guard let self else { return }
-                    var allowed = CGPreflightScreenCaptureAccess()
-                    if !allowed && !self.requestedCaptureAccess {
-                        self.requestedCaptureAccess = true
-                        allowed = CGRequestScreenCaptureAccess()
-                    }
-                    guard allowed else { self.anchors[id] = nil; return }
-                    guard !Task.isCancelled else { return }
-                    do {
-                        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
-                        for wid in previews.ids {
-                            try Task.checkCancellation()
-                            guard let window = content.windows.first(where: { $0.windowID == wid }) else { continue }
-                            let filter = SCContentFilter(desktopIndependentWindow: window)
-                            let config = SCStreamConfiguration()
-                            let aspect = max(0.1, window.frame.width / max(1, window.frame.height))
-                            config.width = 224
-                            config.height = max(1, min(448, Int(224 / aspect)))
-                            config.showsCursor = false
-                            config.ignoreShadowsSingleWindow = true
-                            let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-                            try Task.checkCancellation()
-                            previews.images[wid] = NSImage(cgImage: image, size: .zero)
-                        }
-                        try Task.checkCancellation()
-                        guard !previews.images.isEmpty else { return }
-                        previews.needsDisplay = true
-                        panel?.alphaValue = 1
-                        panel?.orderFrontRegardless()
-                        // Hovering anywhere in the strip holds it open, including
-                        // its padding, as does a thumbnail drag that strays off it.
-                        // Entering during a fade restores visibility; leaving
-                        // starts a fresh one-second dismissal delay.
-                        try await ThumbnailFade.run(delay: 1, shouldStayVisible: {
-                            self.horizontalSwipeSpace == space || previews.isDragging ||
-                                panel.map { $0.frame.contains(NSEvent.mouseLocation) } == true
-                        }) { panel?.alphaValue = $0 }
-                        try Task.checkCancellation()
-                        panel?.orderOut(nil)
-                        // The next reveal returns to the bottom of the display.
-                        self.anchors[id] = nil
-                    } catch {
-                        // Cancellation leaves presentation to the newer refresh;
-                        // unavailable captures never get replaced with fake previews.
-                    }
-                }
-            } else {
-                let dots = PageDots(frame: NSRect(origin: .zero, size: frame.size))
-                dots.count = slots.count
-                dots.selected = slots.firstIndex { $0.id == layout.focused }
-                glass.addSubview(dots)
-                panel.alphaValue = 1
-                panel.orderFrontRegardless()
             }
         }
-        for (id, panel) in panels where !visible.contains(id) {
-            tasks.removeValue(forKey: id)?.cancel()
-            presentations.removeValue(forKey: id)
-            anchors.removeValue(forKey: id)
+        for (id, panel) in dotPanels where !dots.contains(id) {
+            dotPresentations.removeValue(forKey: id)
             panel.orderOut(nil)
+        }
+        for id in trayPanels.keys where !trays.contains(id) { closeTray(id) }
+    }
+
+    private func showDots(_ id: String, slots: [Slot], focused: String?, screen: NSRect) {
+        let panel = dotPanels[id] ?? makePanel()
+        dotPanels[id] = panel
+        let width = min(CGFloat(slots.count) * 14 + 20, max(28, screen.width - 32))
+        let frame = NSRect(x: screen.minX + (screen.width - width) / 2, y: screen.minY + 12, width: width, height: 28)
+        panel.setFrame(frame, display: false)
+        guard let glass = panel.contentView else { return }
+        glass.subviews.forEach { $0.removeFromSuperview() }
+        let view = PageDots(frame: NSRect(origin: .zero, size: frame.size))
+        view.count = slots.count
+        view.selected = slots.firstIndex { $0.id == focused }
+        glass.addSubview(view)
+        panel.alphaValue = 1
+        panel.orderFrontRegardless()
+    }
+
+    private func showTray(_ id: String, space: UInt64, slots: [Slot], focused: String?, screen: NSRect, anchor: CGPoint) {
+        trayTasks[id]?.cancel()
+        let panel = trayPanels[id] ?? makePanel()
+        trayPanels[id] = panel
+        panel.ignoresMouseEvents = false
+        installClickMonitors()
+        let width = min(CGFloat(slots.count) * 116 + 20, max(28, screen.width - 32))
+        let height: CGFloat = 96
+        // Centred on the pointer, kept on its display.
+        let frame = NSRect(x: min(max(anchor.x - width / 2, screen.minX + 8), screen.maxX - 8 - width),
+                           y: min(max(anchor.y - height / 2, screen.minY + 8), screen.maxY - 8 - height),
+                           width: width, height: height)
+        panel.setFrame(frame, display: false)
+        guard let glass = panel.contentView else { return }
+        let cachedImages = (glass.subviews.first as? WindowPreviews)?.images ?? [:]
+        glass.subviews.forEach { $0.removeFromSuperview() }
+        let previews = WindowPreviews(frame: NSRect(origin: .zero, size: frame.size))
+        previews.ids = slots.map(\.activeMember)
+        previews.onSelect = { [weak self] window in self?.onSelect?(window, space) }
+        previews.onMove = { [weak self] window, position in self?.onMove?(window, position, space) }
+        previews.images = cachedImages.filter { previews.ids.contains($0.key) }
+        previews.selected = slots.firstIndex { $0.id == focused }
+        glass.addSubview(previews)
+        if previews.images.isEmpty {
+            panel.orderOut(nil)
+        } else {
+            panel.alphaValue = 1
+            panel.orderFrontRegardless()
+        }
+        trayTasks[id] = Task { [weak self, weak panel] in
+            guard let self else { return }
+            var allowed = CGPreflightScreenCaptureAccess()
+            if !allowed && !self.requestedCaptureAccess {
+                self.requestedCaptureAccess = true
+                allowed = CGRequestScreenCaptureAccess()
+            }
+            guard allowed else { self.closeTray(id); return }
+            guard !Task.isCancelled else { return }
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+                for wid in previews.ids {
+                    try Task.checkCancellation()
+                    guard let window = content.windows.first(where: { $0.windowID == wid }) else { continue }
+                    let filter = SCContentFilter(desktopIndependentWindow: window)
+                    let config = SCStreamConfiguration()
+                    let aspect = max(0.1, window.frame.width / max(1, window.frame.height))
+                    config.width = 224
+                    config.height = max(1, min(448, Int(224 / aspect)))
+                    config.showsCursor = false
+                    config.ignoreShadowsSingleWindow = true
+                    let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                    try Task.checkCancellation()
+                    previews.images[wid] = NSImage(cgImage: image, size: .zero)
+                }
+                try Task.checkCancellation()
+                guard !previews.images.isEmpty else { self.closeTray(id); return }
+                previews.needsDisplay = true
+                panel?.alphaValue = 1
+                panel?.orderFrontRegardless()
+                // Hovering anywhere in the tray holds it open, including its
+                // padding, as does a thumbnail drag that strays off it.
+                // Entering during a fade restores visibility; leaving starts
+                // a fresh one-second dismissal delay.
+                try await ThumbnailFade.run(delay: 1, shouldStayVisible: {
+                    previews.isDragging || panel.map { $0.frame.contains(NSEvent.mouseLocation) } == true
+                }) { panel?.alphaValue = $0 }
+                try Task.checkCancellation()
+                self.closeTray(id)
+            } catch {
+                // Cancellation leaves presentation to the newer redraw;
+                // unavailable captures never get replaced with fake previews.
+            }
+        }
+    }
+
+    private func closeTray(_ id: String) {
+        trayTasks.removeValue(forKey: id)?.cancel()
+        trayPresentations.removeValue(forKey: id)
+        anchors.removeValue(forKey: id)
+        trayPanels[id]?.orderOut(nil)
+        if anchors.isEmpty { removeClickMonitors() }
+    }
+
+    private func installClickMonitors() {
+        guard clickMonitors.isEmpty else { return }
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        // Clicks in other apps. Global monitors run on the main thread.
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
+            MainActor.assumeIsolated { self?.closeTrays(outside: NSEvent.mouseLocation) }
+        }) { clickMonitors.append(monitor) }
+        // Clicks in Paperi's own windows other than the tray (e.g. its menu).
+        if let monitor = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            MainActor.assumeIsolated {
+                guard let self, !self.trayPanels.values.contains(where: { $0 === event.window }) else { return }
+                self.closeTrays(outside: NSEvent.mouseLocation)
+            }
+            return event
+        }) { clickMonitors.append(monitor) }
+    }
+
+    private func removeClickMonitors() {
+        clickMonitors.forEach(NSEvent.removeMonitor)
+        clickMonitors.removeAll()
+    }
+
+    /// Closes open trays at once when a click lands outside them.
+    private func closeTrays(outside point: CGPoint) {
+        for (id, panel) in trayPanels where anchors[id] != nil {
+            guard !panel.frame.contains(point),
+                  (panel.contentView?.subviews.first as? WindowPreviews)?.isDragging != true else { continue }
+            closeTray(id)
         }
     }
 

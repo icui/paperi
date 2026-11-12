@@ -65,6 +65,10 @@ Swipe down to **New Window**, down then right for **Close Tab**, or down then le
 
 New-window creation uses the app's **New Window** menu item, falling back to ⌘N when no matching item is available. To open a window of a specific app, set `gesture.swipeDown` to `openApp` and `gesture.swipeDownApp` to its bundle ID (for example, `com.apple.Terminal`). Paperi launches the app if needed or requests a new window if it is running. You can also change swipe down to minimize, or disable it.
 
+### Window tray
+
+Tap with three fingers to show thumbnails of every window in the strip, centred on the pointer. Click one to focus it, or drag one sideways to reorder the strip. The tray closes on a click outside it, or a second after the pointer leaves it. ⌥⌘T opens it too. Thumbnails require Screen Recording permission.
+
 If macOS uses the same finger count for Mission Control, Spaces, or three-finger drag, Paperi disables its conflicting swipe and shows a warning. Change the system gesture or set `gesture.fingers` to `4`.
 
 ## Drag to reorder or tile vertically
@@ -101,6 +105,7 @@ All default shortcuts below use **⌥⌘ (Option–Command)**.
 | S | Split the available width with the left neighbor. |
 | I / O | Stack into the left column / move out into a separate column. |
 | F | Toggle floating for the focused window. |
+| T | Show the window tray at the pointer. |
 
 Dialogs, sheets, menus, and popovers stay outside the strip. Utility windows without a fullscreen button float by default. Native macOS tab groups share one position in the layout.
 

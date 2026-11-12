@@ -8,9 +8,9 @@ struct HotKeyBindingsTests {
     @Test func defaultsMatchUserPaperWMConfiguration() {
         let defaults = HotKeyBindings.defaults
         let table = Dictionary(uniqueKeysWithValues: defaults.map { ($0.spec, $0.command) })
-        #expect(defaults.count == 15)
+        #expect(defaults.count == 16)
         #expect(defaults.allSatisfy { $0.modifiers == UInt32(cmdKey | optionKey) })
-        #expect(Set(defaults.map(\.keyCode)).count == 15)
+        #expect(Set(defaults.map(\.keyCode)).count == 16)
         #expect(table["alt-cmd-j"] == ["focus", "left"] && table["alt-cmd-k"] == ["focus", "right"])
         #expect(table["alt-cmd-f"] == ["float"] && table["alt-cmd-c"] == ["center"] && table["alt-cmd-s"] == ["split"])
         #expect(table["alt-cmd-left"] == ["swap", "left"] && table["alt-cmd-right"] == ["swap", "right"])
@@ -18,6 +18,7 @@ struct HotKeyBindingsTests {
         #expect(table["alt-cmd-l"] == ["width", "+"] && table["alt-cmd-h"] == ["width", "-"])
         #expect(table["alt-cmd-u"] == ["height", "+"] && table["alt-cmd-n"] == ["height", "-"])
         #expect(table["alt-cmd-i"] == ["slurp"] && table["alt-cmd-o"] == ["barf"])
+        #expect(table["alt-cmd-t"] == ["tray"])
         for n in 1...9 { #expect(table["alt-cmd-\(n)"] == nil) }
         #expect(defaults.first { $0.spec == "alt-cmd-left" }?.display == "⌥⌘←")
     }
@@ -44,7 +45,7 @@ struct HotKeyBindingsTests {
         #expect(table["alt-cmd-j"] == ["focus", "up"])
         #expect(table["alt-cmd-o"] == nil)
         #expect(table["ctrl-alt-l"] == ["width", "+", "0.2"])
-        #expect(resolved.bindings.count == 15)
+        #expect(resolved.bindings.count == 16)
         #expect(resolved.errors.count == 2)
     }
 

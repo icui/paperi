@@ -1133,7 +1133,6 @@ import PaperiCore
     private var gestureBlockedByAnimation: Bool { motionTimer != nil || swipe?.released != nil }
 
     private func cancelSwipe() {
-        windowIndicators.finishHorizontalSwipe(coordinator: coordinator, mode: options.config.bottom)
         standaloneOverlay?.fadeOut(); standaloneOverlay = nil
         standalonePull = false
         swipeGuard?.invalidate(); swipeGuard = nil
@@ -1278,9 +1277,6 @@ import PaperiCore
                         slotSwipe = nil
                         return
                     }
-                    if let space = swipe?.space {
-                        windowIndicators.activateHorizontalSwipe(in: space, coordinator: coordinator, mode: options.config.bottom)
-                    }
                     if case .active(_, let progress, _, _) = swipeReducer.state {
                         updateSwipe(progress)
                     }
@@ -1363,11 +1359,7 @@ import PaperiCore
 
         case .tap:
             guard options.config.gesture.tap == .tray else { return }
-            guard options.config.bottom == .thumbnail else { log("tap: tray needs bottom = thumbnail"); return }
-            guard let display = pointerDisplay() else { return }
-            let shown = windowIndicators.summon(display: display.displayUUID, at: NSEvent.mouseLocation,
-                                                coordinator: coordinator, mode: options.config.bottom)
-            log(shown ? "tap: tray at pointer" : "tap: no tray on this display")
+            log(showTray() ? "tap: tray at pointer" : "tap: no tray on this display")
 
         case .cancel:
             // Only a sequence we are tracking may cancel; an ignored one must
@@ -1377,6 +1369,13 @@ import PaperiCore
             slotSwipe?.cancel()
             slotSwipe = nil
         }
+    }
+
+    /// Shows the thumbnail tray of the display under the pointer, centred on
+    /// the pointer. Returns false when that display has no tray to show.
+    @discardableResult private func showTray() -> Bool {
+        guard let display = pointerDisplay() else { return false }
+        return windowIndicators.summon(display: display.displayUUID, at: NSEvent.mouseLocation, coordinator: coordinator)
     }
 
     /// App actions remain available when no tiled window can supply a strip.
@@ -2046,10 +2045,7 @@ import PaperiCore
     /// for simulations. A rejected commit slides back with no writes.
     func endSwipe(commit requested: Bool, direction requestedDirection: Direction? = nil) {
         defer {
-            if running {
-                windowIndicators.finishHorizontalSwipe(coordinator: coordinator, mode: options.config.bottom)
-                windowIndicators.update(coordinator, mode: options.config.bottom)
-            }
+            if running { windowIndicators.update(coordinator, mode: options.config.bottom) }
         }
         guard var state = swipe, state.released == nil else { return }
         let direction: Direction = requestedDirection ?? (state.targetProgress < 0 ? .left : .right)
@@ -2351,7 +2347,7 @@ import PaperiCore
         reveal(session)
         animateFocus(space: space, byID: latestSurvey)
         _ = raise(wid)
-        windowIndicators.update(coordinator, mode: options.config.bottom, revealSpace: space)
+        windowIndicators.update(coordinator, mode: options.config.bottom)
         scheduleRefresh()
     }
 
@@ -2362,7 +2358,7 @@ import PaperiCore
               coordinator.spaceForWindow[wid] == space,
               let session = coordinator.sessions[space], !session.state.interactionSuppressed,
               session.move(windowID: wid, to: position, ticket: session.ticket) else {
-            windowIndicators.update(coordinator, mode: options.config.bottom, revealSpace: space)
+            windowIndicators.update(coordinator, mode: options.config.bottom, redrawSpace: space)
             return
         }
         log("moved \(wid) to tray position \(position)")
@@ -2370,7 +2366,7 @@ import PaperiCore
         forceApply = true
         reveal(session)
         refresh()
-        windowIndicators.update(coordinator, mode: options.config.bottom, revealSpace: space)
+        windowIndicators.update(coordinator, mode: options.config.bottom, redrawSpace: space)
     }
 
     private func raise(_ wid: UInt32) -> Bool {
@@ -2455,6 +2451,8 @@ import PaperiCore
             return layoutCommand { layout, _ in layout.barf() }
         case "float":
             return toggleFloat()
+        case "tray":
+            return showTray() ? ["ok": true] : fail("no tray on the display under the pointer")
         default:
             return fail("unknown command \(verb)")
         }
