@@ -3,7 +3,8 @@ import PaperiCore
 import ScreenCaptureKit
 
 /// Window indicators above gesture overlays: page dots along the bottom of
-/// each display (`bottom: dot`), and the thumbnail tray, shown only when
+/// each display (`bottom: dot`; app glyphs when sketchybar-app-font is
+/// installed), and the thumbnail tray, shown only when
 /// summoned (a gesture-finger tap or the `tray` command) centred on the
 /// pointer. Thumbnail clicks and drags never activate the panel.
 @MainActor final class WindowIndicators {
@@ -95,17 +96,36 @@ import ScreenCaptureKit
     private func showDots(_ id: String, slots: [Slot], focused: String?, screen: NSRect) {
         let panel = dotPanels[id] ?? makePanel()
         dotPanels[id] = panel
-        let width = min(CGFloat(slots.count) * 14 + 20, max(28, screen.width - 32))
+        // Monochrome app glyphs when sketchybar-app-font is installed, else dots.
+        let glyphs = PageDots.font == nil ? nil : Self.appGlyphs(slots.map(\.activeMember))
+        let pitch: CGFloat = glyphs == nil ? 14 : PageDots.glyphPitch
+        let width = min(CGFloat(slots.count) * pitch + 20, max(28, screen.width - 32))
         let frame = NSRect(x: screen.minX + (screen.width - width) / 2, y: screen.minY + 12, width: width, height: 28)
         panel.setFrame(frame, display: false)
         guard let glass = panel.contentView else { return }
         glass.subviews.forEach { $0.removeFromSuperview() }
         let view = PageDots(frame: NSRect(origin: .zero, size: frame.size))
         view.count = slots.count
+        view.glyphs = glyphs
         view.selected = slots.firstIndex { $0.id == focused }
         glass.addSubview(view)
         panel.alphaValue = 1
         panel.orderFrontRegardless()
+    }
+
+    /// sketchybar-app-font ligatures for the owning apps of `windows`;
+    /// unknown apps get the font's generic glyph.
+    private static func appGlyphs(_ windows: [UInt32]) -> [String] {
+        let ids = windows.map { CGWindowID($0) as CFNumber } as CFArray
+        let info = CGWindowListCreateDescriptionFromArray(ids) as? [[String: Any]] ?? []
+        var names: [UInt32: String] = [:]
+        for entry in info {
+            guard let number = entry[kCGWindowNumber as String] as? UInt32,
+                  let pid = entry[kCGWindowOwnerPID as String] as? pid_t else { continue }
+            names[number] = NSRunningApplication(processIdentifier: pid)?.localizedName
+                ?? entry[kCGWindowOwnerName as String] as? String
+        }
+        return windows.map { names[$0].flatMap { AppGlyphs.ligatures[$0] } ?? ":default:" }
     }
 
     private func showTray(_ id: String, space: UInt64, slots: [Slot], focused: String?, screen: NSRect, anchor: CGPoint) {
@@ -375,11 +395,31 @@ import ScreenCaptureKit
 }
 
 @MainActor private final class PageDots: NSView {
+    /// sketchybar-app-font, when installed.
+    static let font = NSFont(name: "sketchybar-app-font", size: 15)
+    /// Horizontal space per app glyph.
+    static let glyphPitch: CGFloat = 24
     var count = 0
     var selected: Int?
+    /// One ligature per page; nil draws plain dots.
+    var glyphs: [String]?
 
     override func draw(_ dirtyRect: NSRect) {
         guard count > 0 else { return }
+        if let glyphs, let font = Self.font, glyphs.count == count {
+            let pitch = min(Self.glyphPitch, (bounds.width - 20) / CGFloat(count))
+            let start = bounds.midX - CGFloat(count - 1) * pitch / 2
+            for (index, glyph) in glyphs.enumerated() {
+                let text = NSAttributedString(string: glyph, attributes: [
+                    .font: font,
+                    .foregroundColor: NSColor.white.withAlphaComponent(index == selected ? 1 : 0.4),
+                ])
+                let size = text.size()
+                text.draw(at: NSPoint(x: start + CGFloat(index) * pitch - size.width / 2,
+                                      y: bounds.midY - size.height / 2))
+            }
+            return
+        }
         let spacing = min(14, (bounds.width - 20) / CGFloat(count))
         let diameter = min(6, spacing * 0.65)
         let start = bounds.midX - CGFloat(count - 1) * spacing / 2
