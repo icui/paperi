@@ -179,8 +179,8 @@ private struct SettingsView: View {
             .navigationTitle("Settings")
             .searchable(text: $model.search, prompt: "Search settings")
             // An ideal width alone can yield to the system's narrower default.
-            .frame(minWidth: 260)
-            .navigationSplitViewColumnWidth(min: 260, ideal: 260, max: 320)
+            .frame(minWidth: 230)
+            .navigationSplitViewColumnWidth(min: 230, ideal: 230, max: 320)
         } detail: {
             Form {
                 ForEach(settings, id: \.0) { category, fields in
