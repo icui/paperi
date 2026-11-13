@@ -45,7 +45,7 @@ extension LiveManager {
         animateFocus(space: space, byID: latestSurvey)
         _ = raise(wid)
         raiseNeighbours(of: wid, pid: pid, in: space)
-        windowIndicators.update(coordinator, mode: options.config.bottom)
+        windowIndicators.update(coordinator, mode: options.config.bottomDotsVisibility)
         scheduleRefresh()
     }
 
@@ -103,7 +103,7 @@ extension LiveManager {
               coordinator.spaceForWindow[wid] == space,
               let session = coordinator.sessions[space], !session.state.interactionSuppressed,
               session.move(windowID: wid, to: position, ticket: session.ticket) else {
-            windowIndicators.update(coordinator, mode: options.config.bottom, redrawSpace: space)
+            windowIndicators.update(coordinator, mode: options.config.bottomDotsVisibility, redrawSpace: space)
             return
         }
         log("moved \(wid) to tray position \(position)")
@@ -111,7 +111,7 @@ extension LiveManager {
         forceApply = true
         reveal(session)
         refresh()
-        windowIndicators.update(coordinator, mode: options.config.bottom, redrawSpace: space)
+        windowIndicators.update(coordinator, mode: options.config.bottomDotsVisibility, redrawSpace: space)
     }
 
     func raise(_ wid: UInt32) -> Bool {

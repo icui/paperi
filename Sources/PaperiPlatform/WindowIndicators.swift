@@ -3,7 +3,7 @@ import PaperiCore
 import ScreenCaptureKit
 
 /// Window indicators above gesture overlays: page dots along the bottom of
-/// each display (`bottom: dot`), and the thumbnail tray, shown only when
+/// each display (`bottomDotsVisibility`), and the thumbnail tray, shown only when
 /// summoned (a gesture-finger tap or the `tray` command) centred on the
 /// pointer. Thumbnail clicks and drags never activate the panel.
 @MainActor final class WindowIndicators {
@@ -15,9 +15,38 @@ import ScreenCaptureKit
     var onSelect: ((UInt32, UInt64) -> Void)?
     /// A thumbnail was dragged to a new position in tray order.
     var onMove: ((UInt32, Int, UInt64) -> Void)?
-    private var mode: LiveConfig.Bottom = .dot
+    private var mode: LiveConfig.BottomDotsVisibility = .auto
+    private var autoDotsDisplay: String?
+    private var dotsDismissal: Task<Void, Never>?
+
+    func beginHorizontalSwipe(display: String, coordinator: DisplaySpaceCoordinator,
+                              mode: LiveConfig.BottomDotsVisibility) {
+        let changed = autoDotsDisplay != display || self.mode != mode
+        dotsDismissal?.cancel()
+        dotsDismissal = nil
+        autoDotsDisplay = display
+        guard changed else { return }
+        update(coordinator, mode: mode)
+    }
+
+    func finishHorizontalSwipe() {
+        guard autoDotsDisplay != nil, dotsDismissal == nil else { return }
+        dotsDismissal = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(650)) } catch { return }
+            guard let self else { return }
+            self.autoDotsDisplay = nil
+            self.dotsDismissal = nil
+            if self.mode == .auto {
+                self.dotPresentations.removeAll()
+                for id in self.dotPanels.keys { self.fadeDots(id, visible: false) }
+            }
+        }
+    }
+
     // Page dots, by display UUID.
     private var dotPanels: [String: NSPanel] = [:]
+    private var dotFadeTasks: [String: Task<Void, Never>] = [:]
+    private var dotFadeTargets: [String: Bool] = [:]
     private var dotPresentations: [String: Presentation] = [:]
     // Open thumbnail trays, by display UUID.
     private var trayPanels: [String: NSPanel] = [:]
@@ -43,8 +72,12 @@ import ScreenCaptureKit
     }
 
     func hide() {
+        dotsDismissal?.cancel(); dotsDismissal = nil; autoDotsDisplay = nil
         for id in Array(trayPanels.keys) { closeTray(id) }
         dotPresentations.removeAll()
+        for task in dotFadeTasks.values { task.cancel() }
+        dotFadeTasks.removeAll()
+        dotFadeTargets.removeAll()
         for panel in dotPanels.values { panel.orderOut(nil) }
     }
 
@@ -53,7 +86,7 @@ import ScreenCaptureKit
     /// restart a tray's dismissal delay. `redrawTray` (a display UUID, or
     /// a Space's display via `redrawSpace`) forces its open tray to redraw,
     /// e.g. to undo a rejected thumbnail drag.
-    func update(_ coordinator: DisplaySpaceCoordinator, mode: LiveConfig.Bottom,
+    func update(_ coordinator: DisplaySpaceCoordinator, mode: LiveConfig.BottomDotsVisibility,
                 redrawTray: String? = nil, redrawSpace: UInt64? = nil) {
         self.mode = mode
         var dots = Set<String>(), trays = Set<String>()
@@ -70,9 +103,9 @@ import ScreenCaptureKit
             let presentation = Presentation(space: space, layout: layout, canvas: display.canvas)
             let screen = NSRect(x: display.canvas.x, y: primaryTop - display.canvas.y - display.canvas.height,
                                 width: display.canvas.width, height: display.canvas.height)
-            if mode == .dot {
+            if mode == .visible || (mode == .auto && autoDotsDisplay == id) {
                 dots.insert(id)
-                if dotPresentations[id] != presentation {
+                if dotPresentations[id] != presentation || dotPanels[id]?.isVisible != true {
                     dotPresentations[id] = presentation
                     showDots(id, slots: slots, focused: layout.focused, screen: screen)
                 }
@@ -85,9 +118,9 @@ import ScreenCaptureKit
                 }
             }
         }
-        for (id, panel) in dotPanels where !dots.contains(id) {
+        for id in dotPanels.keys where !dots.contains(id) {
             dotPresentations.removeValue(forKey: id)
-            panel.orderOut(nil)
+            fadeDots(id, visible: false)
         }
         for id in trayPanels.keys where !trays.contains(id) { closeTray(id) }
     }
@@ -101,11 +134,43 @@ import ScreenCaptureKit
         guard let glass = panel.contentView else { return }
         glass.subviews.forEach { $0.removeFromSuperview() }
         let view = PageDots(frame: NSRect(origin: .zero, size: frame.size))
+        view.autoresizingMask = [.width, .height]
         view.count = slots.count
         view.selected = slots.firstIndex { $0.id == focused }
         glass.addSubview(view)
-        panel.alphaValue = 1
-        panel.orderFrontRegardless()
+        view.needsDisplay = true
+        fadeDots(id, visible: true)
+    }
+
+    /// Continue from the current opacity when another swipe reverses a fade.
+    private func fadeDots(_ id: String, visible: Bool) {
+        guard let panel = dotPanels[id], dotFadeTargets[id] != visible else { return }
+        dotFadeTasks[id]?.cancel()
+        dotFadeTargets[id] = visible
+        if visible, !panel.isVisible {
+            panel.alphaValue = 0
+            panel.orderFrontRegardless()
+        }
+        let from = panel.alphaValue
+        let to: CGFloat = visible ? 1 : 0
+        dotFadeTasks[id] = Task { [weak self, weak panel] in
+            let started = ProcessInfo.processInfo.systemUptime
+            do {
+                while true {
+                    try Task.checkCancellation()
+                    guard let panel else { return }
+                    let progress = min(1, (ProcessInfo.processInfo.systemUptime - started) / 0.16)
+                    let eased = progress * progress * (3 - 2 * progress)
+                    panel.alphaValue = from + (to - from) * CGFloat(eased)
+                    if progress >= 1 {
+                        if !visible { panel.orderOut(nil) }
+                        self?.dotFadeTasks[id] = nil
+                        return
+                    }
+                    try await Task.sleep(for: .milliseconds(8))
+                }
+            } catch { return }
+        }
     }
 
     private func showTray(_ id: String, space: UInt64, slots: [Slot], focused: String?, screen: NSRect, anchor: CGPoint) {

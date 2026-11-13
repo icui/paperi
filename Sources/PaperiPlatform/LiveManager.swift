@@ -499,7 +499,7 @@ import PaperiCore
     /// topology → admissions → focus → observed resizes → effects.
     public func refresh() {
         guard running, !busy else { return }
-        defer { windowIndicators.update(coordinator, mode: options.config.bottom) }
+        defer { windowIndicators.update(coordinator, mode: options.config.bottomDotsVisibility) }
         if motionActive { return }
         motionFrames.removeAll()
         if animateCachedFocus() { return }

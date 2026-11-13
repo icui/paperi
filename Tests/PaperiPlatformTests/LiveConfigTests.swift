@@ -56,18 +56,29 @@ struct LiveConfigTests {
     }
 
     @Test func bottomModes() throws {
-        #expect(LiveConfig().bottom == .dot)
-        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).bottom == .dot)
-        // The retired bottom thumbnail strip reads as dots.
-        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"bottom":"thumbnail"}"#.utf8)).bottom == .dot)
-        for mode in LiveConfig.Bottom.allCases {
-            let data = Data("{\"bottom\":\"\(mode.rawValue)\"}".utf8)
+        #expect(LiveConfig().bottomDotsVisibility == .auto)
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).bottomDotsVisibility == .auto)
+        for (legacy, expected) in [("dot", "visible"), ("dots", "visible"), ("thumbnail", "visible"), ("none", "hidden")] {
+            let data = Data("{\"bottom\":\"\(legacy)\"}".utf8)
             let config = try JSONDecoder().decode(LiveConfig.self, from: data)
-            #expect(config.bottom == mode)
+            #expect(config.bottomDotsVisibility.rawValue == expected)
+            let encoded = try JSONEncoder().encode(config)
+            let object = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+            #expect(object["bottom"] == nil)
+            #expect(object["bottomDotsVisibility"] as? String == expected)
+        }
+        for mode in LiveConfig.BottomDotsVisibility.allCases {
+            let data = Data("{\"bottomDotsVisibility\":\"\(mode.rawValue)\"}".utf8)
+            let config = try JSONDecoder().decode(LiveConfig.self, from: data)
+            #expect(config.bottomDotsVisibility == mode)
             #expect(try JSONDecoder().decode(LiveConfig.self, from: JSONEncoder().encode(config)) == config)
         }
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"bottom":"invalid"}"#.utf8))
+        let precedence = Data(#"{"bottomDotsVisibility":"auto","bottom":"none"}"#.utf8)
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: precedence).bottomDotsVisibility == .auto)
+        for json in [#"{"bottom":"invalid"}"#, #"{"bottomDotsVisibility":"invalid"}"#] {
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(LiveConfig.self, from: Data(json.utf8))
+            }
         }
     }
 

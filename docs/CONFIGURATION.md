@@ -10,7 +10,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 {
   "gap": 8,
   "outerGap": 8,
-  "bottom": "dot",
+  "bottomDotsVisibility": "auto",
   "exclude": ["us.zoom.xos"],
   "float": [{"app": "com.apple.finder", "titleContains": "Copy"}],
   "tile": [{"app": "com.apple.systempreferences"}],
@@ -147,3 +147,5 @@ Other commands include `focus up|down`, `swap left|right|up|down`,
 and `stop`. `paperi check-apps` explains which visible windows are eligible.
 
 Set `"hotkeysEnabled": false` or turn off **Settings → Shortcuts → Enable shortcuts** to disable all global shortcuts while keeping your bindings. The default is `true`; `--no-hotkeys` takes precedence. Apply Changes saves and applies the toggle.
+
+`bottomDotsVisibility` accepts `visible`, `hidden`, or `auto` (default). Auto shows dots only during horizontal swipes, through the landing animation, and for 650 ms afterward. Legacy `bottom: dot` / `none` settings load as visible / hidden.

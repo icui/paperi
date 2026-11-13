@@ -31,6 +31,11 @@ import PaperiPlatform
             original = try Data(contentsOf: LiveConfig.defaultURL)
             _ = try JSONDecoder().decode(LiveConfig.self, from: original!)
             values = try JSONSerialization.jsonObject(with: original!) as? [String: Any] ?? [:]
+            if values["bottomDotsVisibility"] == nil, values["bottom"] != nil,
+               let config = try? JSONDecoder().decode(LiveConfig.self, from: original!) {
+                values["bottomDotsVisibility"] = config.bottomDotsVisibility.rawValue
+            }
+            values.removeValue(forKey: "bottom")
             error = ""; dirty = false
         } catch {
             if !FileManager.default.fileExists(atPath: LiveConfig.defaultURL.path) {
@@ -104,7 +109,7 @@ private struct SettingsView: View {
                     Setting(id: "outerGap", title: "Outer gap", detail: "Space around the layout, in points."),
                     Setting(id: "focusAfterClose", title: "Focus after close", detail: "Where focus moves when a tiled window closes.", choices: ["left", "right", "system"]),
                     Setting(id: "focusScrollDuration", title: "Focus animation", detail: "Duration in seconds (0–1). Use 0 to disable.")]),
-        ("Appearance", [Setting(id: "bottom", title: "Bottom indicator", detail: "Show the strip’s position along the bottom of the display.", choices: ["dot", "none"]),
+        ("Appearance", [Setting(id: "bottomDotsVisibility", title: "Bottom dots visibility", detail: "Auto shows dots during horizontal swipes and briefly after the animation finishes.", choices: ["visible", "hidden", "auto"]),
                         Setting(id: "swapHighlight", title: "Swap highlight", detail: "Drag preview color: #RRGGBB or #RRGGBBAA."),
                         Setting(id: "edgeHint", title: "Edge hint", detail: "Edge hint color: #RRGGBB or #RRGGBBAA.")]),
         ("Applications", [Setting(id: "include", title: "Managed applications", detail: "App bundle IDs, one per line. Empty means all regular apps."),

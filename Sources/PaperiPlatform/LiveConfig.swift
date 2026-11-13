@@ -157,22 +157,11 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public var focusScrollDuration: Double?
     public var focusAfterClose: FocusAfterClose
     public var gap: Double?
-    /// Indicator along the bottom of each display. The thumbnail tray is
-    /// summoned on demand instead (tap or the `tray` command); the retired
-    /// `thumbnail` value reads as `dot`.
-    public enum Bottom: String, Codable, CaseIterable, Sendable {
-        case none, dot
-        public init(from decoder: Decoder) throws {
-            let c = try decoder.singleValueContainer()
-            let raw = try c.decode(String.self)
-            if raw == "thumbnail" { self = .dot; return }
-            guard let value = Bottom(rawValue: raw) else {
-                throw DecodingError.dataCorruptedError(in: c, debugDescription: "expected none or dot, got \(raw)")
-            }
-            self = value
-        }
+    /// Page dots shown always, never, or temporarily during horizontal swipes.
+    public enum BottomDotsVisibility: String, Codable, CaseIterable, Sendable {
+        case visible, hidden, auto
     }
-    public var bottom: Bottom = .dot
+    public var bottomDotsVisibility: BottomDotsVisibility = .auto
     public var outerGap: Double?
     /// Key spec → command (as accepted by `paperi msg`), merged over the
     /// built-in PaperWM bindings; `null` removes a default binding.
@@ -201,7 +190,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case bottom, include, exclude, singleton, float, tile, gap, outerGap, hotkeys, hotkeysEnabled, swapHighlight, edgeHint, focusScrollDuration, focusAfterClose, gesture
+        case bottomDotsVisibility, include, exclude, singleton, float, tile, gap, outerGap, hotkeys, hotkeysEnabled, swapHighlight, edgeHint, focusScrollDuration, focusAfterClose, gesture
     }
 
     public init(from decoder: Decoder) throws {
@@ -224,7 +213,20 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         } else {
             focusAfterClose = .left
         }
-        bottom = try c.decodeIfPresent(Bottom.self, forKey: .bottom) ?? .dot
+        if let visibility = try c.decodeIfPresent(BottomDotsVisibility.self, forKey: .bottomDotsVisibility) {
+            bottomDotsVisibility = visibility
+        } else {
+            enum LegacyKeys: String, CodingKey { case bottom }
+            let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+            switch try legacy.decodeIfPresent(String.self, forKey: .bottom) {
+            case nil: bottomDotsVisibility = .auto
+            case "dot", "dots", "thumbnail": bottomDotsVisibility = .visible
+            case "none": bottomDotsVisibility = .hidden
+            case let value:
+                throw DecodingError.dataCorruptedError(forKey: .bottom, in: legacy,
+                    debugDescription: "unknown bottom indicator: \(value ?? "")")
+            }
+        }
         gap = try c.decodeIfPresent(Double.self, forKey: .gap)
         outerGap = try c.decodeIfPresent(Double.self, forKey: .outerGap)
         hotkeysEnabled = try c.decodeIfPresent(Bool.self, forKey: .hotkeysEnabled) ?? true
@@ -281,7 +283,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "focusAfterClose": "left",
       "gap": 8,
       "outerGap": 8,
-      "bottom": "dot",
+      "bottomDotsVisibility": "auto",
       "swapHighlight": "#0A84FF4D",
       "gesture": {
         "snapshotStyle": "native",

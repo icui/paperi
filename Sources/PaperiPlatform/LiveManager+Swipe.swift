@@ -139,6 +139,7 @@ extension LiveManager {
     }
 
     func cancelSwipe() {
+        windowIndicators.finishHorizontalSwipe()
         standaloneOverlay?.fadeOut(); standaloneOverlay = nil
         standalonePull = false
         standaloneClose = false
@@ -488,6 +489,7 @@ extension LiveManager {
     /// An animation ended; a waiting gesture may take effect. Asynchronous:
     /// callers are still tearing that animation down.
     func resumeDeferredGestureSoon() {
+        windowIndicators.finishHorizontalSwipe()
         guard gestureDeferred else { return }
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated { self?.resumeDeferredGesture() }
@@ -638,7 +640,7 @@ extension LiveManager {
     /// Captures the strip of the focused window's Space and shows it frozen
     /// in place. Updates and a release may arrive before the capture finishes.
     @discardableResult func beginSwipe(isSimulation: Bool = false, pendingLock: Bool = false) -> [String: Any] {
-        defer { if running { windowIndicators.update(coordinator, mode: options.config.bottom) } }
+        defer { if running { windowIndicators.update(coordinator, mode: options.config.bottomDotsVisibility) } }
         func fail(_ reason: String) -> [String: Any] {
             swipeMetrics = ["state": "refused", "reason": reason]
             return ["ok": false, "error": reason]
@@ -929,6 +931,10 @@ extension LiveManager {
             state.catchingUp = true
         }
         swipe = state
+        if !state.closing, let display = coordinator.displays.first(where: { $0.activeSpaceID == state.space }) {
+            windowIndicators.beginHorizontalSwipe(display: display.displayUUID, coordinator: coordinator,
+                                                   mode: options.config.bottomDotsVisibility)
+        }
         if state.ready && !wasTracking { state.overlay.show() }
     }
 
@@ -1437,7 +1443,7 @@ extension LiveManager {
     /// for simulations. A rejected commit slides back with no writes.
     func endSwipe(commit requested: Bool, direction requestedDirection: Direction? = nil) {
         defer {
-            if running { windowIndicators.update(coordinator, mode: options.config.bottom) }
+            if running { windowIndicators.update(coordinator, mode: options.config.bottomDotsVisibility) }
         }
         guard var state = swipe, state.released == nil else { return }
         state.sampleTracking(at: CACurrentMediaTime())
