@@ -38,7 +38,7 @@ The script builds a release app, installs it to `~/Applications/Paperi.app`, and
 
 In **System Settings → Desktop & Dock → Mission Control**, enable **Displays have separate Spaces**. With multiple displays, arrange them vertically in **System Settings → Displays**. Paperi pauses when displays are side by side, because windows scrolling over a shared edge could enter the other display.
 
-Use the menu bar icon to **Pause/Resume**, **Retile**, **Reload Config**, or enable **Start at Login**. **Stop & Restore Windows** stops management and restores the frames saved when windows entered Paperi. To install without launching, use `./scripts/install.sh --no-launch`.
+Use the menu bar icon to **Pause/Resume**, **Reload Config**, or open **Settings…** to configure Paperi and enable **Start at Login**. **Stop & Restore Windows** stops management and restores the frames saved when windows entered Paperi. To install without launching, use `./scripts/install.sh --no-launch`.
 
 ## Trackpad gestures
 

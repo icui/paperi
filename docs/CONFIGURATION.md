@@ -1,6 +1,8 @@
 # Configuration
 
-Open **Open Config…** from the menu bar, or edit
+Open **Settings…** from the menu bar to edit layout, appearance, application rules, gestures, and shortcuts. Changed settings offer **Restore Default**; **Apply Changes** saves and reloads the configuration. **Restore All Defaults** resets the configuration. Start at Login is under General.
+
+Choose **Open config.json…** in Settings (or **Open Config…** in the menu), or edit
 `~/Library/Application Support/Paperi/config.json`. All keys are optional.
 Choose **Reload Config** after saving. Invalid entries appear in the menu/status.
 
@@ -49,7 +51,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 | `gap`, `outerGap` | Space between windows and around the layout, in points. |
 | `focusAfterClose` | `left` (default), `right`, or `system`. A surviving tab or stacked window keeps the column focused. |
 | `focusScrollDuration` | Focus animation in seconds, default `0.22`; `0` disables it. |
-| `bottom` | `dot` (default) or `none`. Dots along the bottom of each display show the strip's windows and which one is focused; they hide with one window. The former `thumbnail` value reads as `dot`: window thumbnails are now the on-demand tray (see [Gestures](#gestures)). Choose from **Show Config → Bottom** or edit this key. |
+| `bottom` | `dot` (default) or `none`. Dots along the bottom of each display show the strip's windows and which one is focused; they hide with one window. The former `thumbnail` value reads as `dot`: window thumbnails are now the on-demand tray (see [Gestures](#gestures)). Choose from **Settings → Appearance** or edit this key. |
 | `swapHighlight` | Drag preview color as `#RRGGBB` or `#RRGGBBAA`. |
 
 ## Gestures
@@ -143,3 +145,5 @@ paperi msg status
 Other commands include `focus up|down`, `swap left|right|up|down`,
 `height +|-`, `center`, `split`, `slurp`, `barf`, `tray`, `retile`, `pause`, `resume`,
 and `stop`. `paperi check-apps` explains which visible windows are eligible.
+
+Set `"hotkeysEnabled": false` or turn off **Settings → Shortcuts → Enable shortcuts** to disable all global shortcuts while keeping your bindings. The default is `true`; `--no-hotkeys` takes precedence. Apply Changes saves and applies the toggle.

@@ -59,6 +59,17 @@ struct HotKeyBindingsTests {
         #expect(LiveCommand.validate([]) != nil)
     }
 
+    @Test func globalShortcutToggleDefaultsAndRoundTrips() throws {
+        let defaults = try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8))
+        #expect(defaults.hotkeysEnabled)
+        let json = #"{"hotkeysEnabled":false,"hotkeys":{"ctrl-alt-j":"focus left"}}"#
+        let config = try JSONDecoder().decode(LiveConfig.self, from: Data(json.utf8))
+        #expect(!config.hotkeysEnabled)
+        #expect(config.hotkeys["ctrl-alt-j"] == .some("focus left"))
+        let restored = try JSONDecoder().decode(LiveConfig.self, from: JSONEncoder().encode(config))
+        #expect(restored == config)
+    }
+
     @Test func configDecodesHotkeysWithNullRemoval() throws {
         let json = #"{"hotkeys":{"alt-cmd-1":null,"ctrl-alt-l":"width + 0.2"}}"#
         let config = try JSONDecoder().decode(LiveConfig.self, from: Data(json.utf8))

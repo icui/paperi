@@ -25,6 +25,7 @@ import PaperiPlatform
     /// Whether management was running when the arrangement paused it.
     private var resumeWhenStacked = true
     private var arrangementCheck: DispatchWorkItem?
+    private var settingsWindow: SettingsWindow?
     private var warning: NSPopover?
     private var gestureWarningShown = false
 
@@ -126,7 +127,7 @@ import PaperiPlatform
     }
 
     private func registerHotkeys() {
-        guard hotkeysEnabled else { keys.unregister(); hotkeyReport = (0, [:], []); hotkeyBindings = []; return }
+        guard hotkeysEnabled && manager.options.config.hotkeysEnabled else { keys.unregister(); hotkeyReport = (0, [:], []); hotkeyBindings = []; return }
         let resolved = HotKeyBindings.resolve(overrides: manager.options.config.hotkeys)
         hotkeyBindings = resolved.bindings
         let failures = keys.register(resolved.bindings)
@@ -357,18 +358,13 @@ import PaperiPlatform
         else if manager.paused { state = "Paused" }
         else { state = "Managing \(manager.managedWindowCount) window\(manager.managedWindowCount == 1 ? "" : "s")" }
         menu.addItem(withTitle: "Paperi — \(state)", action: nil, keyEquivalent: "")
-        if hotkeysEnabled {
+        if hotkeysEnabled && manager.options.config.hotkeysEnabled {
             let detail = hotkeyReport.failures.isEmpty && hotkeyReport.errors.isEmpty
                 ? "\(hotkeyReport.registered) shortcuts active"
                 : "\(hotkeyReport.registered) shortcuts active, \(hotkeyReport.failures.count + hotkeyReport.errors.count) problem(s)"
             menu.addItem(withTitle: detail, action: nil, keyEquivalent: "")
-            if !hotkeyBindings.isEmpty {
-                let shortcuts = menu.addItem(withTitle: "Show Shortcuts", action: nil, keyEquivalent: "")
-                shortcuts.submenu = shortcutsMenu()
-            }
         }
-        let config = menu.addItem(withTitle: "Show Config", action: nil, keyEquivalent: "")
-        config.submenu = configMenu()
+        add(menu, "Settings…", #selector(openSettings), key: ",")
         if let reason = arrangementPause, SkyLightHealth.isProblem(reason) {
             let why = menu.addItem(withTitle: "Space information unavailable (hover for details)", action: nil, keyEquivalent: "")
             why.toolTip = reason
@@ -385,266 +381,12 @@ import PaperiPlatform
         }
         menu.addItem(.separator())
         if arrangementPause == nil { add(menu, manager.paused ? "Resume" : "Pause", #selector(togglePause)) }
-        add(menu, "Retile", #selector(retile))
         add(menu, "Reload Config", #selector(reloadConfig))
         add(menu, "Open Config…", #selector(openConfig))
         menu.addItem(.separator())
-        let login = add(menu, "Start at Login", #selector(toggleLogin))
-        login.state = LoginAgent.isEnabled ? .on : .off
         if !AXIsProcessTrusted() { add(menu, "Open Accessibility Settings…", #selector(openAccessibility)) }
         menu.addItem(.separator())
         add(menu, "Stop & Restore Windows", #selector(stopAndQuit), key: "q")
-    }
-
-    /// One row per resolved binding (defaults merged with config overrides),
-    /// with the shortcut drawn natively on the right; choosing a row runs it.
-    private func shortcutsMenu() -> NSMenu {
-        let menu = NSMenu()
-        for binding in hotkeyBindings {
-            let failed = hotkeyReport.failures[binding.display] != nil
-            let title = binding.command.joined(separator: " ") + (failed ? " (unavailable)" : "")
-            let item = NSMenuItem(title: title, action: #selector(runShortcut(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = binding.command
-            if let (key, mask) = Self.menuKeyEquivalent(binding.spec) {
-                item.keyEquivalent = key; item.keyEquivalentModifierMask = mask
-            } else {
-                item.title = "\(binding.display)  \(title)"
-            }
-            menu.addItem(item)
-        }
-        for error in hotkeyReport.errors {
-            if menu.items.count == hotkeyBindings.count { menu.addItem(.separator()) }
-            menu.addItem(withTitle: "⚠︎ \(error)", action: nil, keyEquivalent: "")
-        }
-        menu.addItem(.separator())
-        add(menu, "Edit in Config…", #selector(openConfig))
-        return menu
-    }
-
-    /// Every setting with the value in effect (config merged with CLI flags and
-    /// built-in defaults). Choosing a value row copies it to the clipboard.
-    private func configMenu() -> NSMenu {
-        let menu = NSMenu()
-        let config = manager.options.config
-        let url = LiveConfig.defaultURL
-        let exists = FileManager.default.fileExists(atPath: url.path)
-        let file = add(menu, exists ? url.path : "No config file — using defaults", #selector(openConfig))
-        file.toolTip = "Open \(url.path)"
-        menu.addItem(.separator())
-
-        func number(_ value: Double) -> String { value.rounded() == value ? "\(Int(value)) pt" : "\(value) pt" }
-        func origin(_ isSet: Bool) -> String { isSet ? "" : "  (default)" }
-        value(menu, "Gap: \(number(manager.options.gap))\(origin(config.gap != nil))", copy: "\(manager.options.gap)",
-              tip: "\"gap\": space between columns and between stacked windows")
-        value(menu, "Outer gap: \(number(manager.options.outerGap))\(origin(config.outerGap != nil))",
-              copy: "\(manager.options.outerGap)", tip: "\"outerGap\": inset from the screen edges")
-        let bottom = menu.addItem(withTitle: "Bottom: \(config.bottom.rawValue)", action: nil, keyEquivalent: "")
-        let bottomMenu = NSMenu()
-        for mode in LiveConfig.Bottom.allCases {
-            let item = add(bottomMenu, mode.rawValue.capitalized, #selector(setBottom(_:)))
-            item.representedObject = mode.rawValue
-            item.state = config.bottom == mode ? .on : .off
-        }
-        bottom.submenu = bottomMenu
-        let color = config.swapHighlight ?? LiveConfig.defaultSwapHighlight
-        let swatch = value(menu, "Swap highlight: \(color)\(origin(config.swapHighlight != nil))", copy: color,
-                           tip: "\"swapHighlight\": drop overlay (swap, stack, new column) over the window a drag targets, #RRGGBB[AA]")
-        swatch.image = Self.swatch(config.swapHighlightColor)
-        let scroll = config.focusScrollDuration ?? 0.22
-        value(menu, "Focus scroll duration: \(scroll == 0 ? "off (immediate)" : "\(scroll) s")\(origin(config.focusScrollDuration != nil))",
-              copy: "\(scroll)", tip: "\"focusScrollDuration\": seconds from 0 to 1 for focus scrolls and swipe landings; 0 disables")
-        value(menu, "Focus after close: \(config.focusAfterClose.rawValue)\(origin(config.focusAfterClose != .left))",
-              copy: config.focusAfterClose.rawValue,
-              tip: "\"focusAfterClose\": left, right or system — where focus goes when the focused column closes")
-        menu.addItem(.separator())
-
-        let cliApps = Set(cliInclude), cliSingles = Set(cliSingletons)
-        if let include = config.include {
-            list(menu, "Managed apps: only \(include.count)", include.map { appLabel($0) + (cliApps.contains($0) ? "  (--app)" : "") },
-                 tip: "\"include\" / --app: only these apps are tiled")
-        } else {
-            value(menu, "Managed apps: all regular apps", copy: nil, tip: "Add \"include\" to limit tiling to named apps")
-        }
-        let builtIn = LiveConfig.defaultExclude.subtracting(config.exclude).sorted()
-        list(menu, "Excluded apps: \(config.exclude.count) + \(builtIn.count) built-in",
-             config.exclude.map(appLabel) + (builtIn.isEmpty ? [] : ["—"] + builtIn.map { appLabel($0) + "  (built-in)" }),
-             tip: "\"exclude\": apps never tiled")
-        list(menu, "Apps without native tabs: \(config.singleton.count)",
-             config.singleton.map { appLabel($0) + (cliSingles.contains($0) ? "  (--singleton-app)" : "") },
-             tip: "\"singleton\": apps whose tab bars are drawn in-content")
-        list(menu, "Float rules: \(config.float.count)", config.float.map(ruleLabel),
-             tip: "\"float\": windows managed for focus but never tiled")
-        list(menu, "Tile rules: \(config.tile.count)", config.tile.map(ruleLabel),
-             tip: "\"tile\": utility-looking windows that are tiled anyway")
-        menu.addItem(.separator())
-
-        if hotkeysEnabled {
-            let custom = config.hotkeys.count
-            value(menu, "Shortcuts: \(hotkeyBindings.count) active, \(custom) set in config", copy: nil,
-                  tip: "\"hotkeys\": key spec → command; null removes a default")
-        } else {
-            value(menu, "Shortcuts: off (--no-hotkeys)", copy: nil, tip: nil)
-        }
-        gestureRows(menu, config.gesture)
-        value(menu, "Restore windows on stop: \(manager.options.restoreOnStop ? "on" : "off (--no-restore)")", copy: nil, tip: nil)
-        value(menu, "Verbose logging: \(verbose ? "on (--verbose)" : "off")", copy: nil, tip: nil)
-        menu.addItem(.separator())
-        add(menu, exists ? "Edit Config…" : "Create Config…", #selector(openConfig))
-        add(menu, "Reload Config", #selector(reloadConfig))
-        return menu
-    }
-
-    /// The "gesture" object: a summary row with every field in its submenu.
-    private func gestureRows(_ menu: NSMenu, _ gesture: LiveConfig.GestureConfig) {
-        let defaults = LiveConfig.GestureConfig()
-        func origin(_ isDefault: Bool) -> String { isDefault ? "  (default)" : "" }
-        func actionDescription(_ action: LiveConfig.SwipeDownAction) -> String {
-            switch action {
-            case .closeTab: return "close tab"
-            case .minimize: return "minimize"
-            case .newWindow: return "new window"
-            case .openApp: return "open window of \(gesture.swipeDownApp ?? "unconfigured app")"
-            case .none: return "off"
-            }
-        }
-        let down = actionDescription(gesture.swipeDown)
-        let summary = gesture.enabled
-            ? "\(gesture.fingers) fingers" + (gesture.invert ? ", inverted" : "")
-              + " · up: \(gesture.swipeUpToClose ? "close" : "off") · down: \(down)"
-            : "off"
-        let item = menu.addItem(withTitle: "Trackpad swipe: \(summary)", action: nil, keyEquivalent: "")
-        item.toolTip = "\"gesture\": sideways scrolls the strip by one column, up closes the focused window (or tab), down: \(down), down then right: \(actionDescription(gesture.swipeDownRight)), down then left: \(actionDescription(gesture.swipeDownLeft))"
-        let sub = NSMenu()
-        value(sub, "Enabled: \(gesture.enabled ? "on" : "off")\(origin(gesture.enabled == defaults.enabled))",
-              copy: "\(gesture.enabled)", tip: "\"gesture.enabled\"")
-        value(sub, "Snapshot style: \(gesture.snapshotStyle.rawValue)\(origin(gesture.snapshotStyle == defaults.snapshotStyle))",
-              copy: gesture.snapshotStyle.rawValue,
-              tip: "\"gesture.snapshotStyle\": native preserves macOS framing and shadows; simple uses an approximate shadow")
-        value(sub, "Fingers: \(gesture.fingers)\(origin(gesture.fingers == defaults.fingers))",
-              copy: "\(gesture.fingers)", tip: "\"gesture.fingers\": 3 or 4")
-        value(sub, "Travel: \(gesture.travel)\(origin(gesture.travel == defaults.travel))", copy: "\(gesture.travel)",
-              tip: "\"gesture.travel\": fraction of the trackpad width for one column, in (0, 1]")
-        value(sub, "Commit threshold: \(gesture.commitThreshold)\(origin(gesture.commitThreshold == defaults.commitThreshold))",
-              copy: "\(gesture.commitThreshold)",
-              tip: "\"gesture.commitThreshold\": fraction of a column past which release moves, in (0, 1]")
-        value(sub, "Flick velocity: \(gesture.flickVelocity)\(origin(gesture.flickVelocity == defaults.flickVelocity))",
-              copy: "\(gesture.flickVelocity)", tip: "\"gesture.flickVelocity\": release speed that moves regardless of distance")
-        value(sub, "Invert: \(gesture.invert ? "on" : "off")\(origin(gesture.invert == defaults.invert))",
-              copy: "\(gesture.invert)", tip: "\"gesture.invert\": reverse the swipe direction")
-        value(sub, "Swipe up to close: \(gesture.swipeUpToClose ? "on" : "off")\(origin(gesture.swipeUpToClose == defaults.swipeUpToClose))",
-              copy: "\(gesture.swipeUpToClose)", tip: "\"gesture.swipeUpToClose\": swiping up closes the focused window")
-        let apps = gesture.tabCloseApps.isEmpty ? "none" : gesture.tabCloseApps.joined(separator: ", ")
-        value(sub, "Tab close apps: \(apps)\(origin(gesture.tabCloseApps == defaults.tabCloseApps))",
-              copy: gesture.tabCloseApps.joined(separator: ", "),
-              tip: "\"gesture.tabCloseApps\": bundle IDs whose swipe up closes the current tab with ⌘W")
-        value(sub, "Swipe down: \(down) (\(gesture.swipeDown.rawValue))\(origin(gesture.swipeDown == defaults.swipeDown))",
-              copy: gesture.swipeDown.rawValue,
-              tip: "\"gesture.swipeDown\": closeTab, newWindow (the app's New Window menu item, else ⌘N), minimize, openApp, or none")
-        value(sub, "Swipe app: \(gesture.swipeDownApp ?? "not configured")",
-              copy: gesture.swipeDownApp ?? "",
-              tip: "gesture.swipeDownApp: bundle ID of the app whose window openApp opens; launches the app if needed")
-        for (label, key, action, defaultAction) in [
-            ("Swipe down-right", "swipeDownRight", gesture.swipeDownRight, defaults.swipeDownRight),
-            ("Swipe down-left", "swipeDownLeft", gesture.swipeDownLeft, defaults.swipeDownLeft)
-        ] {
-            value(sub, "\(label): \(actionDescription(action)) (\(action.rawValue))\(origin(action == defaultAction))",
-                  copy: action.rawValue, tip: "gesture.\(key): closeTab, newWindow, minimize, openApp, or none")
-        }
-        item.submenu = sub
-    }
-
-    @discardableResult private func value(_ menu: NSMenu, _ title: String, copy: String?, tip: String?) -> NSMenuItem {
-        let item = menu.addItem(withTitle: title, action: copy == nil ? nil : #selector(copyValue(_:)), keyEquivalent: "")
-        item.target = self
-        item.representedObject = copy
-        item.toolTip = tip.map { $0 + (copy == nil ? "" : " — click to copy") }
-        return item
-    }
-
-    private func list(_ menu: NSMenu, _ title: String, _ rows: [String], tip: String) {
-        let item = menu.addItem(withTitle: title, action: nil, keyEquivalent: "")
-        item.toolTip = tip
-        let sub = NSMenu()
-        if rows.isEmpty { sub.addItem(withTitle: "None", action: nil, keyEquivalent: "") }
-        for row in rows {
-            if row == "—" { sub.addItem(.separator()); continue }
-            value(sub, row, copy: row.components(separatedBy: "  (").first, tip: nil)
-        }
-        item.submenu = sub
-    }
-
-    /// "Safari (com.apple.Safari)" when the app is installed, else the bundle ID.
-    private func appLabel(_ bundleID: String) -> String {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return bundleID }
-        return "\(FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")) (\(bundleID))"
-    }
-
-    private func ruleLabel(_ rule: LiveConfig.FloatRule) -> String {
-        guard let needle = rule.titleContains, !needle.isEmpty else { return appLabel(rule.app) + " — all windows" }
-        return appLabel(rule.app) + " — title contains \"\(needle)\""
-    }
-
-    /// Colour sample over a checkerboard so the alpha is visible.
-    private static func swatch(_ color: HexColor) -> NSImage {
-        NSImage(size: NSSize(width: 14, height: 14), flipped: false) { rect in
-            let path = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3)
-            path.addClip()
-            NSColor.white.setFill(); rect.fill()
-            NSColor.lightGray.setFill()
-            for x in 0..<2 { for y in 0..<2 where (x + y) % 2 == 0 {
-                NSRect(x: CGFloat(x) * 7, y: CGFloat(y) * 7, width: 7, height: 7).fill()
-            } }
-            NSColor(srgbRed: color.red, green: color.green, blue: color.blue, alpha: color.alpha).setFill()
-            rect.fill(using: .sourceOver)
-            NSColor.separatorColor.setStroke(); path.stroke()
-            return true
-        }
-    }
-
-    @objc private func copyValue(_ sender: NSMenuItem) {
-        guard let text = sender.representedObject as? String else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-    }
-
-    /// Maps a spec like "alt-cmd-left" to an NSMenuItem key equivalent, or nil
-    /// when the key has no single-character form (the row then shows the spec).
-    private static func menuKeyEquivalent(_ spec: String) -> (String, NSEvent.ModifierFlags)? {
-        let parts = spec.split(separator: "-").map(String.init)
-        guard let key = parts.last else { return nil }
-        var mask: NSEvent.ModifierFlags = []
-        for part in parts.dropLast() {
-            switch part {
-            case "cmd": mask.insert(.command)
-            case "alt": mask.insert(.option)
-            case "ctrl": mask.insert(.control)
-            case "shift": mask.insert(.shift)
-            default: return nil
-            }
-        }
-        func scalar(_ value: Int) -> String { String(Character(UnicodeScalar(UInt32(value))!)) }
-        let named: [String: String] = [
-            "left": scalar(NSLeftArrowFunctionKey), "right": scalar(NSRightArrowFunctionKey),
-            "up": scalar(NSUpArrowFunctionKey), "down": scalar(NSDownArrowFunctionKey),
-            "space": " ", "return": "\r", "enter": "\r", "tab": "\t", "escape": "\u{1b}",
-            "delete": "\u{8}", "forwarddelete": scalar(NSDeleteFunctionKey),
-            "home": scalar(NSHomeFunctionKey), "end": scalar(NSEndFunctionKey),
-            "pageup": scalar(NSPageUpFunctionKey), "pagedown": scalar(NSPageDownFunctionKey),
-            "minus": "-", "equal": "=", "comma": ",", "period": ".", "slash": "/", "backslash": "\\",
-            "semicolon": ";", "quote": "'", "grave": "`", "leftbracket": "[", "rightbracket": "]",
-        ]
-        if let k = named[key] { return (k, mask) }
-        if key.hasPrefix("f"), let n = Int(key.dropFirst()), (1...20).contains(n) {
-            return (scalar(NSF1FunctionKey + n - 1), mask)
-        }
-        if key.count == 1 { return (key, mask) }
-        return nil
-    }
-
-    @objc private func runShortcut(_ sender: NSMenuItem) {
-        guard let command = sender.representedObject as? [String] else { return }
-        dispatch(command, source: "menu")
     }
 
     @discardableResult private func add(_ menu: NSMenu, _ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
@@ -654,30 +396,6 @@ import PaperiPlatform
     }
 
     @objc private func togglePause() { dispatch([manager.paused ? "resume" : "pause"], source: "menu") }
-    @objc private func retile() { dispatch(["retile"], source: "menu") }
-    @objc private func setBottom(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, LiveConfig.Bottom(rawValue: raw) != nil else { return }
-        do {
-            let url = LiveConfig.defaultURL
-            var object: [String: Any] = [:]
-            if FileManager.default.fileExists(atPath: url.path) {
-                let data = try Data(contentsOf: url)
-                _ = try JSONDecoder().decode(LiveConfig.self, from: data)
-                object = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-            }
-            object["bottom"] = raw
-            let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try data.write(to: url, options: .atomic)
-            reloadConfig()
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = "Could not save bottom setting"
-            alert.informativeText = error.localizedDescription
-            alert.runModal()
-        }
-    }
-
     @objc private func reloadConfig() {
         let reply = dispatch(["reload"], source: "menu")
         if reply["ok"] as? Bool != true || !(reply["hotkeyConfigErrors"] as? [String] ?? []).isEmpty {
@@ -688,6 +406,16 @@ import PaperiPlatform
             NSApp.activate(); alert.runModal()
         }
     }
+    @objc private func openSettings() {
+        if settingsWindow?.window?.isVisible != true {
+            settingsWindow = SettingsWindow(apply: { [weak self] in self?.reload() ?? ["ok": false] },
+                                            openJSON: { [weak self] in self?.openConfig() })
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.showWindow(nil)
+        settingsWindow?.window?.makeKeyAndOrderFront(nil)
+    }
+
     @objc private func openConfig() {
         let url = LiveConfig.defaultURL
         if !FileManager.default.fileExists(atPath: url.path) {
@@ -695,15 +423,6 @@ import PaperiPlatform
             try? Data(LiveConfig.template.utf8).write(to: url)
         }
         NSWorkspace.shared.open(url)
-    }
-    @objc private func toggleLogin() {
-        let report = LoginAgent.command([LoginAgent.isEnabled ? "off" : "on"])
-        if report["ok"] as? Bool != true {
-            let alert = NSAlert()
-            alert.messageText = "Could not change Start at Login"
-            alert.informativeText = report["error"] as? String ?? ""
-            NSApp.activate(); alert.runModal()
-        }
     }
     @objc private func openAccessibility() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)

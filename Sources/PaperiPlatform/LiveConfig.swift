@@ -177,6 +177,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     /// Key spec → command (as accepted by `paperi msg`), merged over the
     /// built-in PaperWM bindings; `null` removes a default binding.
     public var hotkeys: [String: String?]
+    /// Disable all global shortcuts without removing their bindings.
+    public var hotkeysEnabled: Bool = true
     /// Mask over the column a dragged window would swap with, `#RRGGBB[AA]`.
     public var swapHighlight: String?
     /// Legacy color setting, retained for config compatibility; no longer displayed.
@@ -199,7 +201,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case bottom, include, exclude, singleton, float, tile, gap, outerGap, hotkeys, swapHighlight, edgeHint, focusScrollDuration, focusAfterClose, gesture
+        case bottom, include, exclude, singleton, float, tile, gap, outerGap, hotkeys, hotkeysEnabled, swapHighlight, edgeHint, focusScrollDuration, focusAfterClose, gesture
     }
 
     public init(from decoder: Decoder) throws {
@@ -225,6 +227,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         bottom = try c.decodeIfPresent(Bottom.self, forKey: .bottom) ?? .dot
         gap = try c.decodeIfPresent(Double.self, forKey: .gap)
         outerGap = try c.decodeIfPresent(Double.self, forKey: .outerGap)
+        hotkeysEnabled = try c.decodeIfPresent(Bool.self, forKey: .hotkeysEnabled) ?? true
         hotkeys = try c.decodeIfPresent([String: String?].self, forKey: .hotkeys) ?? [:]
         edgeHint = try c.decodeIfPresent(String.self, forKey: .edgeHint)
         if let edgeHint, HexColor(edgeHint) == nil {
