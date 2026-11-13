@@ -211,6 +211,21 @@ struct AppGestureFilterTests {
         #expect(!drop(&f, .scroll(phase: changed, momentum: 0, continuous: true)))
     }
 
+    @Test func lateScrollBeginsAndUpdatesStayBlockedUntilNewContact() {
+        var f = AppGestureFilter(fingers: 3)
+        _ = drop(&f, .fingers(down: 3))
+        _ = drop(&f, .fingers(down: 0))
+        for phase in [AppGestureFilter.phaseMayBegin, began, changed, ended] {
+            #expect(drop(&f, .scroll(phase: phase, momentum: 0, continuous: true)))
+        }
+        #expect(drop(&f, .scroll(phase: 0, momentum: 1, continuous: true)))
+        #expect(drop(&f, .scroll(phase: 0, momentum: AppGestureFilter.momentumEnd, continuous: true)))
+        #expect(drop(&f, .scroll(phase: changed, momentum: 0, continuous: true)))
+        _ = drop(&f, .fingers(down: 2))
+        #expect(!drop(&f, .scroll(phase: began, momentum: 0, continuous: true)))
+        #expect(!drop(&f, .scroll(phase: changed, momentum: 0, continuous: true)))
+    }
+
     @Test func slowlyJoinedFingersLeaveScrollToApp() {
         var f = AppGestureFilter(fingers: 3)
         _ = f.shouldDrop(.fingers(down: 2, landingSpread: 0.01))
@@ -235,7 +250,7 @@ struct AppGestureFilterTests {
         #expect(f.claimed)
         _ = drop(&f, .fingers(down: 0))
         #expect(!f.claimed)
-        #expect(!drop(&f, .scroll(phase: began, momentum: 0, continuous: true)))
+        #expect(drop(&f, .scroll(phase: began, momentum: 0, continuous: true)))
     }
 
     @Test func openAppScrollClosesAndItsMomentumIsSwallowed() {
@@ -248,7 +263,7 @@ struct AppGestureFilterTests {
         _ = f.shouldDrop(.fingers(down: 0))
         #expect(drop(&f, .scroll(phase: 0, momentum: 1, continuous: true)))
         #expect(drop(&f, .scroll(phase: 0, momentum: AppGestureFilter.momentumEnd, continuous: true)))
-        #expect(!drop(&f, .scroll(phase: 0, momentum: 1, continuous: true)))
+        #expect(drop(&f, .scroll(phase: 0, momentum: 1, continuous: true)))
     }
 
     @Test func swipeTouchFramesAreWithheldUntilAllFingersLift() {

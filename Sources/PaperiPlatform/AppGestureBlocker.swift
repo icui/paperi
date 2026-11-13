@@ -52,6 +52,7 @@ struct AppGestureFilter: Equatable {
 
     let fingers: Int
     private(set) var claimed = false
+    private var fingersDown = 0
     var swipeEstablished = false
     /// More fingers than the swipe uses were down in this sequence.
     private(set) var systemSequence = false
@@ -74,6 +75,7 @@ struct AppGestureFilter: Equatable {
     mutating func shouldDrop(_ input: Input) -> Bool {
         switch input {
         case .fingers(let down, let landingSpread):
+            fingersDown = down
             if down == 0 {
                 claimed = false
                 systemSequence = false
@@ -127,16 +129,16 @@ struct AppGestureFilter: Equatable {
             if momentum != 0, swallowMomentum {
                 if momentum == Self.momentumEnd {
                     swallowMomentum = false
-                    swallowScrollTail = false
                 }
                 return true
             }
-            if phase == Self.phaseBegan || phase == Self.phaseMayBegin {
+            // A late begin after lift still belongs to the claimed swipe.
+            // Keep the tail blocked until a new scroll starts with fingers down.
+            if fingersDown > 0, phase == Self.phaseBegan || phase == Self.phaseMayBegin {
                 swallowMomentum = false
                 swallowScrollTail = false
             } else if swallowScrollTail {
                 if phase == Self.phaseEnded || phase == Self.phaseCancelled {
-                    swallowScrollTail = false
                     if appScrollOpen {
                         appScrollOpen = false
                         return false
@@ -333,7 +335,22 @@ final class AppGestureBlocker: @unchecked Sendable {
         lock.unlock()
         let wasClaimed = filter.claimed
         _ = filter.shouldDrop(.fingers(down: Int(paperi_mt_fingers_down()), landingSpread: paperi_mt_landing_spread()))
+        let closingBlockedScroll = filter.appScrollOpen && (filter.claimed || filter.swallowScrollTail)
         let drop = filter.shouldDrop(input)
+        if !drop, closingBlockedScroll, case .scroll(let phase, _, _) = input,
+           phase == AppGestureFilter.phaseEnded || phase == AppGestureFilter.phaseCancelled {
+            // Balance the app's scroll without delivering the final movement
+            // to a window that may just have gained focus from the swipe.
+            for field: CGEventField in [.scrollWheelEventDeltaAxis1, .scrollWheelEventDeltaAxis2,
+                                        .scrollWheelEventDeltaAxis3, .scrollWheelEventPointDeltaAxis1,
+                                        .scrollWheelEventPointDeltaAxis2, .scrollWheelEventPointDeltaAxis3] {
+                event.setIntegerValueField(field, value: 0)
+            }
+            for field: CGEventField in [.scrollWheelEventFixedPtDeltaAxis1,
+                                        .scrollWheelEventFixedPtDeltaAxis2, .scrollWheelEventFixedPtDeltaAxis3] {
+                event.setDoubleValueField(field, value: 0)
+            }
+        }
         if drop { droppedThisSequence += 1 }
         if verbose, wasClaimed != filter.claimed {
             if filter.claimed {
