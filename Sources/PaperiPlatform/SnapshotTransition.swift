@@ -171,8 +171,12 @@ import PaperiCore
         do {
             let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
             try Task.checkCancellation()
-            if let content = WindowSnapshotGeometry.contentRect(in: image,
-                size: CGSize(width: window.frame.width * nativeScale, height: window.frame.height * nativeScale)) {
+            let size = CGSize(width: window.frame.width * nativeScale, height: window.frame.height * nativeScale)
+            let content = await Task.detached(priority: .userInitiated) {
+                WindowSnapshotGeometry.contentRect(in: image, size: size)
+            }.value
+            try Task.checkCancellation()
+            if let content {
                 let bytes = image.bytesPerRow * image.height
                 guard textureBytes - reserve + bytes <= 256 * 1024 * 1024 else { throw Failure.memoryBudget }
                 textureBytes += bytes - reserve
