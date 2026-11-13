@@ -1114,6 +1114,7 @@ import PaperiCore
     }
     private var swipe: Swipe?
     private var swipeTask: Task<Void, Never>?
+    private var neighbourTask: Task<Void, Never>?
     private var swipeGuard: Timer?
     private var swipeSimulation: Timer?
     private var swipeMetrics: [String: Any] = [:]
@@ -2347,8 +2348,56 @@ import PaperiCore
         reveal(session)
         animateFocus(space: space, byID: latestSurvey)
         _ = raise(wid)
+        raiseNeighbours(of: wid, pid: pid, in: space)
         windowIndicators.update(coordinator, mode: options.config.bottom)
         scheduleRefresh()
+    }
+
+    /// After a jump, a parked window's sliver can lie over a visible
+    /// neighbour, since stacking follows recency, not the strip. Once the
+    /// target's app is active, its raised windows go on top and other apps'
+    /// land just under its front window. So raise the target app's
+    /// neighbours, then the target, then the other neighbours. Apps apply
+    /// raises asynchronously, so each is awaited, and the result is checked
+    /// and retried.
+    private func raiseNeighbours(of wid: UInt32, pid: pid_t, in space: UInt64) {
+        neighbourTask?.cancel()
+        neighbourTask = Task { [weak self] in
+            for _ in 0..<20 where NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
+                try? await Task.sleep(for: .milliseconds(25))
+            }
+            for _ in 0..<3 {
+                guard let self, !Task.isCancelled, self.running,
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                      let layout = self.coordinator.sessions[space]?.state.layout,
+                      let at = layout.focused.flatMap(layout.index(of:)),
+                      layout.columns[at.column].slots[at.row].activeMember == wid else { return }
+                let strip = Set(layout.columns.flatMap(\.slots).map(\.activeMember))
+                let neighbours = layout.neighbours()
+                @MainActor func stack() -> [UInt32] { Self.frontToBack().filter(strip.contains) }
+                // In order: every neighbour above every parked window.
+                let order = stack()
+                let lowest = neighbours.compactMap { order.firstIndex(of: $0) }.max() ?? 0
+                let highestParked = order.indices.first { !neighbours.contains(order[$0]) && order[$0] != wid } ?? order.count
+                if lowest < highestParked { return }
+                @MainActor func raise(_ id: UInt32, until done: ([UInt32]) -> Bool) async {
+                    guard let element = self.references[id] else { return }
+                    AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+                    for _ in 0..<10 where !done(stack()) { try? await Task.sleep(for: .milliseconds(10)) }
+                }
+                let siblings = neighbours.filter { self.pidForWindow[$0] == pid }
+                for id in siblings { await raise(id) { $0.first == id } }
+                if !siblings.isEmpty {
+                    if let element = self.references[wid] {
+                        AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
+                    }
+                    await raise(wid) { $0.first == wid }
+                }
+                for id in neighbours where self.pidForWindow[id] != pid {
+                    await raise(id) { $0.dropFirst().first == id }
+                }
+            }
+        }
     }
 
     /// Reorders the strip after a thumbnail drag and places windows in the

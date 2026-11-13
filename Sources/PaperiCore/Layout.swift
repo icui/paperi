@@ -245,6 +245,16 @@ public struct Layout: Codable, Equatable, Sendable {
         }
         return true
     }
+    /// The windows that can show beside the focused one: the rest of its
+    /// column and the columns on either side. Farther columns are parked
+    /// with only a sliver on screen, which may lie over these windows.
+    public func neighbours() -> [UInt32] {
+        guard let focused, let at = index(of: focused) else { return [] }
+        return columns.indices.filter { abs($0 - at.column) <= 1 }
+            .flatMap { columns[$0].slots.map(\.activeMember) }
+            .filter { $0 != columns[at.column].slots[at.row].activeMember }
+    }
+
     public func placements(in canvas: Rect, gap: Double = 8, margin: Double = 1,
                            edgeMargin: Double? = nil) throws -> [Placement] {
         try validate()

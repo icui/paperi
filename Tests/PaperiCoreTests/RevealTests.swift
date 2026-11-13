@@ -57,3 +57,16 @@ struct RevealTests {
         #expect(l.columns[1].width == 984)
     }
 }
+
+struct NeighbourTests {
+    @Test func neighboursAreTheFocusedColumnAndTheColumnsBesideIt() {
+        let single = { (n: UInt32) in Column(slots: [Slot(id: "s\(n)", members: [n], activeMember: n)], width: 400) }
+        let stacked = Column(slots: [Slot(id: "s3", members: [3], activeMember: 3),
+                                     Slot(id: "s4", members: [4, 40], activeMember: 40)], width: 400)
+        let columns = [single(1), single(2), stacked, single(5)]
+        #expect(Layout(columns: columns, focused: "s5").neighbours() == [3, 40])
+        #expect(Layout(columns: columns, focused: "s1").neighbours() == [2])
+        #expect(Layout(columns: columns, focused: "s4").neighbours() == [2, 3, 5])
+        #expect(Layout(columns: columns).neighbours().isEmpty)
+    }
+}
