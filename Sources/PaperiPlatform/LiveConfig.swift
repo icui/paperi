@@ -20,7 +20,11 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public struct GestureConfig: Codable, Equatable, Sendable {
         public var enabled: Bool
         public var fingers: Int
+        /// Vertical finger travel (fraction of the trackpad) for a full close,
+        /// pull or turn.
         public var travel: Double
+        /// Horizontal finger travel for a full column.
+        public var columnTravel: Double
         public var commitThreshold: Double
         public var flickVelocity: Double
         public var invert: Bool
@@ -38,7 +42,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         /// What a quick tap with all `fingers` does.
         public var tap: TapAction
 
-        public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.4,
+        public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.4, columnTravel: Double = 0.3,
                     commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false,
                     swipeUpToClose: Bool = true, tabCloseApps: [String] = [], swipeDown: SwipeDownAction = .newWindow,
                     swipeDownRight: SwipeDownAction = .closeTab, swipeDownLeft: SwipeDownAction = .minimize, swipeDownApp: String? = nil,
@@ -46,6 +50,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             self.enabled = enabled
             self.fingers = fingers
             self.travel = travel
+            self.columnTravel = columnTravel
             self.commitThreshold = commitThreshold
             self.flickVelocity = flickVelocity
             self.invert = invert
@@ -60,7 +65,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
 
         enum CodingKeys: String, CodingKey {
             case swipeDownApp
-            case enabled, fingers, travel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDown, swipeDownRight, swipeDownLeft, tap
+            case enabled, fingers, travel, columnTravel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDown, swipeDownRight, swipeDownLeft, tap
             /// Legacy boolean: `false` reads as `swipeDown: "none"`.
             case swipeDownToMinimize
         }
@@ -76,6 +81,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? d.enabled
             fingers = try c.decodeIfPresent(Int.self, forKey: .fingers) ?? d.fingers
             travel = try c.decodeIfPresent(Double.self, forKey: .travel) ?? d.travel
+            columnTravel = try c.decodeIfPresent(Double.self, forKey: .columnTravel) ?? d.columnTravel
             commitThreshold = try c.decodeIfPresent(Double.self, forKey: .commitThreshold) ?? d.commitThreshold
             flickVelocity = try c.decodeIfPresent(Double.self, forKey: .flickVelocity) ?? d.flickVelocity
             invert = try c.decodeIfPresent(Bool.self, forKey: .invert) ?? d.invert
@@ -103,7 +109,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode(enabled, forKey: .enabled); try c.encode(fingers, forKey: .fingers)
-            try c.encode(travel, forKey: .travel); try c.encode(commitThreshold, forKey: .commitThreshold)
+            try c.encode(travel, forKey: .travel); try c.encode(columnTravel, forKey: .columnTravel)
+            try c.encode(commitThreshold, forKey: .commitThreshold)
             try c.encode(flickVelocity, forKey: .flickVelocity); try c.encode(invert, forKey: .invert)
             try c.encode(swipeUpToClose, forKey: .swipeUpToClose); try c.encode(tabCloseApps, forKey: .tabCloseApps)
             try c.encodeIfPresent(swipeDownApp, forKey: .swipeDownApp)
@@ -228,6 +235,9 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             if !g.travel.isFinite || g.travel <= 0 || g.travel > 1 {
                 throw DecodingError.dataCorruptedError(forKey: .gesture, in: c, debugDescription: "expected travel in (0, 1]")
             }
+            if !g.columnTravel.isFinite || g.columnTravel <= 0 || g.columnTravel > 1 {
+                throw DecodingError.dataCorruptedError(forKey: .gesture, in: c, debugDescription: "expected columnTravel in (0, 1]")
+            }
             if !g.commitThreshold.isFinite || g.commitThreshold <= 0 || g.commitThreshold > 1 {
                 throw DecodingError.dataCorruptedError(forKey: .gesture, in: c, debugDescription: "expected commitThreshold in (0, 1]")
             }
@@ -266,6 +276,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         "enabled": true,
         "fingers": 3,
         "travel": 0.4,
+        "columnTravel": 0.3,
         "commitThreshold": 0.5,
         "flickVelocity": 1.5,
         "invert": false,

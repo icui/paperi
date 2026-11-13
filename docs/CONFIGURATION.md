@@ -18,6 +18,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
     "enabled": true,
     "fingers": 3,
     "travel": 0.4,
+    "columnTravel": 0.3,
     "commitThreshold": 0.5,
     "flickVelocity": 1.5,
     "invert": false,
@@ -56,7 +57,9 @@ Gestures are on by default with three fingers. `fingers` accepts `3` or `4`.
 A swipe starts only when its fingers land together, within 150 ms of the first
 touching an empty trackpad. A two-finger scroll or resting finger joined later by
 the other hand stays an ordinary scroll until every finger lifts.
-`travel` is the fraction of trackpad travel for a full gesture; `commitThreshold`
+`columnTravel` is the fraction of trackpad width the fingers move for a full
+column (default `0.3`); `travel` is the same for vertical gestures (close, pull
+and turn; default `0.4`). `commitThreshold`
 is the progress needed to commit (default `0.5`). A sufficiently long, fast flick
 can also commit; `flickVelocity` controls that speed threshold. `invert` reverses
 horizontal navigation.

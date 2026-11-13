@@ -1310,7 +1310,7 @@ import PaperiCore
                 if started["error"] as? String == Self.fullScreenRefusal { return }
             }
             let cfg = SlotSwipe.Configuration(
-                travel: options.config.gesture.travel,
+                travel: options.config.gesture.columnTravel,
                 commitThreshold: options.config.gesture.commitThreshold,
                 flickVelocity: options.config.gesture.flickVelocity,
                 invert: options.config.gesture.invert,
