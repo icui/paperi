@@ -571,7 +571,30 @@ struct SwipeTrackingFilterTests {
         }
         for rate in [60.0, 120] {
             #expect(lag(speed: 3, rate: rate) < lag(speed: 0.05, rate: rate))
-            #expect(lag(speed: 3, rate: rate) < 0.005)
+            #expect(lag(speed: 3, rate: rate) < 0.008)
+        }
+    }
+
+    @Test func quickShortReversalsSpreadAcrossDisplayFrames() {
+        for rate in [60.0, 120] {
+            var filter = SlotSwipe.TrackingFilter()
+            var position = 0.0
+            // Repeated short excursions with four display frames per leg.
+            for leg in 0..<20 {
+                let target = leg.isMultiple(of: 2) ? 0.08 : -0.08
+                let start = position
+                for frame in 0..<4 {
+                    let next = filter.advance(from: position, toward: target, elapsed: 1 / rate)
+                    #expect(next >= min(position, target) && next <= max(position, target))
+                    if frame == 0 {
+                        // A burst must leave some travel for subsequent frames.
+                        #expect(abs(next - position) < 0.75 * abs(target - position))
+                    }
+                    position = next
+                }
+                // Smoothing must still follow the excursion promptly.
+                #expect(abs(target - position) < 0.15 * abs(target - start))
+            }
         }
     }
 
@@ -585,5 +608,74 @@ struct SwipeTrackingFilterTests {
             position = next
         }
         #expect(abs(position - 0.5) < 1e-9)
+    }
+}
+
+struct HorizontalAccelerationTests {
+    @Test func gainIsSymmetricContinuousAndBounded() {
+        var previous = 0.0
+        for step in 0...200 {
+            let speed = Double(step) / 100
+            let gain = SlotSwipe.horizontalGain(speed: speed)
+            #expect(gain >= 0.55 && gain <= 1)
+            #expect(gain >= previous)
+            #expect(gain == SlotSwipe.horizontalGain(speed: -speed))
+            if step > 0 { #expect(gain - previous < 0.02) }
+            previous = gain
+        }
+    }
+
+    private func travel(speed: Double, rate: Double, invert: Bool = false) -> Double {
+        var swipe = SlotSwipe(config: .init(lockThreshold: 0.001, invert: invert, horizontalAcceleration: true))
+        swipe.begin(at: 0)
+        // Identical small lock-in before measuring the next 0.08 trackpad widths.
+        _ = swipe.move(dx: -0.002, dy: 0, at: 0.002 / speed)
+        let steps = max(1, Int((0.08 / speed * rate).rounded()))
+        let dt = 0.08 / speed / Double(steps)
+        for step in 1...steps {
+            _ = swipe.move(dx: -0.08 / Double(steps), dy: 0, at: 0.002 / speed + Double(step) * dt)
+        }
+        guard case .active(let raw, _, _, _) = swipe.state else { Issue.record("active"); return 0 }
+        return raw
+    }
+
+    @Test func slowMotionHasPrecisionAndFastMotionHasReach() {
+        for rate in [60.0, 120, 240] {
+            let slow = travel(speed: 0.05, rate: rate)
+            let fast = travel(speed: 1.2, rate: rate)
+            #expect(slow < 0.15)
+            #expect(fast > slow && fast <= 0.082 / 0.4 + 1e-9)
+            #expect(abs(slow + travel(speed: 0.05, rate: rate, invert: true)) < 1e-9)
+            #expect(abs(fast - travel(speed: 1.2, rate: 120)) < 1e-9)
+        }
+    }
+
+    @Test func holdingAfterFastMovementAddsNoTravelOrFlickCommit() {
+        func movedSwipe() -> SlotSwipe {
+            var swipe = SlotSwipe(config: .init(horizontalAcceleration: true))
+            swipe.begin(at: 0)
+            _ = swipe.move(dx: -0.02, dy: 0, at: 0.01)
+            _ = swipe.move(dx: -0.06, dy: 0, at: 0.02)
+            return swipe
+        }
+        var flick = movedSwipe()
+        #expect(flick.end(at: 0.02) == .commit(.right))
+        var held = movedSwipe()
+        guard case .active(let before, _, _, _) = held.state else { Issue.record("active"); return }
+        _ = held.move(dx: 0, dy: 0, at: 0.5)
+        guard case .active(let after, _, _, _) = held.state else { Issue.record("active"); return }
+        #expect(before == after)
+        #expect(held.end(at: 1) == .snapBack)
+    }
+
+    @Test func verticalActionsAreUnchanged() {
+        var linear = SlotSwipe(config: .init(closeTravel: 0.2))
+        var accelerated = SlotSwipe(config: .init(closeTravel: 0.2, horizontalAcceleration: true))
+        linear.begin(at: 0); accelerated.begin(at: 0)
+        for step in 1...10 {
+            let time = Double(step) / 100
+            #expect(linear.move(dx: 0, dy: 0.015, at: time) == accelerated.move(dx: 0, dy: 0.015, at: time))
+        }
+        #expect(linear.end(at: 0.11) == accelerated.end(at: 0.11))
     }
 }

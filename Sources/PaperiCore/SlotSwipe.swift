@@ -52,6 +52,8 @@ public struct SlotSwipe: Equatable, Sendable {
 
     public struct Configuration: Equatable, Sendable {
         public var travel: Double
+        /// Opt into speed-based gain for live horizontal tracking.
+        public var horizontalAcceleration: Bool
         /// Finger travel for a full step towards the left / right neighbour
         /// when it differs from `travel`. The caller sets these from how far
         /// the strip scrolls each way, so the strip moves the same distance
@@ -85,8 +87,10 @@ public struct SlotSwipe: Equatable, Sendable {
                     turnTravel: Double? = nil,
                     startOffset: Double = 0,
                     travelLeft: Double? = nil,
-                    travelRight: Double? = nil) {
+                    travelRight: Double? = nil,
+                    horizontalAcceleration: Bool = false) {
             self.travel = travel
+            self.horizontalAcceleration = horizontalAcceleration
             self.travelLeft = travelLeft
             self.travelRight = travelRight
             self.commitThreshold = commitThreshold
@@ -182,7 +186,12 @@ public struct SlotSwipe: Equatable, Sendable {
             let speed = (target - previous!) / dt
             derivative += alpha(10) * (speed - derivative)
             previous = target
-            filtered += alpha(8 + 40 * abs(derivative)) * (target - filtered)
+            // Keep a short smoothing interval even during bursts/reversals.
+            // Otherwise adaptive cutoff can approach infinity and an entire
+            // touch report becomes one visible frame. At 24 Hz, steady fast
+            // tracking adds about 6.6 ms of lag, without a movement speed cap.
+            let cutoff = min(24, 8 + 40 * abs(derivative))
+            filtered += alpha(cutoff) * (target - filtered)
             // Direction has already been validated by TrackingPrediction.
             // Filtering may only approach that target, never run past it.
             filtered = min(max(current, target), max(min(current, target), filtered))
@@ -246,6 +255,7 @@ public struct SlotSwipe: Equatable, Sendable {
     public mutating func begin(at time: Double) {
         state = .detecting(accDx: 0, accDy: 0, startTime: time)
         turnX = 0; turnY = 0
+        fingerSpeed = nil
         turnDirection = .right
     }
 
@@ -264,7 +274,8 @@ public struct SlotSwipe: Equatable, Sendable {
                 if absX > 1.2 * absY {
                     // Locked horizontal! As for closes, the shown progress
                     // starts from rest here instead of jumping the lead-in.
-                    let rawProg = advance(0, by: newX * (config.invert ? 1.0 : -1.0))
+                    let gain = horizontalGain(delta: newX, elapsed: time - start)
+                    let rawProg = advance(0, by: newX * gain * (config.invert ? 1.0 : -1.0))
                     origin = max(-0.5, min(0.5, rawProg))
                     let clamped = Self.rubberBand(config.startOffset + Self.shown(rawProg, origin: origin))
                     let dt = max(1.0 / 120.0, time - start)
@@ -303,7 +314,9 @@ public struct SlotSwipe: Equatable, Sendable {
             }
 
         case .active(let rawProg, _, let lastVel, let lastTime):
-            let newRaw = advance(rawProg, by: dx * (config.invert ? 1.0 : -1.0))
+            guard time > lastTime else { return nil }
+            let gain = horizontalGain(delta: dx, elapsed: time - lastTime)
+            let newRaw = advance(rawProg, by: dx * gain * (config.invert ? 1.0 : -1.0))
             let deltaProg = newRaw - rawProg
             let clamped = Self.rubberBand(config.startOffset + Self.shown(newRaw, origin: origin))
             guard time > lastTime else { return nil }
@@ -354,6 +367,26 @@ public struct SlotSwipe: Equatable, Sendable {
     private func advance(_ raw: Double, by fingers: Double) -> Double {
         let position = raw * travel(side: raw) + fingers
         return position / travel(side: position)
+    }
+
+    private var fingerSpeed: Double?
+
+    /// Gain uses trackpad widths/second, independent of column width and
+    /// direction. Smoothstep joins precision tracking to normal gain; extra
+    /// flick reach is reserved for release, never added while fingers stay down.
+    static func horizontalGain(speed: Double) -> Double {
+        let u = min(1, max(0, (abs(speed) - 0.05) / 0.95))
+        return 0.55 + 0.45 * u * u * (3 - 2 * u)
+    }
+
+    private mutating func horizontalGain(delta: Double, elapsed: Double) -> Double {
+        guard config.horizontalAcceleration else { return 1 }
+        let dt = max(1e-6, elapsed)
+        let speed = abs(delta) / dt
+        let previous = fingerSpeed ?? speed
+        let filtered = previous + (1 - exp(-dt / 0.025)) * (speed - previous)
+        fingerSpeed = filtered
+        return Self.horizontalGain(speed: filtered)
     }
 
     /// One close, pull or turn update; `delta` is in progress units.

@@ -504,3 +504,35 @@ validation passed 112 core and 171 platform tests, plus the executable build.
 Detailed comparison against Spaces across column widths and capture catch-up
 remains future measurement work. This follow-up includes the backward-motion
 fix and adaptive smoothing after checkpoint `5177f9e`.
+
+### Short, fast tracking excursions
+
+A contained follow-up caps the adaptive tracking cutoff at 24 Hz. Previously,
+a sudden report or rapid reversal could raise the cutoff enough to display
+almost all its travel in one frame. The ceiling keeps a short smoothing
+interval at high speed (about 6.6 ms steady-state lag); low-speed filtering,
+gesture decisions and rendering architecture are unchanged. There is no
+absolute movement-speed limit. Regression coverage replays short alternating
+excursions at 60/120 Hz and checks that movement spans frames, remains bounded,
+and follows promptly. This does not guarantee display cadence under main-thread
+stalls; live feel still needs verification.
+
+### Horizontal speed-based gain trial
+
+At the user's request, live horizontal swipes now opt into a bounded acceleration
+curve in `SlotSwipe`: 0.55× gain up to 0.05 trackpad widths/second, smoothly
+rising to 1× at 1 width/second. Speed magnitude is filtered over 25 ms;
+direction still comes directly from the finger delta. Gain multiplies deltas,
+not total position, so changing speed cannot relocate the strip on its own.
+Directional column travel still converts that displacement into progress.
+Vertical gestures and their thresholds are unchanged. Core callers can retain
+linear gain via the default configuration; live tracking explicitly enables
+acceleration. These are trial tuning values, not a claim about Apple's private
+Spaces implementation. Tests cover symmetry, bounded continuous gain, equivalent
+steady motion at 60/120/240 Hz, increased reach at speed, and vertical behaviour.
+
+Follow-up: while fingers remain down, the curve now tops out at normal (1×)
+gain rather than adding a fast-motion distance boost. Additional flick reach
+comes only from the existing velocity-based release decision, whose velocity
+expires during a hold. A regression compares immediate release with a held
+release after identical fast movement and confirms no travel is added at rest.

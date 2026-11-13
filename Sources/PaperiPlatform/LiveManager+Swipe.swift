@@ -256,7 +256,8 @@ extension LiveManager {
                 invert: options.config.gesture.invert,
                 closeTravel: options.config.gesture.swipeUpToClose ? options.config.gesture.travel : nil,
                 pullTravel: options.config.gesture.travel,
-                turnTravel: options.config.gesture.travel
+                turnTravel: options.config.gesture.travel,
+                horizontalAcceleration: true
             )
             var swipeReducer = SlotSwipe(config: cfg)
             swipeReducer.begin(at: time)
