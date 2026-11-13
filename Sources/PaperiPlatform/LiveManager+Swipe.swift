@@ -1258,12 +1258,17 @@ extension LiveManager {
     func collapseGap(after wid: UInt32, state: Swipe) -> (targets: [UInt32: Rect], duration: Double)? {
         guard let session = coordinator.sessions[state.space], isActiveRepresentative(wid) else { return nil }
         let members = Set(session.members(of: wid) ?? [wid])
+        let previousLayout = session.state.layout
         let target = neighbourAfterClose(members)
         guard (try? coordinator.removeContainer(containing: wid, classification: Self.tiled)) != nil else { return nil }
         if let target {
             try? session.focus(windowID: target, ownerPID: pidForWindow[target], classification: Self.tiled, ticket: session.ticket)
             closeFocus = (target, ProcessInfo.processInfo.systemUptime + 0.8)
             log("focus after minimize: \(target)")
+        }
+        if let offset = LiveReconciliation.offsetAfterTrailingClose(previous: previousLayout,
+                current: session.state.layout, canvas: session.canvas, gap: options.gap) {
+            session.setOffset(offset, ticket: session.ticket)
         }
         reveal(session)
         applied.removeValue(forKey: state.space)

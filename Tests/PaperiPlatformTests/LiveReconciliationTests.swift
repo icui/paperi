@@ -4,6 +4,37 @@ import PaperiCore
 @testable import PaperiPlatform
 
 @MainActor struct LiveReconciliationTests {
+    @Test func trailingCloseAlignsNeighborRightOnlyWithColumnToItsLeft() {
+        let canvas = Rect(x: 10, y: 30, width: 1000, height: 800)
+        let columns = (1...4).map { id in
+            Column(slots: [Slot(id: "\(id)", members: [UInt32(id)], activeMember: UInt32(id))], width: 400)
+        }
+        let previous = Layout(columns: columns, focused: "4", offset: -816)
+        let current = Layout(columns: Array(columns.prefix(3)), focused: "3", offset: -816)
+        let offset = LiveReconciliation.offsetAfterTrailingClose(previous: previous, current: current, canvas: canvas, gap: 8)
+        #expect(offset == -216)
+        var aligned = current
+        aligned.offset = offset!
+        #expect((try? aligned.reveal(in: canvas, gap: 8)) == false)
+        #expect(LiveReconciliation.offsetAfterTrailingClose(
+            previous: Layout(columns: Array(columns.prefix(2)), focused: "2"),
+            current: Layout(columns: [columns[0]], focused: "1"), canvas: canvas, gap: 8) == nil)
+        #expect(LiveReconciliation.offsetAfterTrailingClose(
+            previous: previous, current: previous, canvas: canvas, gap: 8) == nil)
+        #expect(LiveReconciliation.offsetAfterTrailingClose(
+            previous: Layout(columns: columns, focused: "2"), current: current, canvas: canvas, gap: 8) == nil)
+        // Removing one row of a stack leaves the trailing column in place.
+        var stacked = previous
+        stacked.columns[3].slots.append(Slot(id: "5", members: [5], activeMember: 5))
+        stacked.columns[3].weights.append(1)
+        var survivingStack = stacked
+        survivingStack.columns[3].slots.removeFirst()
+        survivingStack.columns[3].weights.removeFirst()
+        survivingStack.focused = "5"
+        #expect(LiveReconciliation.offsetAfterTrailingClose(previous: stacked,
+            current: survivingStack, canvas: canvas, gap: 8) == nil)
+    }
+
     @Test func longStripCapturesOnlyWindowsThatCanEnterView() {
         let canvas = Rect(x: 8, y: 38, width: 1424, height: 886)
         var starts: [UInt32: Rect] = [:]

@@ -3,6 +3,22 @@ import PaperiCore
 
 /// Pure helpers for the live manager. No OS effects run here.
 enum LiveReconciliation {
+    /// Closing the focused trailing column brings its left neighbor to the
+    /// right edge, provided another column remains to that neighbor's left.
+    static func offsetAfterTrailingClose(previous: Layout, current: Layout,
+                                         canvas: Rect, gap: Double) -> Double? {
+        guard let oldFocus = previous.focused,
+              let oldLast = previous.columns.last,
+              oldLast.slots.contains(where: { $0.id == oldFocus }),
+              oldLast.slots.allSatisfy({ current.index(of: $0.id) == nil }),
+              let focus = current.focused, let index = current.index(of: focus),
+              index.column > 0, index.column == current.columns.count - 1,
+              previous.index(of: focus) != nil else { return nil }
+        let maximum = Layout.maxColumnWidth(in: canvas, edgeMargin: gap)
+        let preceding = current.columns.prefix(index.column).reduce(0) { $0 + min($1.width, maximum) + gap }
+        return canvas.width - min(current.columns[index.column].width, maximum) - preceding
+    }
+
     /// Capture only windows whose horizontal sweep can enter the canvas.
     /// Distant windows tucked against the physical display edge stay outside
     /// the inset canvas; counting them made long strips disable all snapshots.

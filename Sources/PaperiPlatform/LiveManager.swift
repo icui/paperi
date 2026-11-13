@@ -509,6 +509,7 @@ import PaperiCore
         destroyedNotified.removeAll()
         // Spaces whose strip lost a window: the survivors close the gap animated.
         var closedSpaces = Set(gone.compactMap { coordinator.spaceForWindow[$0] })
+        let layoutsBeforeClose = coordinator.sessions.mapValues { $0.state.layout }
         var closeTarget = neighbourAfterClose(gone)
         if !gone.isEmpty { removeMembers(gone) }
         if let closeTarget {
@@ -671,6 +672,11 @@ import PaperiCore
             let classification = owned != nil ? Self.tiled : WindowPolicy.classify(WindowFacts(bundleID: "foreign"))
             try? session.focus(windowID: owned, ownerPID: owned != nil ? focusedPID : nil,
                                classification: classification, ticket: session.ticket)
+            if !mouseDown, closedSpaces.contains(space), let previous = layoutsBeforeClose[space],
+               let offset = LiveReconciliation.offsetAfterTrailingClose(previous: previous,
+                    current: session.state.layout, canvas: session.canvas, gap: options.gap) {
+                session.setOffset(offset, ticket: session.ticket)
+            }
             // Removals, insertions and focus changes can leave the focused
             // column partly off-canvas; reveal is minimal and idempotent.
             if !mouseDown { reveal(session) }
