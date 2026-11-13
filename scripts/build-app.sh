@@ -7,6 +7,13 @@ app="dist/Paperi.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp assets/branding/Paperi.icns "$app/Contents/Resources/Paperi.icns"
 bin_dir="$(./scripts/swift.sh build -c release --show-bin-path)"
+# Catch regressions that silently select the older AppKit/SwiftUI appearance.
+expected_sdk="$(xcrun --sdk macosx --show-sdk-version)"
+linked_sdk="$(xcrun vtool -show-build "$bin_dir/paperi" | awk '$1 == "sdk" { print $2; exit }')"
+if [ "$linked_sdk" != "$expected_sdk" ]; then
+    echo "Linked SDK $linked_sdk does not match installed SDK $expected_sdk" >&2
+    exit 1
+fi
 cp "$bin_dir/paperi" "$app/Contents/MacOS/Paperi"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

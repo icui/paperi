@@ -82,9 +82,17 @@ import PaperiPlatform
 @MainActor final class SettingsWindow: NSWindowController {
     init(apply: @escaping () -> [String: Any], openJSON: @escaping () -> Void) {
         let view = SettingsView(model: SettingsModel(apply: apply), openJSON: openJSON)
-        let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+        // Configure the chrome before hosting SwiftUI so we preserve the split
+        // view's toolbar and sidebar integration with the system window style.
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 680),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false
+        )
         window.title = "Paperi Settings"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.toolbarStyle = .unified
+        window.titlebarSeparatorStyle = .none
+        window.contentViewController = NSHostingController(rootView: view)
         window.setContentSize(NSSize(width: 900, height: 680))
         window.minSize = NSSize(width: 760, height: 500)
         window.center()
@@ -134,77 +142,145 @@ private struct SettingsView: View {
                       Setting(id: "gesture.tap", title: "Tap", detail: "Action for a quick multi-finger tap.", choices: ["tray", "none"])])
     ] }
     private var actions: [String] { ["newWindow", "closeTab", "minimize", "openApp", "none"] }
+    private var categoryIcons: [String: String] {
+        ["Layout": "rectangle.split.3x1", "Appearance": "paintpalette", "Applications": "app.badge",
+         "Gestures": "hand.draw", "Shortcuts": "keyboard", "General": "gearshape"]
+    }
+    private var selection: Binding<String?> {
+        Binding(get: { model.category }, set: { category in
+            guard let category else { return }
+            model.category = category
+            model.search = ""
+        })
+    }
+    private func visibleFields(in category: String, fields: [Setting]) -> [Setting] {
+        fields.filter {
+            model.search.isEmpty ? category == model.category :
+                "\(category) \($0.title) \($0.id) \($0.detail)".localizedCaseInsensitiveContains(model.search)
+        }
+    }
+    private var showsShortcuts: Bool {
+        model.search.isEmpty ? model.category == "Shortcuts" :
+            "shortcuts hotkeys keyboard".localizedCaseInsensitiveContains(model.search)
+    }
+    private var showsGeneral: Bool {
+        model.search.isEmpty ? model.category == "General" :
+            "general start at login".localizedCaseInsensitiveContains(model.search)
+    }
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("SETTINGS").font(.caption).foregroundStyle(.secondary).padding(.bottom, 12)
-                    ForEach(categories, id: \.self) { name in
-                        Button { model.category = name; model.search = "" } label: {
-                            Text(name).frame(maxWidth: .infinity, alignment: .leading).padding(8)
-                                .background(model.category == name ? Color.accentColor.opacity(0.15) : .clear).cornerRadius(6)
-                        }.buttonStyle(.plain)
-                    }
-                    Spacer()
-                    Button("Open config.json…", action: openJSON)
-                }.padding(16).frame(width: 170).background(Color(nsColor: .controlBackgroundColor))
-                Divider()
-                VStack(alignment: .leading, spacing: 16) {
-                    TextField("Search settings", text: $model.search).textFieldStyle(.roundedBorder)
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(settings, id: \.0) { section, fields in
-                                let visible = fields.filter { model.search.isEmpty ? section == model.category : "\($0.title) \($0.id) \($0.detail)".localizedCaseInsensitiveContains(model.search) }
-                                if !visible.isEmpty {
-                                    Text(section).font(.title2.bold()).padding(.vertical, 16)
-                                    ForEach(visible) { field in row(field); Divider() }
-                                }
-                            }
-                            if model.category == "Shortcuts" || (!model.search.isEmpty && "shortcuts hotkeys".contains(model.search.lowercased())) { shortcuts }
-                            if model.category == "General" && model.search.isEmpty {
-                                Text("General").font(.title2.bold())
-                                Toggle("Start at Login", isOn: Binding(get: { model.loginEnabled }, set: { enabled in
-                                    let reply = LoginAgent.command([enabled ? "on" : "off"])
-                                    model.loginEnabled = LoginAgent.isEnabled
-                                    if reply["ok"] as? Bool != true { model.error = reply["error"] as? String ?? "Could not update Start at Login" }
-                                })).padding(.vertical)
-                                Text("Settings saved here apply to the JSON configuration. Launch flags can override application lists and runtime options.").foregroundStyle(.secondary)
-                            }
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }.padding(24)
-            }
-            Divider()
-            HStack {
-                Text(model.error.isEmpty ? (model.dirty ? "Unsaved changes" : "Settings are up to date") : model.error)
-                    .font(.caption).foregroundStyle(model.error.isEmpty ? Color.secondary : Color.red).textSelection(.enabled)
-                Spacer()
-                if settings.flatMap({ $0.1 }).contains(where: { model.modified($0.id) }) || model.modified("hotkeysEnabled") || !(model.values["hotkeys"] as? [String: Any] ?? [:]).isEmpty {
-                    Button("Restore All Defaults") { model.values = [:]; model.textDrafts = [:]; model.dirty = true }
+        NavigationSplitView {
+            List(selection: selection) {
+                ForEach(categories, id: \.self) { category in
+                    Label(category, systemImage: categoryIcons[category] ?? "gearshape")
+                        .tag(category)
                 }
-                Button("Apply Changes") { model.save() }.buttonStyle(.borderedProminent).disabled(!model.dirty)
-            }.padding(16)
+            }
+            .listStyle(.sidebar)
+            .navigationTitle("Settings")
+            .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+            .searchable(text: $model.search, prompt: "Search settings")
+        } detail: {
+            Form {
+                ForEach(settings, id: \.0) { category, fields in
+                    let visible = visibleFields(in: category, fields: fields)
+                    if !visible.isEmpty {
+                        Section(category) {
+                            ForEach(visible) { field in row(field) }
+                        }
+                    }
+                }
+                if showsShortcuts { shortcuts }
+                if showsGeneral {
+                    Section {
+                        Toggle("Start at Login", isOn: Binding(get: { model.loginEnabled }, set: { enabled in
+                            let reply = LoginAgent.command([enabled ? "on" : "off"])
+                            model.loginEnabled = LoginAgent.isEnabled
+                            if reply["ok"] as? Bool != true { model.error = reply["error"] as? String ?? "Could not update Start at Login" }
+                        }))
+                    } header: {
+                        Text("General")
+                    } footer: {
+                        Text("Settings saved here apply to the JSON configuration. Launch flags can override application lists and runtime options.")
+                    }
+                }
+                if !model.search.isEmpty && !showsShortcuts && !showsGeneral &&
+                    settings.allSatisfy({ visibleFields(in: $0.0, fields: $0.1).isEmpty }) {
+                    ContentUnavailableView.search(text: model.search)
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle(model.search.isEmpty ? model.category : "Search Results")
+            .toolbar {
+                ToolbarItem {
+                    Button(action: openJSON) {
+                        Label("Open config.json…", systemImage: "doc.text")
+                    }
+                    .help("Open config.json…")
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack {
+                    Text(model.error.isEmpty ? (model.dirty ? "Unsaved changes" : "Settings are up to date") : model.error)
+                        .font(.caption).foregroundStyle(model.error.isEmpty ? Color.secondary : Color.red)
+                        .textSelection(.enabled)
+                    Spacer()
+                    if settings.flatMap({ $0.1 }).contains(where: { model.modified($0.id) }) || model.modified("hotkeysEnabled") || !(model.values["hotkeys"] as? [String: Any] ?? [:]).isEmpty {
+                        Button("Restore All Defaults") { model.values = [:]; model.textDrafts = [:]; model.dirty = true }
+                    }
+                    Button("Apply Changes") { model.save() }
+                        .keyboardShortcut("s", modifiers: .command)
+                        .disabled(!model.dirty)
+                }
+                .padding()
+                .background(.bar)
+            }
         }
     }
     @ViewBuilder private func row(_ field: Setting) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(field.title).font(.headline)
-                Spacer()
-                if model.modified(field.id) { Button("Restore Default") { model.set(field.id, nil) }.font(.caption) }
+        let isMultiline = field.id == "float" || field.id == "tile" || model.get(field.id) is [String] || field.id == "include"
+        if isMultiline {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    fieldLabel(field)
+                    Spacer()
+                    restoreButton(field)
+                }
+                control(field)
             }
+        } else {
+            LabeledContent {
+                control(field)
+                    .frame(maxWidth: 220, alignment: .trailing)
+                restoreButton(field)
+            } label: {
+                fieldLabel(field)
+            }
+        }
+    }
+    private func fieldLabel(_ field: Setting) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(field.title)
             Text(field.detail).font(.caption).foregroundStyle(.secondary)
-            control(field)
-        }.padding(.vertical, 16)
+        }
+    }
+    @ViewBuilder private func restoreButton(_ field: Setting) -> some View {
+        if model.modified(field.id) {
+            Button { model.set(field.id, nil) } label: {
+                Image(systemName: "arrow.uturn.backward")
+            }
+            .buttonStyle(.borderless)
+            .help("Restore Default")
+            .accessibilityLabel("Restore \(field.title) to default")
+        }
     }
     @ViewBuilder private func control(_ field: Setting) -> some View {
         let value = model.get(field.id)
         if !field.choices.isEmpty {
             Picker(field.title, selection: Binding(get: { value.map { String(describing: $0) } ?? "" }, set: { model.set(field.id, field.id == "gesture.fingers" ? Int($0) as Any? : $0) })) {
                 ForEach(field.choices, id: \.self) { Text($0).tag($0) }
-            }.labelsHidden().frame(maxWidth: 240)
+            }.labelsHidden().accessibilityLabel(field.title)
         } else if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
-            Toggle(field.title, isOn: Binding(get: { number.boolValue }, set: { model.set(field.id, $0) })).labelsHidden().toggleStyle(.switch)
+            Toggle(field.title, isOn: Binding(get: { number.boolValue }, set: { model.set(field.id, $0) })).labelsHidden().toggleStyle(.switch).accessibilityLabel(field.title)
         } else if field.id == "float" || field.id == "tile" {
             rules(field.id)
         } else if value is [String] || field.id == "include" {
@@ -240,8 +316,7 @@ private struct SettingsView: View {
         let overrides = model.values["hotkeys"] as? [String: Any] ?? [:]
         let defaults = Dictionary(uniqueKeysWithValues: HotKeyBindings.defaultTable)
         let keys = Set(defaults.keys).union(overrides.keys).sorted()
-        return VStack(alignment: .leading, spacing: 12) {
-            Text("Shortcuts").font(.title2.bold())
+        return Section("Shortcuts") {
             row(Setting(id: "hotkeysEnabled", title: "Enable shortcuts", detail: "Enable all global keyboard shortcuts. Your bindings are kept when disabled. The --no-hotkeys launch flag overrides this setting."))
             Text("Edit a command, disable a binding, or add a shortcut such as ctrl-alt-j. Restore Default removes its override.").font(.caption).foregroundStyle(.secondary)
             ForEach(keys, id: \.self) { key in
