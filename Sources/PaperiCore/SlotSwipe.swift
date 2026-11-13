@@ -12,6 +12,11 @@ import Foundation
 /// (progress grows as the fingers move down); the caller chooses the action.
 /// With `turnTravel` set too, a pull can turn left or right. Progress then
 /// follows that direction, and the pull no longer acts.
+///
+/// A swipe may start with the strip already off its column: a new swipe that
+/// catches a landing in flight (`startOffset`, set by `anchor`). Progress is
+/// then measured from the column nearest to where the strip was caught, and
+/// a release settles on that column or one of its neighbours.
 public struct SlotSwipe: Equatable, Sendable {
     public enum State: Equatable, Sendable {
         case idle
@@ -60,6 +65,9 @@ public struct SlotSwipe: Equatable, Sendable {
         /// Horizontal finger travel for a full turn out of a pull.
         /// `nil`: a pull cannot turn.
         public var turnTravel: Double?
+        /// Where the strip was, in slots from this swipe's column, when the
+        /// swipe began (a landing it caught); 0 for a strip at rest.
+        public var startOffset: Double
 
         public init(travel: Double = 0.4,
                     commitThreshold: Double = 0.5,
@@ -68,7 +76,8 @@ public struct SlotSwipe: Equatable, Sendable {
                     invert: Bool = false,
                     closeTravel: Double? = nil,
                     pullTravel: Double? = nil,
-                    turnTravel: Double? = nil) {
+                    turnTravel: Double? = nil,
+                    startOffset: Double = 0) {
             self.travel = travel
             self.commitThreshold = commitThreshold
             self.flickVelocity = flickVelocity
@@ -77,6 +86,7 @@ public struct SlotSwipe: Equatable, Sendable {
             self.closeTravel = closeTravel
             self.pullTravel = pullTravel
             self.turnTravel = turnTravel
+            self.startOffset = startOffset
         }
     }
 
@@ -180,7 +190,7 @@ public struct SlotSwipe: Equatable, Sendable {
                     let dirFactor = config.invert ? 1.0 : -1.0
                     let rawProg = (newX * dirFactor) / max(0.01, config.travel)
                     origin = max(-0.5, min(0.5, rawProg))
-                    let clamped = Self.rubberBand(Self.shown(rawProg, origin: origin))
+                    let clamped = Self.rubberBand(config.startOffset + Self.shown(rawProg, origin: origin))
                     let dt = max(1.0 / 120.0, time - start)
                     let vel = rawProg / dt
                     state = .active(rawProgress: rawProg, clampedProgress: clamped, velocity: vel, lastTime: time)
@@ -220,7 +230,7 @@ public struct SlotSwipe: Equatable, Sendable {
             let dirFactor = config.invert ? 1.0 : -1.0
             let deltaProg = (dx * dirFactor) / max(0.01, config.travel)
             let newRaw = rawProg + deltaProg
-            let clamped = Self.rubberBand(Self.shown(newRaw, origin: origin))
+            let clamped = Self.rubberBand(config.startOffset + Self.shown(newRaw, origin: origin))
             guard time > lastTime else { return nil }
             let dt = time - lastTime
             let instantVel = deltaProg / max(1.0 / 120.0, dt)
@@ -329,9 +339,7 @@ public struct SlotSwipe: Equatable, Sendable {
     public mutating func end(at time: Double) -> Decision {
         switch state {
         case .active(let rawProg, _, let vel, let lastTime):
-            // Decide on the whole finger travel, including the lead-in.
-            let decision: Decision = releases(raw: rawProg, clamped: Self.rubberBand(rawProg), velocity: vel, lastTime: lastTime, at: time)
-                ? (rawProg > 0 ? .commit(.right) : .commit(.left)) : .snapBack
+            let decision = horizontalDecision(raw: rawProg, velocity: vel, lastTime: lastTime, at: time)
             state = .completed(decision)
             return decision
 
@@ -367,5 +375,89 @@ public struct SlotSwipe: Equatable, Sendable {
 
     public mutating func cancel() {
         state = .cancelled
+    }
+
+    /// Sets where the strip was when this swipe began (see `startOffset`),
+    /// e.g. once the swipe has locked onto a landing it caught.
+    public mutating func anchor(offset: Double) {
+        config.startOffset = offset.isFinite ? offset : 0
+        if case .active(let raw, _, let velocity, let lastTime) = state {
+            state = .active(rawProgress: raw, clampedProgress: Self.rubberBand(config.startOffset + Self.shown(raw, origin: origin)),
+                            velocity: velocity, lastTime: lastTime)
+        }
+    }
+
+    /// A flick (enough travel, fast, aligned) steps one slot its way from
+    /// this swipe's column, even if the strip has not passed that column yet:
+    /// two quick swipes move two columns. Otherwise the strip settles where
+    /// it was left: past the commit threshold of a neighbour, unless moving
+    /// fast back, it goes there, else back to its column. At rest at the
+    /// start this is the plain one-slot rule.
+    private func horizontalDecision(raw: Double, velocity: Double, lastTime: Double, at time: Double) -> Decision {
+        // Stationary touches produce no move events. Fade stale velocity out
+        // over 100 ms so a hold before release cannot act as a flick.
+        let releaseVelocity = velocity * max(0, 1 - max(0, time - lastTime) / 0.1)
+        // Require intentional travel as well as speed. A tiny twitch must
+        // not jump a whole slot, nor should reversing select an unseen slot.
+        if abs(raw) >= 0.12, releaseVelocity * raw > 0, abs(releaseVelocity) >= config.flickVelocity {
+            return .commit(raw > 0 ? .right : .left)
+        }
+        // Decide on the whole finger travel, including the lead-in.
+        let position = config.startOffset + raw
+        let retreating = releaseVelocity * position < 0 && abs(releaseVelocity) >= config.flickVelocity
+        guard abs(Self.rubberBand(position)) >= config.commitThreshold, !retreating else { return .snapBack }
+        return .commit(position > 0 ? .right : .left)
+    }
+
+    // MARK: catching a landing
+
+    /// Progress along a settle animation `elapsed` seconds in, for the
+    /// cubic Bézier timing curve `curve` (control points as for
+    /// `CAMediaTimingFunction`). 0 at the start, 1 from `duration` on.
+    public static func settleFraction(elapsed: Double, duration: Double, curve: (Double, Double, Double, Double)) -> Double {
+        guard elapsed.isFinite, duration.isFinite, duration > 0 else { return 1 }
+        let x = min(1, max(0, elapsed / duration))
+        if x <= 0 || x >= 1 { return x }
+        func bezier(_ s: Double, _ p1: Double, _ p2: Double) -> Double {
+            let r = 1 - s
+            return 3 * r * r * s * p1 + 3 * r * s * s * p2 + s * s * s
+        }
+        // x(s) is monotonic for control x within 0…1: bisect for s.
+        var lo = 0.0, hi = 1.0
+        for _ in 0..<40 {
+            let mid = (lo + hi) / 2
+            if bezier(mid, curve.0, curve.2) < x { lo = mid } else { hi = mid }
+        }
+        return bezier((lo + hi) / 2, curve.1, curve.3)
+    }
+
+    /// The column (-1, 0 or 1 from a landing's own) a new swipe takes over
+    /// from at `position`: the nearest one there is.
+    public static func nearestSlot(_ position: Double, available: Set<Int>) -> Int {
+        guard position.isFinite else { return 0 }
+        return available.min { abs(Double($0) - position) < abs(Double($1) - position) } ?? 0
+    }
+
+    /// Which part of a caught swipe's path `progress` lies on. The images
+    /// start at the caught frames (`offset`); from there they move to the
+    /// swipe's own column (`toColumn`, fraction of the way), or straight on
+    /// to the neighbour beyond (`fromCaught`). Past its column they move from
+    /// there to the other neighbour (`fromColumn`). Fractions may exceed 1
+    /// past a neighbour.
+    public enum PathLeg: Equatable, Sendable {
+        case toColumn(Double)
+        case fromColumn(Direction, Double)
+        case fromCaught(Direction, Double)
+    }
+
+    public static func leg(_ progress: Double, offset: Double) -> PathLeg {
+        let side: Direction = progress < 0 ? .left : .right
+        guard offset.isFinite, abs(offset) > 1e-9, progress.isFinite else { return .fromColumn(side, abs(progress)) }
+        if progress * offset <= 0 {
+            return progress == 0 ? .toColumn(1) : .fromColumn(side, abs(progress))
+        }
+        if abs(progress) <= abs(offset) { return .toColumn(1 - progress / offset) }
+        let remaining = 1 - abs(offset)
+        return .fromCaught(side, remaining > 1e-6 ? (abs(progress) - abs(offset)) / remaining : 1)
     }
 }

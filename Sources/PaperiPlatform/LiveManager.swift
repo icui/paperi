@@ -1105,6 +1105,33 @@ import PaperiCore
         var failed = false
         var released: Bool?
         var releaseDirection: Direction?
+        /// The layout progress 0 stands for, and those of the neighbours at
+        /// ∓1 (keyed like `ends`): what a release settles on.
+        var base = Layout()
+        var baseWindow: UInt32?
+        var layouts: [Direction: Layout] = [:]
+        /// A swipe that caught a landing in flight: `starts` are the frames
+        /// the images were caught at, `origin` (progress) where that was,
+        /// and `center` the frames at progress 0. Its release always writes
+        /// the layout it settles on, even its own column.
+        var caught = false
+        var origin = 0.0
+        var center: [UInt32: Rect]?
+        /// A horizontal release sliding to its column; a new swipe may catch it.
+        var landing: Landing?
+    }
+    /// A horizontal release on screen: progress `from` → `to` along `curve`.
+    struct Landing {
+        let began: Double
+        let duration: Double
+        let curve: (Double, Double, Double, Double)
+        let from: Double
+        let to: Double
+        /// Where the images end up.
+        let frames: [UInt32: Rect]
+        func progress(at time: Double) -> Double {
+            from + (to - from) * SlotSwipe.settleFraction(elapsed: time - began, duration: duration, curve: curve)
+        }
     }
     enum TabClose: String {
         /// The window is the front tab of a native tab group (AX press).
@@ -1132,6 +1159,14 @@ import PaperiCore
     /// Gesture input is ignored until it finishes; live finger tracking is not
     /// an animation.
     private var gestureBlockedByAnimation: Bool { motionTimer != nil || swipe?.released != nil }
+    /// A horizontal landing is on screen that a new swipe may take over.
+    private var landingCatchable: Bool {
+        guard motionTimer == nil, let state = swipe, state.released != nil, !state.closing else { return false }
+        return state.landing != nil && state.ready && !state.failed
+    }
+    /// The current touch sequence began during a catchable landing and has
+    /// not locked an axis yet; the landing goes on until it locks horizontally.
+    private var catchPending = false
 
     private func cancelSwipe() {
         standaloneOverlay?.fadeOut(); standaloneOverlay = nil
@@ -1239,21 +1274,41 @@ import PaperiCore
             cancelSwipe()
             slotSwipe?.cancel()
             slotSwipe = nil
+            catchPending = false
             return
+        }
+        // A sequence that began during a landing leaves it alone until it
+        // locks horizontally: resting fingers, taps and vertical swipes
+        // must not stop a strip on its way to a column.
+        let landingInFlight = swipe?.released != nil
+        if catchPending {
+            switch event {
+            case .begin, .tap: catchPending = false
+            case .cancel:
+                catchPending = false; slotSwipe = nil; return
+            case .end:
+                // Lifted before an axis locked (or after a vertical lock).
+                guard landingInFlight else { catchPending = false; break }
+                catchPending = false; slotSwipe = nil; return
+            case .move: break
+            }
         }
         switch event {
         case .begin(let time):
-            // Ignore the whole contact sequence if it starts during an
-            // animation: interrupting a landing could capture the previous
-            // overlay, and a focus scroll must not be cancelled by a touch.
-            guard !gestureBlockedByAnimation else { return }
-            // Capture while determining the axis, but keep the overlay hidden
-            // until horizontal movement locks. This overlaps input with capture.
+            // A sequence starting during a focus scroll or a close/pull is
+            // ignored whole: a focus scroll must not be cancelled by a touch.
+            // A horizontal landing can be caught once the fingers lock.
+            let catching = landingCatchable
+            guard catching || !gestureBlockedByAnimation else { return }
             standalonePull = false
-            let started = beginSwipe(pendingLock: true)
-            // Nothing to swipe on a full-screen Space; a retry on horizontal
-            // lock would refuse again (and refresh again).
-            if started["error"] as? String == Self.fullScreenRefusal { return }
+            if !catching {
+                // Capture while determining the axis, but keep the overlay hidden
+                // until horizontal movement locks. This overlaps input with capture.
+                let started = beginSwipe(pendingLock: true)
+                // Nothing to swipe on a full-screen Space; a retry on horizontal
+                // lock would refuse again (and refresh again).
+                if started["error"] as? String == Self.fullScreenRefusal { return }
+            }
             let cfg = SlotSwipe.Configuration(
                 travel: options.config.gesture.travel,
                 commitThreshold: options.config.gesture.commitThreshold,
@@ -1266,10 +1321,21 @@ import PaperiCore
             var swipeReducer = SlotSwipe(config: cfg)
             swipeReducer.begin(at: time)
             slotSwipe = swipeReducer
+            catchPending = catching
 
         case .move(let dx, let dy, let time):
             guard var swipeReducer = slotSwipe else { return }
             if let action = swipeReducer.move(dx: dx, dy: dy, at: time) {
+                if catchPending {
+                    catchPending = false
+                    // Locked while the landing is still on screen: only a
+                    // horizontal swipe takes it over. (If it has finished,
+                    // this is an ordinary swipe from a strip at rest.)
+                    if swipe?.released != nil {
+                        guard action == .started, let offset = catchLanding() else { slotSwipe = nil; return }
+                        swipeReducer.anchor(offset: offset)
+                    }
+                }
                 switch action {
                 case .started:
                     let res: [String: Any] = swipe != nil ? ["ok": true] : beginSwipe()
@@ -1478,34 +1544,10 @@ import PaperiCore
               let surveys = cachedStripSurveys(space: space, placements: current) else {
             scheduleRefresh(); return fail("strip not settled")
         }
-        var ends: [Direction: [UInt32: Rect]] = [:], neighbours: [Direction: UInt32] = [:]
-        for direction in [Direction.left, .right] {
-            // A swipe moves the strip: target the nearest column in that
-            // direction that needs scrolling to reveal. If every column that
-            // way is already fully visible, fall back to the adjacent one.
-            var layout = session.state.layout
-            var candidate = layout
-            var firstStep: Layout?
-            var scrolled = false
-            while let id = candidate.neighbor(direction) {
-                candidate.focused = id
-                if firstStep == nil { firstStep = candidate }
-                if (try? candidate.reveal(in: session.canvas, gap: options.gap)) == true { scrolled = true; break }
-            }
-            guard let chosen = scrolled ? candidate : firstStep else { continue }
-            layout = chosen
-            _ = try? layout.reveal(in: session.canvas, gap: options.gap)
-            guard let id = layout.focused, let loc = layout.index(of: id) else { continue }
-            guard let placements = try? layout.placements(in: session.canvas, gap: options.gap) else { continue }
-            let targets = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
-            // Images keep their size; a size change cannot be shown by sliding.
-            guard surveys.allSatisfy({ wid, row in
-                guard let frame = row.frame, let target = targets[wid] else { return false }
-                return LiveReconciliation.animationSizeMatches(frame, target)
-            }) else { scheduleRefresh(); return fail("strip not settled") }
-            ends[direction] = targets
-            neighbours[direction] = layout.columns[loc.column].slots[loc.row].activeMember
+        guard let destinations = swipeDestinations(from: session.state.layout, session: session, surveys: surveys) else {
+            scheduleRefresh(); return fail("strip not settled")
         }
+        let ends = destinations.ends, neighbours = destinations.neighbours
         let generation = motionGeneration
         let overlay = SnapshotTransition()
         // Only the focused tiled window closes, and only if its image is captured.
@@ -1518,6 +1560,9 @@ import PaperiCore
         swipe = Swipe(space: space, generation: generation, overlay: overlay, surveys: surveys,
                       ends: ends, neighbours: neighbours, canvas: session.canvas, closeWindow: closeWindow,
                       tabClose: tabClose, tracking: !pendingLock)
+        swipe?.base = session.state.layout
+        swipe?.baseWindow = ctx.window
+        swipe?.layouts = destinations.layouts
         motionSpace = space
         swipeBegan = ProcessInfo.processInfo.systemUptime
         swipeMetrics = ["state": "capturing", "windows": surveys.count]
@@ -1572,6 +1617,119 @@ import PaperiCore
             }
         }
         return ["ok": true, "neighbours": neighbours.count]
+    }
+
+    /// Where a swipe from `base` lands either way: for each direction the
+    /// nearest column that needs scrolling to reveal (if every column that way
+    /// is already fully visible, the adjacent one), as frames, its window and
+    /// its layout. Nil when a target size differs from the window's, as
+    /// images keep their size and cannot show that by sliding.
+    private func swipeDestinations(from base: Layout, session: ScopedLayoutSession, surveys: [UInt32: Survey])
+        -> (ends: [Direction: [UInt32: Rect]], neighbours: [Direction: UInt32], layouts: [Direction: Layout])? {
+        var ends: [Direction: [UInt32: Rect]] = [:], neighbours: [Direction: UInt32] = [:], layouts: [Direction: Layout] = [:]
+        for direction in [Direction.left, .right] {
+            var candidate = base
+            var firstStep: Layout?
+            var scrolled = false
+            while let id = candidate.neighbor(direction) {
+                candidate.focused = id
+                if firstStep == nil { firstStep = candidate }
+                if (try? candidate.reveal(in: session.canvas, gap: options.gap)) == true { scrolled = true; break }
+            }
+            guard var layout = scrolled ? candidate : firstStep else { continue }
+            _ = try? layout.reveal(in: session.canvas, gap: options.gap)
+            guard let id = layout.focused, let loc = layout.index(of: id) else { continue }
+            guard let placements = try? layout.placements(in: session.canvas, gap: options.gap) else { continue }
+            let targets = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
+            guard surveys.allSatisfy({ wid, row in
+                guard let frame = row.frame, let target = targets[wid] else { return false }
+                return LiveReconciliation.animationSizeMatches(frame, target)
+            }) else { return nil }
+            ends[direction] = targets
+            neighbours[direction] = layout.columns[loc.column].slots[loc.row].activeMember
+            layouts[direction] = layout
+        }
+        return (ends, neighbours, layouts)
+    }
+
+    /// The window in `layout`'s focused slot.
+    private static func focusedWindow(_ layout: Layout) -> UInt32? {
+        guard let id = layout.focused, let loc = layout.index(of: id) else { return nil }
+        return layout.columns[loc.column].slots[loc.row].activeMember
+    }
+
+    /// A new swipe takes over the horizontal landing on screen, as on a
+    /// phone's home screen: the images stop where they are, and the swipe
+    /// continues from the column nearest to there. Nothing real moves until
+    /// its release. Returns where the strip was caught, in progress from that
+    /// column; nil (the landing goes on) when it cannot be taken over.
+    private func catchLanding() -> Double? {
+        guard landingCatchable, let old = swipe, let landing = old.landing,
+              running, NSEvent.pressedMouseButtons == 0, drag == nil,
+              DisplayArrangement.currentProblem() == nil,
+              coordinator.display(forSpace: old.space)?.activeSpaceID == old.space,
+              let session = coordinator.sessions[old.space], !session.state.interactionSuppressed,
+              // Windows came or went since the strip was captured: no images for that.
+              session.state.layout.columns == old.base.columns else { return nil }
+        let now = CACurrentMediaTime()
+        let caughtAt = landing.progress(at: now)
+        var columns: [Int: Layout] = [0: old.base]
+        if let layout = old.layouts[.left] { columns[-1] = layout }
+        if let layout = old.layouts[.right] { columns[1] = layout }
+        let slot = SlotSwipe.nearestSlot(caughtAt, available: Set(columns.keys))
+        guard let base = columns[slot], let baseWindow = Self.focusedWindow(base),
+              let placements = try? base.placements(in: session.canvas, gap: options.gap),
+              let destinations = swipeDestinations(from: base, session: session, surveys: old.surveys) else { return nil }
+        let center = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
+        guard old.surveys.keys.allSatisfy({ center[$0] != nil }) else { return nil }
+        // Catch the images exactly where they are on screen; the rest of
+        // the strip (no image) where the path has it.
+        let shown = old.overlay.freeze()
+        let starts = swipeFrames(old, progress: caughtAt).merging(shown) { _, frame in frame }
+        swipeTask?.cancel(); swipeTask = nil
+        motionGeneration &+= 1
+        var next = Swipe(space: old.space, generation: motionGeneration, overlay: old.overlay, surveys: old.surveys,
+                         ends: destinations.ends, neighbours: destinations.neighbours, canvas: session.canvas,
+                         closeWindow: nil, tabClose: nil)
+        next.base = base
+        next.baseWindow = baseWindow
+        next.layouts = destinations.layouts
+        next.caught = true
+        next.origin = caughtAt - Double(slot)
+        next.center = center
+        next.starts = starts
+        next.progress = next.origin
+        next.targetProgress = next.origin
+        next.lastVisualTime = now
+        next.ready = true
+        swipe = next
+        swipeBegan = ProcessInfo.processInfo.systemUptime
+        swipeMetrics = ["state": "caught", "caughtAt": caughtAt, "column": slot, "windows": old.surveys.count]
+        old.overlay.startFrameClock { [weak self] link in self?.advanceSwipeVisuals(link) }
+        captureReachable(from: base, ends: destinations.ends, state: next)
+        return next.origin
+    }
+
+    /// Adds images, in the background, for strip windows a swipe from
+    /// `layout` could bring on screen but the overlay has none of (a caught
+    /// swipe reaches further along the strip than the first capture).
+    private func captureReachable(from layout: Layout, ends: [Direction: [UInt32: Rect]], state: Swipe) {
+        guard let session = coordinator.sessions[state.space],
+              let placements = try? layout.placements(in: session.canvas, gap: options.gap) else { return }
+        let center = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
+        let ids = LiveReconciliation.swipeCaptureIDs(starts: center, destinations: Array(ends.values), canvas: session.canvas)
+            .intersection(state.surveys.keys)
+        let overlay = state.overlay
+        guard !ids.subtracting(overlay.captured.keys).isEmpty else { return }
+        Task { [weak self] in
+            await overlay.capture(more: ids, at: { wid in
+                // Where the image belongs now: on the tracking path, or where
+                // a landing ends (such windows are off screen until then).
+                guard let self, let state = self.swipe, state.overlay === overlay else { return nil }
+                if state.released == nil { return self.swipeFrames(state)[wid] }
+                return state.landing?.frames[wid] ?? state.starts[wid]
+            })
+        }
     }
 
     /// Switches a tracking swipe to closing its focused window, or to the
@@ -1667,19 +1825,28 @@ import PaperiCore
     private func swipeFrames(_ state: Swipe, progress: Double) -> [UInt32: Rect] {
         // Closing a tab leaves the window where it is.
         if state.closing { return state.showsIndicator ? state.starts : closeFrames(state, progress: progress) }
-        let direction: Direction = progress < 0 ? .left : .right
-        guard let ends = state.ends[direction] else {
-            // Strip end: resist, moving at most a few points.
-            let shift = -Self.swipeEdgeResistance * progress
-            return state.starts.mapValues { var frame = $0; frame.x += shift; return frame }
+        let center = state.center ?? state.starts
+        // From `from` towards the neighbour on `side`, `travelled` progress
+        // since `from`; past the neighbour (or at a strip end) resist,
+        // moving at most a few points.
+        func towards(_ side: Direction, from: [UInt32: Rect], fraction: Double, travelled: Double) -> [UInt32: Rect] {
+            guard let ends = state.ends[side] else {
+                let shift = -Self.swipeEdgeResistance * travelled
+                return from.mapValues { var frame = $0; frame.x += shift; return frame }
+            }
+            let frames = LiveReconciliation.interpolate(from, ends, progress: min(1, fraction), canvas: state.canvas)
+            let excess = max(0, abs(progress) - 1)
+            guard excess > 0 else { return frames }
+            let extraShift = (side == .left ? 1.0 : -1.0) * excess * Self.swipeEdgeResistance
+            return frames.mapValues { var frame = $0; frame.x += extraShift; return frame }
         }
-        let absP = abs(progress)
-        if absP <= 1.0 {
-            return LiveReconciliation.interpolate(state.starts, ends, progress: absP, canvas: state.canvas)
-        } else {
-            let base = LiveReconciliation.interpolate(state.starts, ends, progress: 1.0, canvas: state.canvas)
-            let extraShift = (direction == .left ? 1.0 : -1.0) * (absP - 1.0) * Self.swipeEdgeResistance
-            return base.mapValues { var frame = $0; frame.x += extraShift; return frame }
+        switch SlotSwipe.leg(progress, offset: state.origin) {
+        case .toColumn(let fraction):
+            return LiveReconciliation.interpolate(state.starts, center, progress: fraction, canvas: state.canvas)
+        case .fromColumn(let side, let fraction):
+            return towards(side, from: center, fraction: fraction, travelled: progress)
+        case .fromCaught(let side, let fraction):
+            return towards(side, from: state.starts, fraction: fraction, travelled: progress - state.origin)
         }
     }
 
@@ -2052,6 +2219,9 @@ import PaperiCore
         let direction: Direction = requestedDirection ?? (state.targetProgress < 0 ? .left : .right)
         let target = state.closing ? state.closeWindow : state.neighbours[direction]
         let commit = requested && (state.closing || requestedDirection != nil || state.targetProgress != 0) && target != nil
+        // A caught swipe settles on its own column for real: the landing
+        // it caught has already moved the windows to a different one.
+        if state.caught && !commit { endCaughtSwipe(state, settle: max(0.12, options.config.focusScrollDuration ?? 0.22)); return }
         state.releaseDirection = direction
         let settle = max(0.12, options.config.focusScrollDuration ?? 0.22)
         if !state.ready && !state.failed { state.released = commit; swipe = state; return }
@@ -2080,7 +2250,7 @@ import PaperiCore
         swipeMetrics["trackingMaxFrameMS"] = state.maxFrameMS
         if commit && state.closing { finishClose(state, settle: settle); return }
         guard commit, let wid = target, let session = coordinator.sessions[space],
-              let ends = state.ends[direction] else {
+              let ends = state.ends[direction], let layout = state.layouts[direction] else {
             // Drop back from the speed the images had on screen.
             let back = state.progress < 0 ? state.visualVelocity : -state.visualVelocity
             let duration = SlotSwipe.settleDuration(distance: abs(state.progress), speed: back, base: settle)
@@ -2089,6 +2259,10 @@ import PaperiCore
             let from = state.progress, path = state
             overlay.slide(along: { u in self.swipeFrames(path, progress: from * (1 - u)) },
                           to: state.starts, duration: duration, curve: curve)
+            if !state.closing {
+                swipe?.landing = Landing(began: CACurrentMediaTime(), duration: duration, curve: curve,
+                                         from: from, to: 0, frames: state.starts)
+            }
             if state.showsIndicator { overlay.retractIndicator(duration: duration) }
             else if state.closing, let wid = state.closeWindow { overlay.fade(wid, to: 1, duration: duration, curve: curve) }
             swipeTask = Task { [weak self] in
@@ -2101,26 +2275,72 @@ import PaperiCore
             }
             return
         }
-        let destinationProgress = direction == .left ? -1.0 : 1.0
+        land(state, on: layout, window: wid, at: direction == .left ? -1 : 1, frames: ends, session: session, settle: settle)
+    }
+
+    /// A caught swipe released short of a neighbour settles on its own column.
+    private func endCaughtSwipe(_ state: Swipe, settle: Double) {
+        var state = state
+        guard let wid = state.baseWindow, let session = coordinator.sessions[state.space] else {
+            cancelSwipe(); scheduleRefresh(); return
+        }
+        state.released = true
+        swipe = state
+        state.overlay.stopFrameClock()
+        land(state, on: state.base, window: wid, at: 0, frames: state.center ?? state.starts, session: session, settle: settle)
+    }
+
+    /// Slides the images from where they are to `frames` (progress
+    /// `destination`) while the real windows are placed once underneath for
+    /// `layout`, then hands over to them. A new swipe may catch the slide.
+    private func land(_ state: Swipe, on layout: Layout, window wid: UInt32, at destinationProgress: Double,
+                      frames ends: [UInt32: Rect], session: ScopedLayoutSession, settle: Double) {
+        let generation = state.generation, space = state.space, overlay = state.overlay
+        if state.caught, session.state.layout.columns != layout.columns {
+            // The strip changed under a caught swipe; let a refresh place it.
+            cancelSwipe(); scheduleRefresh(); return
+        }
         // Land from the speed the strip had on screen, then slow onto the column.
         let distance = abs(destinationProgress - state.progress)
         let speed = destinationProgress > state.progress ? state.visualVelocity : -state.visualVelocity
         let duration = SlotSwipe.settleDuration(distance: distance, speed: speed, base: settle)
+        let curve = SlotSwipe.settleCurve(speed: speed, distance: distance, duration: duration)
         let from = state.progress, path = state
         // Start the landing first: it runs off the main thread, so the
         // synchronous window writes below cannot freeze it at release.
         overlay.slide(along: { u in
             self.swipeFrames(path, progress: from + (destinationProgress - from) * u)
-        }, to: ends, duration: duration, curve: SlotSwipe.settleCurve(speed: speed, distance: distance, duration: duration))
+        }, to: ends, duration: duration, curve: curve)
+        swipe?.landing = Landing(began: CACurrentMediaTime(), duration: duration, curve: curve,
+                                 from: from, to: destinationProgress, frames: ends)
         let released = ProcessInfo.processInfo.systemUptime
         // Same logical result as `focus`; one real placement under the overlay.
         try? session.focus(windowID: wid, ownerPID: pidForWindow[wid], classification: Self.tiled, ticket: session.ticket)
-        reveal(session)
+        if state.caught {
+            // The column a caught swipe settles on may be revealed from a
+            // different scroll position than the one the strip is at now.
+            session.setOffset(layout.offset, ticket: session.ticket)
+        } else {
+            reveal(session)
+        }
         applied.removeValue(forKey: space)
-        apply(space: space, byID: state.surveys)
+        // A caught swipe's survey frames are from before the landing it
+        // caught moved the windows. `apply` skips a window whose target
+        // matches its surveyed frame, so with those it would leave windows
+        // where that landing put them (all of them when swiping back to the
+        // start). Without a frame, every window is written.
+        let byID = !state.caught ? state.surveys : state.surveys.mapValues {
+            Survey(windowID: $0.windowID, pid: $0.pid, element: $0.element, classification: $0.classification,
+                   facts: $0.facts, floatRequested: $0.floatRequested, spaceID: $0.spaceID, frame: nil)
+        }
+        apply(space: space, byID: byID)
         _ = raise(wid)
         let writesMS = (ProcessInfo.processInfo.systemUptime - released) * 1000
         swipeMetrics["releaseWritesMS"] = writesMS
+        // Images for a further swipe from here, ready before it can begin.
+        if let next = swipeDestinations(from: layout, session: session, surveys: state.surveys) {
+            captureReachable(from: layout, ends: next.ends, state: state)
+        }
         swipeTask = Task { [weak self] in
             // The slide began before the writes; wait out only what is left of it.
             try? await Task.sleep(for: .milliseconds(max(0, Int(duration * 1000 - writesMS))))

@@ -215,6 +215,59 @@ import PaperiCore
         CATransaction.commit()
     }
 
+    /// Stops any slide where it is on screen and returns the images' frames
+    /// there (a new swipe catching a landing in flight).
+    func freeze() -> [UInt32: Rect] {
+        var frames: [UInt32: Rect] = [:]
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (wid, layer) in layers {
+            let position = layer.presentation()?.position ?? layer.position
+            layer.removeAnimation(forKey: "slide")
+            layer.position = position
+            let size = layer.bounds.size
+            frames[wid] = Rect(x: position.x - size.width / 2 + screenFrame.minX,
+                               y: mainHeight - screenFrame.minY - position.y - size.height / 2,
+                               width: size.width, height: size.height)
+        }
+        CATransaction.commit()
+        return frames
+    }
+
+    /// Adds images for `ids` that have none yet, behind the others, each at
+    /// `frame(wid)` when it is ready (skipped if that is nil). Best effort:
+    /// a window that cannot be captured keeps showing nothing.
+    func capture(more ids: Set<UInt32>, at frame: @escaping @MainActor (UInt32) -> Rect?) async {
+        let missing = ids.subtracting(layers.keys)
+        guard !missing.isEmpty, let root, let screen, window != nil else { return }
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) else { return }
+        let scale = screen.backingScaleFactor
+        let tasks = content.windows.filter { missing.contains($0.windowID) }.map { item in
+            (item, Task { try await self.capture(SCContentFilter(desktopIndependentWindow: item), scale: scale) })
+        }
+        for (item, task) in tasks {
+            guard let image = try? await task.value else { continue }
+            // The overlay may have gone (or been replaced) meanwhile.
+            guard self.root === root, window != nil, layers[item.windowID] == nil,
+                  let place = frame(item.windowID) else { continue }
+            let layer = CALayer()
+            layer.actions = Self.noActions
+            layer.contents = image
+            layer.contentsScale = scale
+            layer.contentsGravity = .resize
+            layer.frame = local(Rect(x: place.x, y: place.y, width: item.frame.width, height: item.frame.height))
+            layer.isHidden = indicatorOnly
+            Self.addShadow(to: layer, image: image, scale: scale, active: false)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            root.insertSublayer(layer, at: 0)
+            CATransaction.commit()
+            layers[item.windowID] = layer
+            captured[item.windowID] = Rect(x: item.frame.minX, y: item.frame.minY,
+                                           width: item.frame.width, height: item.frame.height)
+        }
+    }
+
     /// Sets one image's opacity at once (finger tracking).
     func setOpacity(_ wid: UInt32, _ value: Double) {
         guard let layer = layers[wid] else { return }

@@ -411,3 +411,99 @@ struct SlotSwipeTests {
         #expect(flick.end(at: 0.205) == .turn)
     }
 }
+
+struct SlotSwipeCatchTests {
+
+    @Test func caughtSwipeStartsWhereTheStripWas() {
+        var swipe = SlotSwipe()
+        swipe.begin(at: 0)
+        #expect(swipe.move(dx: -0.02, dy: 0, at: 0.01) == .started)
+        swipe.anchor(offset: -0.3)
+        guard case .active(_, let shown, _, _) = swipe.state else { Issue.record("active"); return }
+        #expect(abs(shown + 0.3) < 1e-9)
+        // Follows the fingers from there, one slot per `travel`.
+        guard case .updated(let next) = swipe.move(dx: -0.08, dy: 0, at: 0.05) else { Issue.record("update"); return }
+        #expect(next > -0.3 && next < 0)
+    }
+
+    @Test func quickSecondFlickStepsPastTheCaughtColumn() {
+        // Caught 0.2 short of the first swipe's column, then flicked on:
+        // the next column, although the strip never passed the first.
+        var swipe = SlotSwipe()
+        swipe.begin(at: 0)
+        _ = swipe.move(dx: -0.02, dy: 0, at: 0.01)
+        swipe.anchor(offset: -0.2)
+        _ = swipe.move(dx: -0.04, dy: 0, at: 0.03)
+        #expect(swipe.end(at: 0.035) == .commit(.right))
+    }
+
+    @Test func caughtSwipeSettlesWhereItIsLeft() {
+        // Slow drag that leaves the strip near its column: settles there,
+        // though the fingers travelled what would commit from rest.
+        var near = SlotSwipe(config: .init(startOffset: -0.4))
+        near.begin(at: 0)
+        _ = near.move(dx: -0.02, dy: 0, at: 0.1)
+        _ = near.move(dx: -0.2, dy: 0, at: 1)
+        #expect(near.end(at: 1.5) == .snapBack)
+
+        // Dragged back past halfway to the column it came from: goes there.
+        var back = SlotSwipe(config: .init(startOffset: -0.3))
+        back.begin(at: 0)
+        _ = back.move(dx: 0.02, dy: 0, at: 0.1)
+        _ = back.move(dx: 0.06, dy: 0, at: 1)
+        #expect(back.end(at: 1.5) == .commit(.left))
+    }
+
+    @Test func reverseFlickUndoesTheLanding() {
+        var swipe = SlotSwipe(config: .init(startOffset: -0.25))
+        swipe.begin(at: 0)
+        _ = swipe.move(dx: 0.02, dy: 0, at: 0.01)
+        _ = swipe.move(dx: 0.04, dy: 0, at: 0.03)
+        #expect(swipe.end(at: 0.035) == .commit(.left))
+    }
+
+    @Test func zeroOffsetKeepsThePlainRule() {
+        for (dx, expected) in [(-0.24, SlotSwipe.Decision.commit(.right)), (-0.1, .snapBack), (0.24, .commit(.left))] {
+            var plain = SlotSwipe()
+            plain.begin(at: 0)
+            _ = plain.move(dx: dx, dy: 0, at: 0.5)
+            #expect(plain.end(at: 1.5) == expected)
+        }
+    }
+
+    @Test func settleFractionFollowsTheCurve() {
+        let easeOut = (0.25, 0.6, 0.4, 1.0)
+        #expect(SlotSwipe.settleFraction(elapsed: 0, duration: 0.2, curve: easeOut) == 0)
+        #expect(SlotSwipe.settleFraction(elapsed: 0.3, duration: 0.2, curve: easeOut) == 1)
+        let half = SlotSwipe.settleFraction(elapsed: 0.1, duration: 0.2, curve: easeOut)
+        #expect(half > 0.5 && half < 1)
+        // Linear control points give linear timing.
+        let linear = SlotSwipe.settleFraction(elapsed: 0.05, duration: 0.2, curve: (1.0 / 3, 1.0 / 3, 2.0 / 3, 2.0 / 3))
+        #expect(abs(linear - 0.25) < 1e-6)
+        var previous = 0.0
+        for step in 1...20 {
+            let value = SlotSwipe.settleFraction(elapsed: Double(step) / 100, duration: 0.2, curve: easeOut)
+            #expect(value >= previous)
+            previous = value
+        }
+    }
+
+    @Test func nearestSlotPrefersAvailableColumns() {
+        #expect(SlotSwipe.nearestSlot(0.7, available: [-1, 0, 1]) == 1)
+        #expect(SlotSwipe.nearestSlot(0.3, available: [-1, 0, 1]) == 0)
+        #expect(SlotSwipe.nearestSlot(-0.8, available: [0, 1]) == 0)
+    }
+
+    @Test func pathLegsMeetAtTheirEnds() {
+        // At rest: straight from the column.
+        #expect(SlotSwipe.leg(0.4, offset: 0) == .fromColumn(.right, 0.4))
+        #expect(SlotSwipe.leg(-0.4, offset: 0) == .fromColumn(.left, 0.4))
+        // Caught at -0.3: towards the column, the left neighbour beyond.
+        #expect(SlotSwipe.leg(-0.3, offset: -0.3) == .toColumn(0))
+        #expect(SlotSwipe.leg(-0.15, offset: -0.3) == .toColumn(0.5))
+        #expect(SlotSwipe.leg(0, offset: -0.3) == .toColumn(1))
+        #expect(SlotSwipe.leg(0.5, offset: -0.3) == .fromColumn(.right, 0.5))
+        guard case .fromCaught(.left, let u) = SlotSwipe.leg(-1, offset: -0.3) else { Issue.record("leg"); return }
+        #expect(abs(u - 1) < 1e-9)
+    }
+}

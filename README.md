@@ -42,7 +42,7 @@ Use the menu bar icon to **Pause/Resume**, **Retile**, **Reload Config**, or ena
 
 ## Trackpad gestures
 
-Use **three fingers** by default (four is configurable). Horizontal swipes move one column at a time. Two-finger scrolling stays available inside apps.
+Use **three fingers** by default (four is configurable). Horizontal swipes move one column at a time; a new swipe can catch the strip while it is still sliding, so two quick swipes move two columns. Two-finger scrolling stays available inside apps.
 
 | Finger movement | Action |
 | --- | --- |
