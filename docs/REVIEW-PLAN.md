@@ -313,12 +313,13 @@ logging its distribution over a day of use.
 
 ### S6. Visible seams at overlay show and hide
 
-- Shadows are re-drawn approximations (`addShadow`, `:168`: 0.4/16 pt active,
-  0.22/7 pt inactive), so the shadow changes shape the moment the overlay
-  appears and again when it fades. Capture with shadows
-  (`ignoreShadowsSingleWindow = false`) and place the layer using the
-  capture's own content rect rather than the window frame **(verify that the
-  filter reports the shadow margins)**.
+- Native framing and shadows are now captured on an oversized, unscaled
+  independent-window canvas. Opaque content bounds locate the asymmetric native
+  margins, and an overflowing child layer preserves window geometry for tracking
+  and handoff. Nonopaque/nonstandard captures fall back to the previous synthetic
+  shadow when their content bounds cannot be verified. Capture geometry was
+  checked against real active/inactive and partially offscreen windows; full
+  gesture visual validation across appearances remains outstanding.
 - After a commit the newly focused window is live-drawn as active while its
   snapshot was inactive, and the 180 ms cross-fade (`fadeOut`, `:444`) shows
   the change as a soft pop. Shorten to ~80 ms, or cross-fade only that one

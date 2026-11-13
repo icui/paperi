@@ -1017,8 +1017,8 @@ extension LiveManager {
         return 1 - 0.3 * min(1, max(0, (progress - threshold) / (1 - threshold)))
     }
 
-    /// Room for the active window shadow (radius 16, offset 8) above the display.
-    static let closeShadowClearance = 32.0
+    /// Allow the native active shadow to clear the display in either direction.
+    static let closeShadowClearance = 128.0
 
     enum CloseMethod: String { case press, key, none }
 

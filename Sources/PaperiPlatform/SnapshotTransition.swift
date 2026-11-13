@@ -60,7 +60,7 @@ import PaperiCore
                                    scale: scale)
         }
         let windowCaptures = windows.reversed().map { item in
-            (item, Task { try await self.capture(SCContentFilter(desktopIndependentWindow: item), scale: scale) })
+            (item, Task { try await self.captureWindow(item, scale: scale) })
         }
         defer {
             background.cancel()
@@ -76,15 +76,12 @@ import PaperiCore
         // ScreenCaptureKit's list is front to back; compose back to front.
         for (item, task) in windowCaptures {
             let frame = Rect(x: item.frame.minX, y: item.frame.minY, width: item.frame.width, height: item.frame.height)
-            let image = try await task.value
+            let snapshot = try await task.value
             try Task.checkCancellation()
             let layer = CALayer()
             layer.actions = Self.noActions
-            layer.contents = image
-            layer.contentsScale = scale
-            layer.contentsGravity = .resize
             layer.frame = local(frame)
-            Self.addShadow(to: layer, image: image, scale: scale, active: item.windowID == key)
+            Self.install(snapshot, on: layer, scale: scale, active: item.windowID == key)
             root.addSublayer(layer)
             layers[item.windowID] = layer
             captured[item.windowID] = frame
@@ -147,6 +144,74 @@ import PaperiCore
         show()
     }
 
+    private struct WindowSnapshot {
+        let image: CGImage
+        /// Top-left content rectangle within the image, in points; nil for the
+        /// fallback unframed capture that still needs an approximate shadow.
+        let content: CGRect?
+        let imageScale: Double
+    }
+
+    private func captureWindow(_ window: SCWindow, scale: Double) async throws -> WindowSnapshot {
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let nativeScale = Double(filter.pointPixelScale)
+        // A generous canvas prevents the native shadow from scaling down to
+        // fit the window bounds. scalesToFit=false preserves native pixels;
+        // unused canvas remains transparent. Geometry is measured, not guessed.
+        let config = SCStreamConfiguration()
+        config.width = Int(((window.frame.width + 256) * nativeScale).rounded(.up))
+        config.height = Int(((window.frame.height + 256) * nativeScale).rounded(.up))
+        config.scalesToFit = false
+        config.ignoreShadowsSingleWindow = false
+        config.ignoreGlobalClipSingleWindow = true
+        config.showsCursor = false
+        let reserve = config.width * config.height * 4
+        guard textureBytes + reserve <= 256 * 1024 * 1024 else { throw Failure.memoryBudget }
+        textureBytes += reserve
+        do {
+            let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+            try Task.checkCancellation()
+            if let content = WindowSnapshotGeometry.contentRect(in: image,
+                size: CGSize(width: window.frame.width * nativeScale, height: window.frame.height * nativeScale)) {
+                let bytes = image.bytesPerRow * image.height
+                guard textureBytes - reserve + bytes <= 256 * 1024 * 1024 else { throw Failure.memoryBudget }
+                textureBytes += bytes - reserve
+                return WindowSnapshot(image: image,
+                    content: CGRect(x: content.minX / nativeScale, y: content.minY / nativeScale,
+                                    width: content.width / nativeScale, height: content.height / nativeScale),
+                    imageScale: nativeScale)
+            }
+        } catch {
+            textureBytes -= reserve
+            throw error
+        }
+        textureBytes -= reserve
+        let image = try await capture(filter, scale: scale)
+        return WindowSnapshot(image: image, content: nil, imageScale: scale)
+    }
+
+    private static func install(_ snapshot: WindowSnapshot, on layer: CALayer, scale: Double, active: Bool) {
+        guard let content = snapshot.content else {
+            layer.contents = snapshot.image
+            layer.contentsScale = scale
+            layer.contentsGravity = .resize
+            addShadow(to: layer, image: snapshot.image, scale: scale, active: active)
+            return
+        }
+        // Animate an unpadded container so all placement, freeze and handoff
+        // calculations keep using actual window bounds. Its child overflows to
+        // carry the native rim and asymmetric shadow margins.
+        let image = CALayer()
+        image.actions = noActions
+        image.contents = snapshot.image
+        image.contentsScale = snapshot.imageScale
+        let size = CGSize(width: Double(snapshot.image.width) / snapshot.imageScale,
+                          height: Double(snapshot.image.height) / snapshot.imageScale)
+        image.frame = CGRect(x: -content.minX, y: layer.bounds.height + content.minY - size.height,
+                             width: size.width, height: size.height)
+        layer.addSublayer(image)
+    }
+
     private func capture(_ filter: SCContentFilter, scale: Double) async throws -> CGImage {
         let config = SCStreamConfiguration()
         config.width = max(1, Int(filter.contentRect.width * scale))
@@ -162,9 +227,8 @@ import PaperiCore
         return image
     }
 
-    /// Captures exclude window shadows (a shadowed capture is squeezed into the
-    /// window's frame), so draw an approximation of the system shadow instead of
-    /// letting it vanish while the overlay is up. A path keeps it cheap to move.
+    /// Fallback for nonopaque content whose native framing cannot be located
+    /// reliably. A path keeps the approximate shadow cheap to move.
     private static func addShadow(to layer: CALayer, image: CGImage, scale: Double, active: Bool) {
         let radius = cornerRadius(of: image) / scale
         layer.shadowPath = CGPath(roundedRect: layer.bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
@@ -284,21 +348,18 @@ import PaperiCore
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) else { return }
         let scale = screen.backingScaleFactor
         let tasks = content.windows.filter { missing.contains($0.windowID) }.map { item in
-            (item, Task { try await self.capture(SCContentFilter(desktopIndependentWindow: item), scale: scale) })
+            (item, Task { try await self.captureWindow(item, scale: scale) })
         }
         for (item, task) in tasks {
-            guard let image = try? await task.value else { continue }
+            guard let snapshot = try? await task.value else { continue }
             // The overlay may have gone (or been replaced) meanwhile.
             guard self.root === root, window != nil, layers[item.windowID] == nil,
                   let place = frame(item.windowID) else { continue }
             let layer = CALayer()
             layer.actions = Self.noActions
-            layer.contents = image
-            layer.contentsScale = scale
-            layer.contentsGravity = .resize
             layer.frame = local(Rect(x: place.x, y: place.y, width: item.frame.width, height: item.frame.height))
             layer.isHidden = indicatorOnly
-            Self.addShadow(to: layer, image: image, scale: scale, active: false)
+            Self.install(snapshot, on: layer, scale: scale, active: false)
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             root.insertSublayer(layer, at: 0)
