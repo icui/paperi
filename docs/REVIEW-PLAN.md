@@ -536,3 +536,44 @@ gain rather than adding a fast-motion distance boost. Additional flick reach
 comes only from the existing velocity-based release decision, whose velocity
 expires during a hold. A regression compares immediate release with a held
 release after identical fast movement and confirms no travel is added at rest.
+
+## Predicted Core Animation experiment
+
+`main` was fast-forwarded to checkpoint `f9a4538`; this experiment lives on
+`experiment/predicted-core-animation`. Discarded easing trials are not included.
+
+Horizontal tracking now uses short Core Animation keyframe trajectories instead
+of immediate per-display-tick layer placement. A new report forecasts up to
+25 ms ahead using the existing filtered velocity and direction validation. The
+renderer samples a 60 ms cubic Hermite segment into synchronized layer animations,
+starting at the presentation position. Retargeting inherits the previous segment's
+instantaneous velocity; extreme corrections bound that velocity to three times
+the remaining distance divided by duration. Thus ordinary retargeting preserves
+velocity, while exceptional corrections and stops may change it.
+
+When no report follows, the segment stops at its forecast; it does not integrate
+speed indefinitely. Existing freeze and landing operations replace the same
+animation key. Release samples the in-flight scalar progress and velocity rather
+than the model layer's future destination. The horizontal low-pass/capture-catch-up
+filters are bypassed. Horizontal acceleration is disabled for this experiment;
+vertical gestures retain their existing renderer and filtering.
+
+`status.performance.swipe.trackingRenderer` reports `coreAnimationPrediction`;
+`trackingTrajectoryMS` reports the 60 ms segment horizon. Display callbacks are
+still needed to submit new reports, but an already-submitted segment runs in the
+render server when the main thread is occupied. New windows captured mid-gesture
+join at their latest sampled strip position.
+
+Tests cover trajectory endpoints, bounded stopping without reports, ordinary
+velocity continuity, reversals, exceptional-speed bounds, and sampling the actual
+in-flight progress for handoff. Automated tests do not establish visual frame
+pacing. Live checks: slow drag, short fast motion, repeated reversals, hold, lift,
+catch another landing, and late snapshot capture. Key remaining risks are latency
+from repeatedly retargeted segments and brief velocity changes when prediction
+needs a large correction. No claim is made about matching Apple's private Spaces
+implementation. The experiment is intentionally local to the snapshot tracking
+path; real-window placement and release decisions remain unchanged.
+
+Live validation: the user confirmed that the predicted Core Animation tracking
+is smooth and approved merging it into `main`. All 295 automated tests and the
+executable build passed before this checkpoint.

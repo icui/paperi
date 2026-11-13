@@ -215,6 +215,32 @@ import PaperiCore
         CATransaction.commit()
     }
 
+    /// Horizontal tracking runs in the render server between touch reports.
+    /// Replacing the shared slide key also lets freeze/landing interrupt it.
+    func track(along path: (Double) -> [UInt32: Rect], motion: SwipeTrajectory, began: Double) {
+        let steps = 12
+        let samples = (0...steps).map { path(motion.position(at: motion.duration * Double($0) / Double(steps))) }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (wid, layer) in layers {
+            guard let end = samples.last?[wid] else { continue }
+            let shown = layer.presentation()?.position ?? layer.position
+            var values = samples.map { $0[wid].map(center) ?? shown }
+            values[0] = shown
+            layer.removeAnimation(forKey: "slide")
+            layer.position = center(end)
+            let animation = CAKeyframeAnimation(keyPath: "position")
+            animation.values = values.map { NSValue(point: $0) }
+            animation.calculationMode = .linear
+            animation.timingFunction = CAMediaTimingFunction(name: .linear)
+            animation.duration = motion.duration
+            animation.beginTime = layer.convertTime(began, from: nil)
+            layer.add(animation, forKey: "slide")
+        }
+        CATransaction.commit()
+        CATransaction.flush()
+    }
+
     /// Stops any slide where it is on screen and returns the images' frames
     /// there (a new swipe catching a landing in flight).
     func freeze() -> [UInt32: Rect] {

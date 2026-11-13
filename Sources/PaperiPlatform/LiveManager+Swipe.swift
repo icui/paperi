@@ -61,6 +61,15 @@ extension LiveManager {
         /// when its latest report was made (media time).
         var targetVelocity = 0.0
         var targetTime = 0.0
+        var trackingMotion: SwipeTrajectory?
+        var trackingBegan = 0.0
+        var animatedReportTime = -Double.infinity
+
+        mutating func sampleTracking(at time: Double) {
+            guard let motion = trackingMotion else { return }
+            progress = motion.position(at: time - trackingBegan)
+            visualVelocity = motion.velocity(at: time - trackingBegan)
+        }
         /// The images are easing onto the fingers (the capture finished
         /// after the fingers had already moved) instead of jumping there.
         var catchingUp = false
@@ -257,7 +266,7 @@ extension LiveManager {
                 closeTravel: options.config.gesture.swipeUpToClose ? options.config.gesture.travel : nil,
                 pullTravel: options.config.gesture.travel,
                 turnTravel: options.config.gesture.travel,
-                horizontalAcceleration: true
+                horizontalAcceleration: false
             )
             var swipeReducer = SlotSwipe(config: cfg)
             swipeReducer.begin(at: time)
@@ -853,11 +862,8 @@ extension LiveManager {
         if state.ready && !wasTracking { state.overlay.show() }
     }
 
-    /// One display frame: move the images to where the fingers will be when
-    /// it is shown. Touch reports and display frames are not in step, so the
-    /// latest report is carried forward at the fingers' speed by its age;
-    /// following reports as they arrive would move unevenly, and smoothing
-    /// them would trail the fingers.
+    /// Display ticks record pacing and submit fresh horizontal trajectories.
+    /// Vertical tracking retains its existing predicted/filtered placement.
     func advanceSwipeVisuals(_ link: CADisplayLink) {
         guard var state = swipe, state.ready, state.tracking, state.released == nil else { return }
         let period = link.targetTimestamp - link.timestamp
@@ -868,6 +874,11 @@ extension LiveManager {
             state.droppedFrames += max(0, Int((interval / period).rounded()) - 1)
         }
         state.lastFrameTime = link.timestamp
+        if !state.closing {
+            advanceHorizontalTracking(&state)
+            swipe = state
+            return
+        }
         let now = link.targetTimestamp
         let elapsed = min(1.0 / 30, max(0, now - state.lastVisualTime))
         let age = max(0, now - state.targetTime)
@@ -900,6 +911,28 @@ extension LiveManager {
         guard changed else { return }
         state.overlay.place(swipeFrames(state))
         if state.closing, let wid = state.closeWindow { state.overlay.setOpacity(wid, closeOpacity(next)) }
+    }
+
+    /// Submit only when a touch report changes. Core Animation continues the
+    /// bounded trajectory between reports, even when the main thread is busy.
+    func advanceHorizontalTracking(_ state: inout Swipe) {
+        let now = CACurrentMediaTime()
+        state.sampleTracking(at: now)
+        guard state.animatedReportTime != state.targetTime else { return }
+        let age = max(0, now - state.targetTime)
+        let velocity = state.targetVelocity * max(0, 1 - age / 0.06)
+        // Forecast at most 25 ms ahead; never integrate speed indefinitely.
+        let target = state.prediction.position(from: state.progress, velocity: velocity,
+                                               age: min(age + 0.025, 0.06), period: 1.0 / 60)
+        let motion = SwipeTrajectory(start: state.progress, target: min(1.3, max(-1.3, target)),
+                                     velocity: state.visualVelocity)
+        let path = state
+        state.overlay.track(along: { self.swipeFrames(path, progress: $0) }, motion: motion, began: now)
+        state.trackingMotion = motion
+        state.trackingBegan = now
+        state.animatedReportTime = state.targetTime
+        swipeMetrics["trackingRenderer"] = "coreAnimationPrediction"
+        swipeMetrics["trackingTrajectoryMS"] = motion.duration * 1000
     }
 
     /// Finger travel (fraction of the trackpad width) for a full step each
@@ -1322,6 +1355,7 @@ extension LiveManager {
             if running { windowIndicators.update(coordinator, mode: options.config.bottom) }
         }
         guard var state = swipe, state.released == nil else { return }
+        state.sampleTracking(at: CACurrentMediaTime())
         let direction: Direction = requestedDirection ?? (state.targetProgress < 0 ? .left : .right)
         let target = state.closing ? state.closeWindow : state.neighbours[direction]
         let commit = requested && (state.closing || requestedDirection != nil || state.targetProgress != 0) && target != nil
