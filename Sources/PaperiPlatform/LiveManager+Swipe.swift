@@ -82,9 +82,11 @@ extension LiveManager {
         var frames = 0
         var droppedFrames = 0
         var maxFrameMS = 0.0
-        var ready = false
+        enum CaptureState { case pending, ready, failed }
+        var captureState: CaptureState = .pending
+        var ready: Bool { captureState == .ready }
+        var failed: Bool { captureState == .failed }
         var tracking = true
-        var failed = false
         var released: Bool?
         var releaseDirection: Direction?
         /// The layout progress 0 stands for, and those of the neighbours at
@@ -133,7 +135,7 @@ extension LiveManager {
     /// A horizontal landing is on screen that a new swipe may take over.
     var landingCatchable: Bool {
         guard motionTimer == nil, let state = swipe, state.released != nil, !state.closing else { return false }
-        return state.landing != nil && state.ready && !state.failed
+        return state.landing != nil && state.ready
     }
 
     func cancelSwipe() {
@@ -534,7 +536,8 @@ extension LiveManager {
         AXUIElementSetMessagingTimeout(application, 0.2)
         guard let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
               CFGetTypeID(value) == AXUIElementGetTypeID() else { return false }
-        let wid = paperi_window_id(value as! AXUIElement)
+        // Parenthesize the checked CF cast to avoid Swift’s optional-argument cast warning.
+        let wid = paperi_window_id((value as! AXUIElement))
         guard let space = coordinator.spaceForWindow[wid],
               let session = coordinator.sessions[space] else { return false }
         return session.state.layout.columns.contains { column in
@@ -720,7 +723,7 @@ extension LiveManager {
                     self.cancelMotion(); self.scheduleRefresh(); return
                 }
                 state.starts = starts.merging(overlay.captured) { _, captured in captured }
-                state.ready = true
+                state.captureState = .ready
                 self.swipe = state
                 self.swipeMetrics = ["state": "tracking", "windows": surveys.count, "captureMS": overlay.captureMS,
                                      "textureBytes": overlay.textureBytes, "capturedWindows": snapshotIDs.count, "snapshotStyle": overlay.snapshotStyle.rawValue]
@@ -735,7 +738,7 @@ extension LiveManager {
             } catch {
                 overlay.hide()
                 guard let self, var state = self.swipe, state.generation == generation else { return }
-                state.failed = true
+                state.captureState = .failed
                 self.swipe = state
                 self.swipeMetrics = ["state": "fallback", "reason": String(describing: error)]
                 if let commit = state.released { state.released = nil; self.swipe = state; self.endSwipe(commit: commit, direction: state.releaseDirection) }
@@ -827,7 +830,7 @@ extension LiveManager {
         next.targetProgress = next.origin
         next.prediction = .init(target: next.origin)
         next.lastVisualTime = now
-        next.ready = true
+        next.captureState = .ready
         swipe = next
         swipeBegan = ProcessInfo.processInfo.systemUptime
         swipeMetrics = ["state": "caught", "caughtAt": caughtAt, "column": slot, "windows": old.surveys.count]
@@ -1114,7 +1117,8 @@ extension LiveManager {
         let application = AXUIElementCreateApplication(pid)
         guard let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
               CFGetTypeID(value) == AXUIElementGetTypeID(),
-              paperi_window_id(value as! AXUIElement) == wid else { return false }
+              // Parentheses silence Swift’s optional-argument cast warning after the CF type check.
+              paperi_window_id((value as! AXUIElement)) == wid else { return false }
         // A private-state source is ignored as a key equivalent; HID state is not.
         let source = CGEventSource(stateID: .hidSystemState)
         for down in [true, false] {
@@ -1289,11 +1293,16 @@ extension LiveManager {
     /// After a slide under the overlay: wait for the real windows to stop at
     /// their targets (up to 0.4 s), correct the images onto where they
     /// actually landed, and hold two frames for apps to redraw.
-    func finishHandoff(overlay: SnapshotTransition, targets: [UInt32: Rect], generation: UInt64) async {
+    @discardableResult
+    func finishHandoff(overlay: SnapshotTransition, targets: [UInt32: Rect], generation: UInt64,
+                       interruptOnMouse: Bool = false) async -> (settled: Bool, landing: [UInt32: Rect], maxDeviation: Double)? {
         var previous: [UInt32: Rect] = [:]
         var result = (settled: false, landing: targets, maxDeviation: 0.0)
         for _ in 0..<16 {
-            guard swipe?.generation == generation, !Task.isCancelled else { return }
+            guard swipe?.generation == generation, !Task.isCancelled else { return nil }
+            if interruptOnMouse && NSEvent.pressedMouseButtons != 0 {
+                cancelMotion(); refreshOnMouseUp(); return nil
+            }
             var current: [UInt32: Rect] = [:]
             for id in targets.keys {
                 guard let element = references[id] else { continue }
@@ -1306,11 +1315,15 @@ extension LiveManager {
             previous = current
             try? await Task.sleep(for: .milliseconds(25))
         }
+        guard swipe?.generation == generation, !Task.isCancelled else { return nil }
         if result.maxDeviation > 0.5 {
             overlay.slide(to: result.landing, duration: 0.08)
             try? await Task.sleep(for: .milliseconds(90))
         }
+        guard swipe?.generation == generation, !Task.isCancelled else { return nil }
         try? await Task.sleep(for: .milliseconds(34))
+        guard swipe?.generation == generation, !Task.isCancelled else { return nil }
+        return result
     }
 
     enum NewWindowMethod: String { case menu, key, launch, none }
@@ -1436,7 +1449,7 @@ extension LiveManager {
         if state.caught && !commit { endCaughtSwipe(state, settle: max(0.12, options.config.focusScrollDuration ?? 0.22)); return }
         state.releaseDirection = direction
         let settle = max(0.12, options.config.focusScrollDuration ?? 0.22)
-        if !state.ready && !state.failed { state.released = commit; swipe = state; return }
+        if !state.ready { state.released = commit; swipe = state; return }
         if state.failed {
             swipe = nil
             swipeTask = nil
@@ -1559,36 +1572,9 @@ extension LiveManager {
             try? await Task.sleep(for: .milliseconds(max(0, Int(duration * 1000 - writesMS))))
             // Hand off only once the real windows have stopped moving, then
             // finish the images on the frames they actually took.
-            var previous: [UInt32: Rect] = [:]
-            var result = (settled: false, landing: ends, maxDeviation: 0.0)
-            for _ in 0..<16 {
-                guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
-                guard NSEvent.pressedMouseButtons == 0 else {
-                    self.cancelMotion(); self.refreshOnMouseUp(); return
-                }
-                var current: [UInt32: Rect] = [:]
-                for wid in ends.keys {
-                    if let element = self.references[wid] {
-                        AXUIElementSetMessagingTimeout(element, 0.02)
-                        if let frame = Diagnostics.frame(element) { current[wid] = frame }
-                        AXUIElementSetMessagingTimeout(element, 0.2)
-                    }
-                }
-                result = LiveReconciliation.handoff(previous: previous, current: current, targets: ends)
-                if result.settled { break }
-                previous = current
-                try? await Task.sleep(for: .milliseconds(25))
-            }
-            guard let self, self.swipe?.generation == generation else { return }
-            if result.maxDeviation > 0.5 {
-                overlay.slide(to: result.landing, duration: 0.08)
-                try? await Task.sleep(for: .milliseconds(90))
-                guard self.swipe?.generation == generation else { return }
-            }
-            // AX geometry can settle before WindowServer presents the apps'
-            // newly drawn surfaces. Keep the mask for two 60 Hz frames.
-            try? await Task.sleep(for: .milliseconds(34))
-            guard self.swipe?.generation == generation, !Task.isCancelled else { return }
+            guard let self,
+                  let result = await self.finishHandoff(overlay: overlay, targets: ends,
+                                                       generation: generation, interruptOnMouse: true) else { return }
             overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil; self.resumeDeferredGestureSoon()
             self.swipeMetrics["state"] = result.settled ? (result.maxDeviation <= 0.5 ? "completed" : "landedAdjusted") : "handoffUnsettled"
             self.swipeMetrics["handoffMS"] = (ProcessInfo.processInfo.systemUptime - released) * 1000 - duration * 1000

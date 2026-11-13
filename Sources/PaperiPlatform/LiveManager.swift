@@ -3,7 +3,7 @@ import AppKit
 import PaperiBridge
 import PaperiCore
 
-/// Opt-in live manager for real windows of allowlisted applications.
+/// Live manager for real windows of configured applications.
 ///
 /// Scope: every display's *active* user Space owns one scrolling strip. Windows
 /// on inactive Spaces are never written. Native tab containers are admitted
@@ -195,7 +195,7 @@ import PaperiCore
 
     public var managedWindowCount: Int { coordinator.spaceForWindow.count }
 
-    /// Stops management, restores admission geometry and removes the journal.
+    /// Stops management and restores admission geometry, retaining unresolved recovery entries.
     @discardableResult public func stop(restore: Bool? = nil, keepJournal: Bool = false) -> [String: Any] {
         if paused && !keepJournal {
             // Paused: nothing is running, but the journal still holds originals.
@@ -224,38 +224,65 @@ import PaperiCore
     }
 
     func restoreJournal(_ restore: Bool) -> [String: Any] {
-        var restored = 0, failed = 0
-        if restore {
-            for (wid, entry) in journal {
-                let element = references[wid] ?? findWindow(wid, pid: entry.pid)
-                if let element, write(entry.frame, to: element) { restored += 1 } else { failed += 1 }
-            }
+        if !restore {
+            journal.removeAll()
+            do { if FileManager.default.fileExists(atPath: options.journalURL.path) { try FileManager.default.removeItem(at: options.journalURL) } }
+            catch { return ["restored": 0, "restoreFailed": 0, "journal": "persistenceFailed", "error": String(describing: error)] }
+            return ["restored": 0, "restoreFailed": 0]
+        }
+        let entries = journal.map { id, entry in
+            RestoreEntry(windowID: id, pid: entry.pid, frame: [entry.frame.x, entry.frame.y, entry.frame.width, entry.frame.height])
+        }
+        let result = Self.restoreEntries(entries, url: options.journalURL) { wid, pid in
+            self.references[wid] ?? self.findWindow(wid, pid: pid)
         }
         journal.removeAll()
-        try? FileManager.default.removeItem(at: options.journalURL)
-        return ["restored": restored, "restoreFailed": failed]
+        return result
     }
 
-    /// Restores frames left by a previous run that did not stop cleanly.
     @discardableResult public static func restore(journalURL: URL = defaultJournalURL) -> [String: Any] {
-        guard let data = try? Data(contentsOf: journalURL),
-              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            return ["restored": 0, "journal": "absent"]
+        guard FileManager.default.fileExists(atPath: journalURL.path) else {
+            return ["restored": 0, "restoreFailed": 0, "journal": "absent"]
         }
-        var restored = 0, failed = 0
-        for row in rows {
-            guard let wid = (row["windowID"] as? NSNumber)?.uint32Value, let pid = (row["pid"] as? NSNumber)?.int32Value,
-                  let f = row["frame"] as? [Double], f.count == 4 else { continue }
-            let frame = Rect(x: f[0], y: f[1], width: f[2], height: f[3])
-            if let element = findWindow(wid, pid: pid), write(frame, to: element) { restored += 1 } else { failed += 1 }
+        do {
+            let entries = try JSONDecoder().decode([RestoreEntry].self, from: Data(contentsOf: journalURL))
+            return restoreEntries(entries, url: journalURL)
+        } catch {
+            return ["restored": 0, "restoreFailed": 0, "journal": "unreadable", "error": String(describing: error)]
         }
-        try? FileManager.default.removeItem(at: journalURL)
-        return ["restored": restored, "restoreFailed": failed, "journal": "removed"]
+    }
+
+    static func restoreEntries(_ entries: [RestoreEntry], url: URL,
+                               lookup: (UInt32, pid_t) -> AXUIElement? = { findWindow($0, pid: $1) }) -> [String: Any] {
+        // WindowServer ownership distinguishes vanished windows from unavailable AX enumeration.
+        let rows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]]
+        return LiveRestoration.run(entries: entries, url: url) { entry, frame in
+            guard let rows else { return .failed("WindowServer inventory unavailable") }
+            guard rows.contains(where: {
+                ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == entry.windowID &&
+                ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == entry.pid
+            }) else { return .gone }
+            guard let element = lookup(entry.windowID, entry.pid) else {
+                return .failed("AX window lookup unavailable")
+            }
+            AXUIElementSetMessagingTimeout(element, 0.2)
+            let errors = writeErrors(frame, to: element)
+            guard errors.allSatisfy({ $0 == 0 }) else { return .failed("AX size/position/size errors: \(errors)") }
+            guard let actual = Diagnostics.frame(element),
+                  abs(actual.x - frame.x) <= 2, abs(actual.y - frame.y) <= 2,
+                  abs(actual.width - frame.width) <= 2, abs(actual.height - frame.height) <= 2 else {
+                return .adjusted("AX writes succeeded; final frame differs or is unavailable (app constraints, display changes, or asynchronous updates)")
+            }
+            return .restored
+        }
     }
 
     func restoreStaleJournal() throws {
-        guard FileManager.default.fileExists(atPath: options.journalURL.path) else { return }
         let result = Self.restore(journalURL: options.journalURL)
+        guard ["absent", "removed"].contains(result["journal"] as? String ?? "") else {
+            throw NSError(domain: "Paperi.Restoration", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Window recovery remains unresolved: \(result). Retry paperi restore before starting management."])
+        }
         log("restored stale journal: \(result)")
     }
 
@@ -957,16 +984,20 @@ import PaperiCore
     }
 
     @discardableResult static func write(_ frame: Rect, to element: AXUIElement) -> Bool {
+        writeErrors(frame, to: element).allSatisfy { $0 == 0 }
+    }
+
+    static func writeErrors(_ frame: Rect, to element: AXUIElement) -> [Int32] {
         var point = CGPoint(x: frame.x, y: frame.y)
         var size = CGSize(width: frame.width, height: frame.height)
-        guard let p = AXValueCreate(.cgPoint, &point), let s = AXValueCreate(.cgSize, &size) else { return false }
+        guard let p = AXValueCreate(.cgPoint, &point), let s = AXValueCreate(.cgSize, &size) else { return [AXError.illegalArgument.rawValue] }
         // Size, position, size: shrinking first avoids edge clamping; the
         // second size handles apps that clamp size against the old position.
-        var ok = true
+        var errors: [Int32] = []
         for (name, value) in [(kAXSizeAttribute, s), (kAXPositionAttribute, p), (kAXSizeAttribute, s)] {
-            ok = AXUIElementSetAttributeValue(element, name as CFString, value) == .success && ok
+            errors.append(AXUIElementSetAttributeValue(element, name as CFString, value).rawValue)
         }
-        return ok
+        return errors
     }
     func write(_ frame: Rect, to element: AXUIElement) -> Bool {
         let start = ProcessInfo.processInfo.systemUptime
@@ -996,12 +1027,12 @@ import PaperiCore
     }
 
     func persistJournal() {
-        let rows: [[String: Any]] = journal.map { wid, entry in
-            ["windowID": wid, "pid": entry.pid, "frame": [entry.frame.x, entry.frame.y, entry.frame.width, entry.frame.height]]
+        let rows = journal.map { wid, entry in
+            RestoreEntry(windowID: wid, pid: entry.pid, frame: [entry.frame.x, entry.frame.y, entry.frame.width, entry.frame.height])
         }
         do {
             try FileManager.default.createDirectory(at: options.journalURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let data = try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys])
+            let data = try JSONEncoder().encode(rows)
             try data.write(to: options.journalURL, options: .atomic)
         } catch { log("cannot persist restore journal: \(error)") }
     }

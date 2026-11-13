@@ -179,3 +179,23 @@ Animation ticks reuse targets and issue position-only writes with a 20 ms AX
 messaging timeout; AX remains synchronous, so multiple slow apps can still
 exceed a tick budget. Live multi-app profiling and interruption soak remain
 required before making latency claims.
+
+## Live restoration failures
+
+Normal stop and `paperi restore` share the recovery policy. WindowServer ownership
+checks discard entries whose original window/PID pair is gone. AX lookup errors,
+and size/position/size write errors retain the entry
+for an explicit retry. Reports include `restoreFailed`, per-window `failures`, and
+the journal disposition. Missing journals are distinct from unreadable or invalid
+ones; invalid input is preserved without applying any entries.
+
+Startup refuses to replace an unresolved recovery journal. Retry `paperi restore`
+after the affected app responds or its window becomes accessible. If recovery is
+no longer wanted, deliberately move the journal out of the way before restarting.
+No automatic retry loop runs. Geometry confirmation is an immediate read with a
+two-point tolerance. If all writes succeed, differing or unavailable geometry is
+reported in `adjustments` and does not retain an entry or block startup. This allows
+app size constraints, disconnected displays, and asynchronous geometry updates.
+Normal stop prefers cached AX handles, including windows on other Spaces.
+Journal update failures are always logged to standard error because stale entries
+on disk may repeat a completed restoration.
