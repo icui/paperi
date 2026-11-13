@@ -177,8 +177,10 @@ private struct SettingsView: View {
             }
             .listStyle(.sidebar)
             .navigationTitle("Settings")
-            .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
             .searchable(text: $model.search, prompt: "Search settings")
+            // An ideal width alone can yield to the system's narrower default.
+            .frame(minWidth: 260)
+            .navigationSplitViewColumnWidth(min: 260, ideal: 260, max: 320)
         } detail: {
             Form {
                 ForEach(settings, id: \.0) { category, fields in
