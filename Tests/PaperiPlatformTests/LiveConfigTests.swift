@@ -3,6 +3,31 @@ import Testing
 @testable import PaperiPlatform
 
 struct LiveConfigTests {
+    @Test func snapshotStyleConfiguration() throws {
+        #expect(LiveConfig.GestureConfig().snapshotStyle == .native)
+        for json in ["{}", #"{"gesture":{}}"#] {
+            let config = try JSONDecoder().decode(LiveConfig.self, from: Data(json.utf8))
+            #expect(config.gesture.snapshotStyle == .native)
+        }
+        for style in [LiveConfig.SnapshotStyle.native, .simple] {
+            let json = "{\"gesture\":{\"snapshotStyle\":\"\(style.rawValue)\"}}"
+            let config = try JSONDecoder().decode(LiveConfig.self, from: Data(json.utf8))
+            #expect(config.gesture.snapshotStyle == style)
+            let encoded = try JSONEncoder().encode(config)
+            let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+            #expect((object["gesture"] as? [String: Any])?["snapshotStyle"] as? String == style.rawValue)
+            #expect(try JSONDecoder().decode(LiveConfig.self, from: encoded) == config)
+        }
+        for value in [#""fast""#, "true", "42"] {
+            let json = "{\"gesture\":{\"snapshotStyle\":\(value)}}"
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(LiveConfig.self, from: Data(json.utf8))
+            }
+        }
+        let template = try JSONDecoder().decode(LiveConfig.self, from: Data(LiveConfig.template.utf8))
+        #expect(template.gesture.snapshotStyle == .native)
+    }
+
     @Test func tapAction() throws {
         #expect(LiveConfig.GestureConfig().tap == .tray)
         let config = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"tap":"none"}}"#.utf8))

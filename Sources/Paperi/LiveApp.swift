@@ -518,6 +518,9 @@ import PaperiPlatform
         let sub = NSMenu()
         value(sub, "Enabled: \(gesture.enabled ? "on" : "off")\(origin(gesture.enabled == defaults.enabled))",
               copy: "\(gesture.enabled)", tip: "\"gesture.enabled\"")
+        value(sub, "Snapshot style: \(gesture.snapshotStyle.rawValue)\(origin(gesture.snapshotStyle == defaults.snapshotStyle))",
+              copy: gesture.snapshotStyle.rawValue,
+              tip: "\"gesture.snapshotStyle\": native preserves macOS framing and shadows; simple uses an approximate shadow")
         value(sub, "Fingers: \(gesture.fingers)\(origin(gesture.fingers == defaults.fingers))",
               copy: "\(gesture.fingers)", tip: "\"gesture.fingers\": 3 or 4")
         value(sub, "Travel: \(gesture.travel)\(origin(gesture.travel == defaults.travel))", copy: "\(gesture.travel)",

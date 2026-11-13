@@ -3,6 +3,18 @@ import Testing
 @testable import PaperiPlatform
 
 struct WindowSnapshotTests {
+    @MainActor @Test func snapshotStyleIsFixedForEachGesture() {
+        var config = LiveConfig.GestureConfig()
+        let native = SnapshotTransition(snapshotStyle: config.snapshotStyle)
+        config.snapshotStyle = .simple
+        let simple = SnapshotTransition(snapshotStyle: config.snapshotStyle)
+        #expect(native.snapshotStyle == .native)
+        #expect(simple.snapshotStyle == .simple)
+        #expect(native.closeShadowClearance == 128)
+        #expect(simple.closeShadowClearance == 32)
+        #expect(SnapshotTransition().snapshotStyle == .native)
+    }
+
     private func image(alpha: CGFloat = 1) -> CGImage {
         let context = CGContext(data: nil, width: 180, height: 140, bitsPerComponent: 8,
                                 bytesPerRow: 180 * 4, space: CGColorSpaceCreateDeviceRGB(),

@@ -611,7 +611,7 @@ extension LiveManager {
         }
         let ends = destinations.ends, neighbours = destinations.neighbours
         let generation = motionGeneration
-        let overlay = SnapshotTransition()
+        let overlay = SnapshotTransition(snapshotStyle: options.config.gesture.snapshotStyle)
         // Only the focused tiled window closes, and only if its image is captured.
         let closeWindow = session.state.layout.focused == nil || surveys[ctx.window] == nil ? nil : ctx.window
         let tabClose: TabClose? = closeWindow.flatMap { wid in
@@ -660,7 +660,7 @@ extension LiveManager {
                 state.ready = true
                 self.swipe = state
                 self.swipeMetrics = ["state": "tracking", "windows": surveys.count, "captureMS": overlay.captureMS,
-                                     "textureBytes": overlay.textureBytes, "capturedWindows": snapshotIDs.count]
+                                     "textureBytes": overlay.textureBytes, "capturedWindows": snapshotIDs.count, "snapshotStyle": overlay.snapshotStyle.rawValue]
                 // A quick gesture can finish before capture. Begin that release
                 // at the real windows instead of flashing a displaced snapshot.
                 overlay.place(state.starts)
@@ -1001,8 +1001,8 @@ extension LiveManager {
     func closeFrames(_ state: Swipe, progress: Double) -> [UInt32: Rect] {
         guard let wid = state.closeWindow, var frame = state.starts[wid] else { return state.starts }
         let distance = state.pulling
-            ? state.overlay.screenBottom - frame.y + Self.closeShadowClearance
-            : frame.y + frame.height - state.overlay.screenTop + Self.closeShadowClearance
+            ? state.overlay.screenBottom - frame.y + state.overlay.closeShadowClearance
+            : frame.y + frame.height - state.overlay.screenTop + state.overlay.closeShadowClearance
         let absP = min(1, progress)
         frame.y -= (state.pulling ? -1 : 1) * (distance * absP + max(0, progress - 1) * Self.swipeEdgeResistance)
         var frames = state.starts
@@ -1016,9 +1016,6 @@ extension LiveManager {
         let threshold = min(0.99, options.config.gesture.commitThreshold)
         return 1 - 0.3 * min(1, max(0, (progress - threshold) / (1 - threshold)))
     }
-
-    /// Allow the native active shadow to clear the display in either direction.
-    static let closeShadowClearance = 128.0
 
     enum CloseMethod: String { case press, key, none }
 

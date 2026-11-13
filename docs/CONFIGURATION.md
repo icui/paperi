@@ -15,6 +15,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
   "focusAfterClose": "left",
   "focusScrollDuration": 0.22,
   "gesture": {
+    "snapshotStyle": "native",
     "enabled": true,
     "fingers": 3,
     "travel": 0.4,
@@ -63,6 +64,12 @@ and turn; default `0.4`). `commitThreshold`
 is the progress needed to commit (default `0.5`). A sufficiently long, fast flick
 can also commit; `flickVelocity` controls that speed threshold. `invert` reverses
 horizontal navigation.
+
+`snapshotStyle` accepts `native` (default) or `simple`. Native preserves macOS
+window borders, highlights, and shadows. Simple uses an unframed screenshot
+with an approximate shadow, avoiding native framing inspection at swipe start.
+Changes apply to the next gesture. Native automatically falls back to the simple
+capture when its content bounds cannot be verified.
 
 `swipeDown`, `swipeDownRight`, and `swipeDownLeft` each accept `closeTab`,
 `newWindow`, `openApp`, `minimize`, or `none`. Their defaults are new window, close tab,

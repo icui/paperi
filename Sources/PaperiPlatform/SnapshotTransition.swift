@@ -8,6 +8,15 @@ import PaperiCore
 /// while their images move; the caller moves the real windows once underneath,
 /// slides the images onto the frames the real windows actually took, then fades out.
 @MainActor final class SnapshotTransition {
+    /// Fixed for the lifetime of a gesture, including later neighbor captures.
+    let snapshotStyle: LiveConfig.SnapshotStyle
+
+    init(snapshotStyle: LiveConfig.SnapshotStyle = .native) {
+        self.snapshotStyle = snapshotStyle
+    }
+
+    var closeShadowClearance: Double { snapshotStyle == .native ? 128 : 32 }
+
     private var window: NSWindow?
     private var layers: [UInt32: CALayer] = [:]
     private var root: CALayer?
@@ -154,6 +163,10 @@ import PaperiCore
 
     private func captureWindow(_ window: SCWindow, scale: Double) async throws -> WindowSnapshot {
         let filter = SCContentFilter(desktopIndependentWindow: window)
+        if snapshotStyle == .simple {
+            let image = try await capture(filter, scale: scale)
+            return WindowSnapshot(image: image, content: nil, imageScale: scale)
+        }
         let nativeScale = Double(filter.pointPixelScale)
         // A generous canvas prevents the native shadow from scaling down to
         // fit the window bounds. scalesToFit=false preserves native pixels;

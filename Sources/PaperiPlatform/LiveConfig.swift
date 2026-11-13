@@ -17,7 +17,12 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public init(app: String, titleContains: String? = nil) { self.app = app; self.titleContains = titleContains }
     }
 
+    public enum SnapshotStyle: String, Codable, Equatable, Sendable {
+        case native, simple
+    }
+
     public struct GestureConfig: Codable, Equatable, Sendable {
+        public var snapshotStyle: SnapshotStyle
         public var enabled: Bool
         public var fingers: Int
         /// Vertical finger travel (fraction of the trackpad) for a full close,
@@ -46,7 +51,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
                     commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false,
                     swipeUpToClose: Bool = true, tabCloseApps: [String] = [], swipeDown: SwipeDownAction = .newWindow,
                     swipeDownRight: SwipeDownAction = .closeTab, swipeDownLeft: SwipeDownAction = .minimize, swipeDownApp: String? = nil,
-                    tap: TapAction = .tray) {
+                    tap: TapAction = .tray, snapshotStyle: SnapshotStyle = .native) {
+            self.snapshotStyle = snapshotStyle
             self.enabled = enabled
             self.fingers = fingers
             self.travel = travel
@@ -64,7 +70,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         }
 
         enum CodingKeys: String, CodingKey {
-            case swipeDownApp
+            case swipeDownApp, snapshotStyle
             case enabled, fingers, travel, columnTravel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDown, swipeDownRight, swipeDownLeft, tap
             /// Legacy boolean: `false` reads as `swipeDown: "none"`.
             case swipeDownToMinimize
@@ -74,6 +80,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             let d = GestureConfig()
+            snapshotStyle = try c.decodeIfPresent(SnapshotStyle.self, forKey: .snapshotStyle) ?? d.snapshotStyle
             swipeDownApp = try c.decodeIfPresent(String.self, forKey: .swipeDownApp)
             if let app = swipeDownApp, app.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 throw DecodingError.dataCorruptedError(forKey: .swipeDownApp, in: c, debugDescription: "expected an app bundle ID")
@@ -108,6 +115,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
 
         public func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(snapshotStyle, forKey: .snapshotStyle)
             try c.encode(enabled, forKey: .enabled); try c.encode(fingers, forKey: .fingers)
             try c.encode(travel, forKey: .travel); try c.encode(columnTravel, forKey: .columnTravel)
             try c.encode(commitThreshold, forKey: .commitThreshold)
@@ -273,6 +281,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "bottom": "dot",
       "swapHighlight": "#0A84FF4D",
       "gesture": {
+        "snapshotStyle": "native",
         "enabled": true,
         "fingers": 3,
         "travel": 0.4,
