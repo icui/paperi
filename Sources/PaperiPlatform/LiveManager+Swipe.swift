@@ -139,6 +139,7 @@ extension LiveManager {
     func cancelSwipe() {
         standaloneOverlay?.fadeOut(); standaloneOverlay = nil
         standalonePull = false
+        standaloneClose = false
         swipeGuard?.invalidate(); swipeGuard = nil
         swipeSimulation?.invalidate(); swipeSimulation = nil
         swipeTask?.cancel(); swipeTask = nil
@@ -214,7 +215,7 @@ extension LiveManager {
 
 
     func updateStandaloneHint(_ progress: Double, direction: Direction? = nil) {
-        guard standalonePull else { return }
+        guard standalonePull || standaloneClose else { return }
         let config = options.config.gesture
         let action = direction.map { $0 == .left ? config.swipeDownLeft : config.swipeDownRight } ?? standaloneAction
         if standaloneOverlay == nil {
@@ -285,13 +286,16 @@ extension LiveManager {
                 return
             }
             standalonePull = false
-            if !catching {
+            standaloneClose = false
+            if !catching && focusedWindowIsManaged() {
                 // Capture while determining the axis, but keep the overlay hidden
                 // until horizontal movement locks. This overlaps input with capture.
                 let started = beginSwipe(pendingLock: true)
                 // Nothing to swipe on a full-screen Space; a retry on horizontal
                 // lock would refuse again (and refresh again).
-                if started["error"] as? String == Self.fullScreenRefusal { slotSwipe = nil; return }
+                if started["error"] as? String == Self.fullScreenRefusal {
+                    slotSwipe = swipeReducer; return
+                }
                 applySwipeTravel(to: &swipeReducer)
             }
             slotSwipe = swipeReducer
@@ -417,8 +421,18 @@ extension LiveManager {
             applySwipeTravel(to: &reducer)
             if case .active(_, let progress, _, _) = reducer.state { updateSwipe(progress, at: time) }
         case .closing(let progress):
-            guard begun(), startClosing() else { cancelSwipe(); return false }
-            updateSwipe(progress, at: time)
+            if standaloneClose || !focusedWindowIsManaged() {
+                if !standaloneClose {
+                    cancelSwipe()
+                    standaloneClose = true
+                    standaloneAction = .closeTab
+                    standaloneHintDirection = CGVector(dx: 0, dy: 1)
+                }
+                updateStandaloneHint(progress)
+            } else {
+                guard begun(), startClosing() else { cancelSwipe(); return false }
+                updateSwipe(progress, at: time)
+            }
         case .pulling(let progress):
             enterPull()
             updateStandaloneHint(progress)
@@ -434,6 +448,12 @@ extension LiveManager {
 
     /// Acts on a released gesture.
     func finishGesture(_ decision: SlotSwipe.Decision, turnDirection: Direction) {
+        if standaloneClose {
+            standaloneOverlay?.fadeOut(); standaloneOverlay = nil
+            standaloneClose = false
+            if decision == .close { performStandalonePull(.closeTab) }
+            return
+        }
         if standalonePull {
             standaloneOverlay?.fadeOut(); standaloneOverlay = nil
             standalonePull = false
@@ -505,6 +525,21 @@ extension LiveManager {
     @discardableResult func showTray() -> Bool {
         guard let display = pointerDisplay() else { return false }
         return windowIndicators.summon(display: display.displayUUID, at: NSEvent.mouseLocation, coordinator: coordinator)
+    }
+
+    /// Consult the actual focused window rather than the strip's last focus.
+    func focusedWindowIsManaged() -> Bool {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+        let application = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(application, 0.2)
+        guard let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
+              CFGetTypeID(value) == AXUIElementGetTypeID() else { return false }
+        let wid = paperi_window_id(value as! AXUIElement)
+        guard let space = coordinator.spaceForWindow[wid],
+              let session = coordinator.sessions[space] else { return false }
+        return session.state.layout.columns.contains { column in
+            column.slots.contains { $0.members.contains(wid) }
+        }
     }
 
     /// App actions remain available when no tiled window can supply a strip.
