@@ -498,3 +498,92 @@ struct SlotSwipeCatchTests {
         #expect(abs(u - 1) < 1e-9)
     }
 }
+
+struct SwipeTrackingPredictionTests {
+    @Test func agingPredictionNeverRetreatsInEitherDirection() {
+        for sign in [-1.0, 1.0] {
+            var prediction = SlotSwipe.TrackingPrediction()
+            prediction.observe(sign * 0.2)
+            var position = sign * 0.2
+            for frame in 0...12 {
+                let next = prediction.position(from: position, velocity: sign * 4,
+                                               age: Double(frame) / 120, period: 1.0 / 120)
+                #expect(sign * (next - position) >= 0)
+                position = next
+            }
+        }
+    }
+
+    @Test func slowerForwardReportDoesNotRetractEarlierPrediction() {
+        for sign in [-1.0, 1.0] {
+            var prediction = SlotSwipe.TrackingPrediction()
+            prediction.observe(sign * 0.2)
+            let ahead = prediction.position(from: sign * 0.2, velocity: sign * 8, age: 0.015, period: 1.0 / 60)
+            prediction.observe(sign * 0.21)
+            let next = prediction.position(from: ahead, velocity: sign * 2, age: 0.002, period: 1.0 / 60)
+            #expect(next == ahead)
+            prediction.observe(sign * 0.5)
+            #expect(sign * prediction.position(from: next, velocity: 0, age: 0, period: 1.0 / 120) == 0.5)
+        }
+    }
+
+    @Test func actualReversalRespondsBeforeFilteredVelocityChangesSign() {
+        var prediction = SlotSwipe.TrackingPrediction()
+        prediction.observe(0.3)
+        prediction.observe(0.28)
+        let reversed = prediction.position(from: 0.35, velocity: 5, age: 0.01, period: 1.0 / 120)
+        #expect(reversed == 0.28)
+        prediction.observe(0.28) // A stationary report preserves the direction.
+        #expect(prediction.position(from: reversed, velocity: 5, age: 0.03, period: 1.0 / 120) == reversed)
+    }
+}
+
+struct SwipeTrackingFilterTests {
+    @Test func tinyReverseSamplesDoNotReversePrediction() {
+        var prediction = SlotSwipe.TrackingPrediction()
+        prediction.observe(0.2)
+        prediction.observe(0.1995)
+        #expect(prediction.position(from: 0.21, velocity: 0, age: 0, period: 1.0 / 120) == 0.21)
+        prediction.observe(0.199)
+        prediction.observe(0.197)
+        #expect(prediction.position(from: 0.21, velocity: 0, age: 0, period: 1.0 / 120) == 0.197)
+    }
+
+    @Test func filterReducesStationaryNoise() {
+        var filter = SlotSwipe.TrackingFilter()
+        var position = 0.0
+        var peak = 0.0
+        for index in 0..<240 {
+            position = filter.advance(from: position, toward: index.isMultiple(of: 2) ? 0.001 : -0.001, elapsed: 1.0 / 120)
+            if index > 120 { peak = max(peak, abs(position)) }
+        }
+        #expect(peak < 0.0004)
+    }
+
+    @Test func fastTrackingHasLessRelativeLagThanSlowTracking() {
+        func lag(speed: Double, rate: Double) -> Double {
+            var filter = SlotSwipe.TrackingFilter()
+            var position = 0.0
+            for index in 1...Int(rate) {
+                position = filter.advance(from: position, toward: speed * Double(index) / rate, elapsed: 1 / rate)
+            }
+            return (speed - position) / speed
+        }
+        for rate in [60.0, 120] {
+            #expect(lag(speed: 3, rate: rate) < lag(speed: 0.05, rate: rate))
+            #expect(lag(speed: 3, rate: rate) < 0.005)
+        }
+    }
+
+    @Test func filterPreservesMonotonicMotionAndConverges() {
+        var filter = SlotSwipe.TrackingFilter()
+        var position = 0.0
+        for index in 1...120 {
+            let target = min(0.5, Double(index) / 120)
+            let next = filter.advance(from: position, toward: target, elapsed: 1.0 / 120)
+            #expect(next >= position && next <= target)
+            position = next
+        }
+        #expect(abs(position - 0.5) < 1e-9)
+    }
+}

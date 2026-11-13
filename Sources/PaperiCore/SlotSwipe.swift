@@ -121,6 +121,75 @@ public struct SlotSwipe: Equatable, Sendable {
         return sign * resisted
     }
 
+    /// Prediction may lead the fingers, but catching up to an earlier forecast
+    /// must never look like a reversal. Direction comes from touch reports,
+    /// independently of the filtered velocity, which can lag a real reversal.
+    public struct TrackingPrediction: Equatable, Sendable {
+        private var target: Double
+        private var direction = 0.0
+        private var extremum: Double
+
+        public init(target: Double = 0) { self.target = target; self.extremum = target }
+
+        public mutating func observe(_ next: Double) {
+            guard next.isFinite else { return }
+            let delta = next - target
+            // Accumulate reverse travel from the furthest report, so a
+            // deliberate slow reversal works without reacting to tiny tremors.
+            let tolerance = 0.002
+            if direction == 0, delta != 0 {
+                direction = delta > 0 ? 1 : -1
+                extremum = next
+            } else if direction > 0 {
+                extremum = max(extremum, next)
+                if next < extremum - tolerance { direction = -1; extremum = next }
+            } else if direction < 0 {
+                extremum = min(extremum, next)
+                if next > extremum + tolerance { direction = 1; extremum = next }
+            }
+            target = next
+        }
+
+        public func position(from current: Double, velocity: Double, age: Double, period: Double) -> Double {
+            let age = max(0, age)
+            let lead = min(age, 1.5 * max(period, 1.0 / 120)) * max(0, 1 - age / 0.06)
+            let speed = velocity * direction > 0 ? velocity : 0
+            let predicted = target + speed * lead
+            if direction > 0 { return max(current, predicted) }
+            if direction < 0 { return min(current, predicted) }
+            return current
+        }
+    }
+
+    /// Speed-adaptive low-pass filter (the 1€ filter). Units are slot progress;
+    /// the conservative minimum cutoff smooths slow motion, while increasing
+    /// cutoff with speed keeps fast tracking responsive. No speed limit.
+    public struct TrackingFilter: Equatable, Sendable {
+        private var previous: Double?
+        private var filtered = 0.0
+        private var derivative = 0.0
+
+        public init() {}
+
+        public mutating func advance(from current: Double, toward target: Double, elapsed: Double) -> Double {
+            guard elapsed.isFinite, elapsed > 0, current.isFinite, target.isFinite else { return current }
+            let dt = min(elapsed, 1.0 / 30)
+            func alpha(_ cutoff: Double) -> Double {
+                let r = 2 * Double.pi * cutoff * dt
+                return r / (1 + r)
+            }
+            if previous == nil { filtered = current; previous = current }
+            let speed = (target - previous!) / dt
+            derivative += alpha(10) * (speed - derivative)
+            previous = target
+            filtered += alpha(8 + 40 * abs(derivative)) * (target - filtered)
+            // Direction has already been validated by TrackingPrediction.
+            // Filtering may only approach that target, never run past it.
+            filtered = min(max(current, target), max(min(current, target), filtered))
+            return filtered
+        }
+    }
+
     /// A critically damped spring carrying a released swipe to its target:
     /// `distance` (progress units) still to go, entered at `speed` towards
     /// the target (negative: moving away). The motion continues at exactly

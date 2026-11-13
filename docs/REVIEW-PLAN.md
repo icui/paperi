@@ -474,3 +474,33 @@ exist (`status.performance.swipe`): `captureMS`, `trackingFrames`,
 A 240 fps phone recording of the trackpad and screen together is the practical
 way to compare against the native Space swipe; do one before and one after
 S1–S3.
+
+## Slow tracking research and follow-up — 2026-11-13
+
+Public sources reviewed do not establish the exact filter or transfer function
+used for Mission Control / Spaces. Apple's
+[trackpad event guide](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/EventOverview/HandlingTouchEvents/HandlingTouchEvents.html)
+distinguishes raw touches from driver-interpreted gestures; the two should not
+be assumed to have identical motion quality.
+
+[Chromium's scrolling investigation](https://blog.chromium.org/2023/08/smoothing-out-scrolling-experience-in.html)
+identified inconsistent sampling and predictor output as causes of slow-scroll
+jank, and reported improvement with the
+[1€ adaptive filter](https://gery.casiez.net/1euro/). This supports trying
+speed-adaptive temporal filtering; it does not establish that Apple uses it.
+
+The follow-up implementation adds an adaptive display-target filter with an
+8 Hz minimum cutoff, a cutoff increase of 40 per unit of filtered progress
+speed, and a 10 Hz derivative cutoff. A 0.002-progress reversal tolerance
+accumulates movement from the directional extremum, preventing a single tiny
+opposite sample from retracting a predicted lead. Finger-to-distance gain is
+unchanged. These values are initial tuning choices in slot progress units;
+their perceived strength can vary with destination distance.
+
+Regression checks cover stationary noise attenuation, genuine accumulated
+reversal, forward monotonicity, convergence, and relative tracking lag at 60
+and 120 Hz. The user verified the updated gesture tracking works in live use. Automated
+validation passed 112 core and 171 platform tests, plus the executable build.
+Detailed comparison against Spaces across column widths and capture catch-up
+remains future measurement work. This follow-up includes the backward-motion
+fix and adaptive smoothing after checkpoint `5177f9e`.

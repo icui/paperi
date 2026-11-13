@@ -52,6 +52,8 @@ extension LiveManager {
         var starts: [UInt32: Rect] = [:]
         var progress = 0.0
         var targetProgress = 0.0
+        var prediction = SlotSwipe.TrackingPrediction()
+        var trackingFilter = SlotSwipe.TrackingFilter()
         var lastVisualTime = 0.0
         /// On-screen speed of the images, progress per second (smoothed).
         var visualVelocity = 0.0
@@ -746,6 +748,7 @@ extension LiveManager {
         next.starts = starts
         next.progress = next.origin
         next.targetProgress = next.origin
+        next.prediction = .init(target: next.origin)
         next.lastVisualTime = now
         next.ready = true
         swipe = next
@@ -805,6 +808,8 @@ extension LiveManager {
         state.pullAction = direction == .left ? options.config.gesture.swipeDownLeft : options.config.gesture.swipeDownRight
         state.progress = 0
         state.targetProgress = 0
+        state.prediction = .init()
+        state.trackingFilter = .init()
         state.visualVelocity = 0
         state.targetVelocity = 0
         state.targetTime = 0
@@ -834,6 +839,7 @@ extension LiveManager {
         } else if !wasTracking || state.targetTime == 0 {
             state.targetVelocity = 0
         }
+        state.prediction.observe(target)
         state.targetProgress = target
         state.targetTime = max(state.targetTime, at)
         if !wasTracking {
@@ -845,11 +851,6 @@ extension LiveManager {
         swipe = state
         if state.ready && !wasTracking { state.overlay.show() }
     }
-
-    /// Longest the images run ahead of the latest finger report, in display
-    /// frames, and how stale a report may be before its speed stops counting.
-    static let predictionFrames = 1.5
-    static let predictionStale = 0.06
 
     /// One display frame: move the images to where the fingers will be when
     /// it is shown. Touch reports and display frames are not in step, so the
@@ -869,12 +870,11 @@ extension LiveManager {
         let now = link.targetTimestamp
         let elapsed = min(1.0 / 30, max(0, now - state.lastVisualTime))
         let age = max(0, now - state.targetTime)
-        let lead = min(age, Self.predictionFrames * max(period, 1.0 / 120)) * max(0, 1 - age / Self.predictionStale)
-        var aim = state.targetProgress + state.targetVelocity * lead
+        var aim = state.prediction.position(from: state.progress, velocity: state.targetVelocity, age: age, period: period)
         aim = state.closing ? min(1.3, max(0, aim)) : min(1.3, max(-1.3, aim))
-        var next = aim
+        var next = state.trackingFilter.advance(from: state.progress, toward: aim, elapsed: elapsed)
         if state.catchingUp {
-            next = state.progress + (aim - state.progress) * (1 - exp(-elapsed / 0.03))
+            next = state.progress + (next - state.progress) * (1 - exp(-elapsed / 0.03))
             if abs(aim - next) < 0.004 { state.catchingUp = false }
         }
         if elapsed > 0 {
