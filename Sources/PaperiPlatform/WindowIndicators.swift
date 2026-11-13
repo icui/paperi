@@ -170,8 +170,8 @@ import ScreenCaptureKit
                 // Hovering anywhere in the tray holds it open, including its
                 // padding, as does a thumbnail drag that strays off it.
                 // Entering during a fade restores visibility; leaving starts
-                // a fresh one-second dismissal delay.
-                try await ThumbnailFade.run(delay: 1, shouldStayVisible: {
+                // a fresh 0.3-second dismissal delay.
+                try await ThumbnailFade.run(delay: 0.3, shouldStayVisible: {
                     previews.isDragging || panel.map { $0.frame.contains(NSEvent.mouseLocation) } == true
                 }) { panel?.alphaValue = $0 }
                 try Task.checkCancellation()

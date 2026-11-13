@@ -96,7 +96,7 @@ it has no tabs remaining.
 A quick tap with all gesture fingers (`tap`, default `tray`) shows the thumbnail
 tray centred on the pointer, on the display under it; click a thumbnail to focus that
 window, or drag one sideways to reorder the strip. The tray stays while hovered, fades
-one second after the pointer leaves, and closes at once on a click outside it. The
+0.3 seconds after the pointer leaves, and closes at once on a click outside it. The
 `tray` command (default ⌥⌘T) opens it the same way. Thumbnails require Screen
 Recording permission. Only a
 deliberate tap counts: fingers landing and lifting within 100 ms of each other, down

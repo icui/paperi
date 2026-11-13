@@ -67,7 +67,7 @@ New-window creation uses the app's **New Window** menu item, falling back to ⌘
 
 ### Window tray
 
-Tap with three fingers to show thumbnails of every window in the strip, centred on the pointer. Click one to focus it, or drag one sideways to reorder the strip. The tray closes on a click outside it, or a second after the pointer leaves it. ⌥⌘T opens it too. Thumbnails require Screen Recording permission.
+Tap with three fingers to show thumbnails of every window in the strip, centred on the pointer. Click one to focus it, or drag one sideways to reorder the strip. The tray closes on a click outside it, or shortly after the pointer leaves it. ⌥⌘T opens it too. Thumbnails require Screen Recording permission.
 
 If macOS uses the same finger count for Mission Control, Spaces, or three-finger drag, Paperi disables its conflicting swipe and shows a warning. Change the system gesture or set `gesture.fingers` to `4`.
 
