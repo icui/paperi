@@ -61,6 +61,8 @@ struct AppGestureFilter: Equatable {
     private(set) var staggeredSequence = false
     /// Momentum from a scroll that was cut off by a claimed sequence.
     private(set) var swallowMomentum = false
+    /// Scroll updates can arrive after the device has reported every finger up.
+    private(set) var swallowScrollTail = false
     /// The app has seen a scroll begin without its end.
     private(set) var appScrollOpen = false
     /// The app has seen a begin-gesture without its end.
@@ -79,12 +81,15 @@ struct AppGestureFilter: Equatable {
             } else if down > fingers, !swipeEstablished {
                 claimed = false
                 systemSequence = true
+                swallowScrollTail = false
+                swallowMomentum = false
             } else if down == fingers, !claimed, !systemSequence, !staggeredSequence,
                       landingSpread > EventTapTouchSource.swipeLandingSpread {
                 staggeredSequence = true
             } else if down == fingers, !claimed, !systemSequence, !staggeredSequence {
                 claimed = true
                 swallowMomentum = true
+                swallowScrollTail = true
             }
             return false
 
@@ -108,7 +113,9 @@ struct AppGestureFilter: Equatable {
 
         case .scroll(let phase, let momentum, let continuous):
             // Mouse wheels are never part of a trackpad gesture.
-            guard continuous else { return false }
+            // Phased trackpad events can omit the continuous flag. Ordinary
+            // unphased mouse-wheel events still pass through.
+            guard continuous || phase != 0 || momentum != 0 else { return false }
             if claimed {
                 // Let an already-open app scroll close cleanly.
                 if appScrollOpen, phase == Self.phaseEnded || phase == Self.phaseCancelled {
@@ -118,11 +125,24 @@ struct AppGestureFilter: Equatable {
                 return true
             }
             if momentum != 0, swallowMomentum {
-                if momentum == Self.momentumEnd { swallowMomentum = false }
+                if momentum == Self.momentumEnd {
+                    swallowMomentum = false
+                    swallowScrollTail = false
+                }
                 return true
             }
             if phase == Self.phaseBegan || phase == Self.phaseMayBegin {
                 swallowMomentum = false
+                swallowScrollTail = false
+            } else if swallowScrollTail {
+                if phase == Self.phaseEnded || phase == Self.phaseCancelled {
+                    swallowScrollTail = false
+                    if appScrollOpen {
+                        appScrollOpen = false
+                        return false
+                    }
+                }
+                return true
             }
             if phase == Self.phaseBegan || phase == Self.phaseChanged {
                 appScrollOpen = true

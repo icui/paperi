@@ -189,6 +189,28 @@ struct AppGestureFilterTests {
         #expect(!drop(&f, .scroll(phase: 0, momentum: 0, continuous: false)))
     }
 
+    @Test func swipeBlocksPhasedScrollWithoutContinuousFlag() {
+        var f = AppGestureFilter(fingers: 3)
+        _ = drop(&f, .fingers(down: 3))
+        #expect(drop(&f, .scroll(phase: began, momentum: 0, continuous: false)))
+        #expect(drop(&f, .scroll(phase: changed, momentum: 0, continuous: false)))
+        #expect(!drop(&f, .scroll(phase: 0, momentum: 0, continuous: false)))
+    }
+
+    @Test func swipeBlocksScrollTailAfterFingersLift() {
+        var f = AppGestureFilter(fingers: 3)
+        _ = drop(&f, .fingers(down: 3))
+        #expect(drop(&f, .scroll(phase: began, momentum: 0, continuous: true)))
+        _ = drop(&f, .fingers(down: 0))
+        #expect(drop(&f, .scroll(phase: changed, momentum: 0, continuous: true)))
+        #expect(drop(&f, .scroll(phase: ended, momentum: 0, continuous: true)))
+        #expect(drop(&f, .scroll(phase: 0, momentum: 1, continuous: true)))
+        #expect(drop(&f, .scroll(phase: 0, momentum: AppGestureFilter.momentumEnd, continuous: true)))
+        _ = drop(&f, .fingers(down: 2))
+        #expect(!drop(&f, .scroll(phase: began, momentum: 0, continuous: true)))
+        #expect(!drop(&f, .scroll(phase: changed, momentum: 0, continuous: true)))
+    }
+
     @Test func slowlyJoinedFingersLeaveScrollToApp() {
         var f = AppGestureFilter(fingers: 3)
         _ = f.shouldDrop(.fingers(down: 2, landingSpread: 0.01))

@@ -558,9 +558,37 @@ extension LiveManager {
             if let item = Self.newWindowMenuItem(pid: pid),
                AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { return }
             Self.postAppCommand(Self.keyN, pid: pid)
-        case .closeTab: Self.postAppCommand(Self.keyW, pid: pid)
+        case .closeTab:
+            Self.postAppCommand(Self.keyW, pid: pid)
+            focusManagedWindowAfterCommandW()
         }
         scheduleRefresh()
+    }
+
+    /// Give the app time to close or show a save prompt before restoring focus.
+    func focusManagedWindowAfterCommandW() {
+        guard let space = pointerDisplay()?.activeSpaceID else { return }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let self, self.running, !self.paused,
+                  NSEvent.pressedMouseButtons == 0, !self.motionActive,
+                  DisplayArrangement.currentProblem() == nil,
+                  self.coordinator.display(forSpace: space)?.activeSpaceID == space,
+                  let app = NSWorkspace.shared.frontmostApplication else { return }
+            let application = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetMessagingTimeout(application, 0.2)
+            // Another tab/window or an unsaved-changes prompt keeps its focus.
+            var focused: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute as CFString, &focused)
+            guard result == .noValue || (result == .success && focused == nil) else { return }
+            guard let session = self.coordinator.sessions[space],
+                  !session.state.interactionSuppressed,
+                  let slot = session.state.layout.focused,
+                  let index = session.state.layout.index(of: slot) else { return }
+            let wid = session.state.layout.columns[index.column].slots[index.row].activeMember
+            guard Self.windowOnScreen(wid) else { return }
+            _ = self.raise(wid)
+        }
     }
 
     /// Always opens a new window of the configured app. Launching an app
@@ -1360,6 +1388,7 @@ extension LiveManager {
         }
         swipeMetrics["closeMethod"] = method.rawValue
         swipeMetrics["tabClose"] = mode.rawValue
+        if method == .key { focusManagedWindowAfterCommandW() }
         if method == .none { overlay.retractIndicator(duration: 0.18) }
         swipeTask = Task { [weak self] in
             var gone = false
