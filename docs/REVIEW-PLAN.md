@@ -577,3 +577,14 @@ path; real-window placement and release decisions remain unchanged.
 Live validation: the user confirmed that the predicted Core Animation tracking
 is smooth and approved merging it into `main`. All 295 automated tests and the
 executable build passed before this checkpoint.
+
+### Swipe-up window tracking
+
+The same bounded Core Animation trajectory renderer now handles swipe-up window
+movement. The closing snapshot's opacity is sampled from the same progress curve
+and animated on the same timeline, instead of updated by main-thread ticks.
+Progress is clamped at rest when a correction would briefly move below zero.
+Release samples the current trajectory before the existing close/snap-back path.
+Close decisions and thresholds are unchanged. Tab-close/action indicators and
+downward pulls retain their prior tracking. Added regressions cover renderer
+routing and the swipe-up reversal boundary. Live swipe-up validation is pending.

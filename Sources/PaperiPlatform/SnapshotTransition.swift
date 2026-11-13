@@ -215,11 +215,13 @@ import PaperiCore
         CATransaction.commit()
     }
 
-    /// Horizontal tracking runs in the render server between touch reports.
+    /// Window tracking runs in the render server between touch reports.
     /// Replacing the shared slide key also lets freeze/landing interrupt it.
-    func track(along path: (Double) -> [UInt32: Rect], motion: SwipeTrajectory, began: Double) {
+    func track(along path: (Double) -> [UInt32: Rect], motion: SwipeTrajectory, began: Double,
+               fadingWindow: UInt32? = nil, opacity: (Double) -> Double = { _ in 1 }) {
         let steps = 12
-        let samples = (0...steps).map { path(motion.position(at: motion.duration * Double($0) / Double(steps))) }
+        let progress = (0...steps).map { motion.position(at: motion.duration * Double($0) / Double(steps)) }
+        let samples = progress.map(path)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (wid, layer) in layers {
@@ -236,6 +238,19 @@ import PaperiCore
             animation.duration = motion.duration
             animation.beginTime = layer.convertTime(began, from: nil)
             layer.add(animation, forKey: "slide")
+            if wid == fadingWindow {
+                var opacities = progress.map { Float(opacity($0)) }
+                opacities[0] = layer.presentation()?.opacity ?? layer.opacity
+                layer.removeAnimation(forKey: "fade")
+                layer.opacity = opacities[steps]
+                let fade = CAKeyframeAnimation(keyPath: "opacity")
+                fade.values = opacities
+                fade.calculationMode = .linear
+                fade.timingFunction = CAMediaTimingFunction(name: .linear)
+                fade.duration = animation.duration
+                fade.beginTime = animation.beginTime
+                layer.add(fade, forKey: "fade")
+            }
         }
         CATransaction.commit()
         CATransaction.flush()
