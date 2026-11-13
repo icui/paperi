@@ -170,8 +170,10 @@ import ScreenCaptureKit
                 // Hovering anywhere in the tray holds it open, including its
                 // padding, as does a thumbnail drag that strays off it.
                 // Entering during a fade restores visibility; leaving starts
-                // a fresh 0.3-second dismissal delay.
-                try await ThumbnailFade.run(delay: 0.3, shouldStayVisible: {
+                // a fresh 0.3-second dismissal delay. A tray pushed out from
+                // under the pointer (near a screen edge) waits a full second
+                // until the pointer first enters it.
+                try await ThumbnailFade.run(delay: 1, leaveDelay: 0.3, shouldStayVisible: {
                     previews.isDragging || panel.map { $0.frame.contains(NSEvent.mouseLocation) } == true
                 }) { panel?.alphaValue = $0 }
                 try Task.checkCancellation()
@@ -392,15 +394,18 @@ import ScreenCaptureKit
 
 /// A task-owned fade. AppKit animator animations continue after task cancellation;
 /// explicit opacity updates stop at the next suspension when a reveal supersedes them.
+/// `delay` precedes the fade until `shouldStayVisible` first holds it; after
+/// that, each release waits `leaveDelay` (defaulting to `delay`).
 @MainActor enum ThumbnailFade {
-    static func run(duration: TimeInterval = 0.2, delay: TimeInterval = 0,
+    static func run(duration: TimeInterval = 0.2, delay: TimeInterval = 0, leaveDelay: TimeInterval? = nil,
                     shouldStayVisible: () -> Bool = { false }, setOpacity: (Double) -> Void) async throws {
         var started = ProcessInfo.processInfo.systemUptime
+        var delay = delay
         while true {
             try Task.checkCancellation()
             let now = ProcessInfo.processInfo.systemUptime
             let held = shouldStayVisible()
-            if held { started = now }
+            if held { started = now; delay = leaveDelay ?? delay }
             let elapsed = max(0, now - started - delay)
             let progress = held || now - started < delay ? 0 : duration > 0 ? min(1, elapsed / duration) : 1
             setOpacity(1 - progress)

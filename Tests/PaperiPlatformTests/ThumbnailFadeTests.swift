@@ -52,4 +52,21 @@ import Testing
         try await ThumbnailFade.run(duration: 0) { opacity = $0 }
         #expect(opacity == 0)
     }
+
+    @Test func leaveDelayAppliesOnlyAfterFirstHold() async throws {
+        // Never held: the initial delay keeps it fully visible.
+        var opacity = 1.0
+        let start = ProcessInfo.processInfo.systemUptime
+        try await ThumbnailFade.run(duration: 0, delay: 0.15, leaveDelay: 0) { opacity = $0 }
+        #expect(opacity == 0)
+        #expect(ProcessInfo.processInfo.systemUptime - start >= 0.15)
+
+        // Held once, then released: the shorter leave delay applies.
+        var polls = 0
+        let heldStart = ProcessInfo.processInfo.systemUptime
+        try await ThumbnailFade.run(duration: 0, delay: 10, leaveDelay: 0,
+                                    shouldStayVisible: { polls += 1; return polls == 1 }) { opacity = $0 }
+        #expect(opacity == 0)
+        #expect(ProcessInfo.processInfo.systemUptime - heldStart < 5)
+    }
 }
