@@ -279,7 +279,7 @@ import PaperiCore
     }
 
     /// Animates one image's opacity from what is on screen now.
-    func fade(_ wid: UInt32, to value: Double, duration: Double, curve: (Double, Double, Double, Double)? = nil) {
+    func fade(_ wid: UInt32, to value: Double, duration: Double) {
         guard let layer = layers[wid] else { return }
         let from = layer.presentation()?.opacity ?? layer.opacity
         CATransaction.begin()
@@ -291,9 +291,7 @@ import PaperiCore
             animation.fromValue = from
             animation.toValue = Float(value)
             animation.duration = duration
-            animation.timingFunction = curve.map {
-                CAMediaTimingFunction(controlPoints: Float($0.0), Float($0.1), Float($0.2), Float($0.3))
-            } ?? CAMediaTimingFunction(name: .easeOut)
+            animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
             layer.add(animation, forKey: "fade")
         }
         CATransaction.commit()
@@ -322,14 +320,17 @@ import PaperiCore
         CATransaction.flush()
     }
 
-    /// Slides images along `path` (frames at fraction 0…1 of the way), ending
-    /// exactly on `frames`. Unlike `slide(to:)`, images whose straight-line
-    /// distances differ still move together at the path's speed.
-    func slide(along path: (Double) -> [UInt32: Rect], to frames: [UInt32: Rect], duration: Double,
-               curve: (Double, Double, Double, Double)? = nil) {
+    /// Slides images along `path` (frames at fraction 0…1 of the way) with
+    /// `spring`'s motion, ending exactly on `frames`. Unlike `slide(to:)`,
+    /// images whose straight-line distances differ still move together at
+    /// the path's speed. The animation runs in the render server, so main
+    /// thread work after this call cannot stall it.
+    func slide(along path: (Double) -> [UInt32: Rect], to frames: [UInt32: Rect], spring: SlotSwipe.Spring) {
+        let duration = spring.duration
         guard duration > 0 else { place(frames); return }
-        let steps = 32
-        let samples = (0...steps).map { path(Double($0) / Double(steps)) }
+        // One sample per 120 Hz frame; the spring's own timing, so linear between them.
+        let steps = max(8, Int((duration * 120).rounded(.up)))
+        let samples = (0...steps).map { path(spring.fraction(at: duration * Double($0) / Double(steps))) }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (wid, layer) in layers {
@@ -346,9 +347,7 @@ import PaperiCore
             animation.values = values.map { NSValue(point: $0) }
             animation.calculationMode = .linear
             animation.duration = duration
-            animation.timingFunction = curve.map {
-                CAMediaTimingFunction(controlPoints: Float($0.0), Float($0.1), Float($0.2), Float($0.3))
-            } ?? CAMediaTimingFunction(name: .easeOut)
+            animation.timingFunction = CAMediaTimingFunction(name: .linear)
             layer.add(animation, forKey: "slide")
         }
         CATransaction.commit()

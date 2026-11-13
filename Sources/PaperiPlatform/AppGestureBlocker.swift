@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import PaperiBridge
@@ -133,6 +134,26 @@ struct AppGestureFilter: Equatable {
     }
 }
 
+/// Independent AppKit counts may lag the device callback around finger landings.
+/// Only sustained disagreement is evidence of an unsafe private record layout.
+struct FingerCountValidation {
+    private var mismatchSince: Double?
+    private var mismatches = 0
+    private(set) var failed = false
+
+    mutating func observe(appKit: Int, device: Int, at time: Double) {
+        guard !failed, time.isFinite else { return }
+        if appKit == device {
+            mismatchSince = nil
+            mismatches = 0
+            return
+        }
+        if mismatchSince == nil { mismatchSince = time }
+        mismatches += 1
+        if mismatches >= 4, time - mismatchSince! >= 0.15 { failed = true }
+    }
+}
+
 /// An active session event tap, serviced on its own thread so a busy main
 /// thread never delays scrolling, that withholds app gestures while the
 /// swipe gesture's fingers are down. See `AppGestureFilter`.
@@ -141,6 +162,8 @@ final class AppGestureBlocker: @unchecked Sendable {
     private let verbose: Bool
     private let lock = NSLock()
     // Accessed only on the tap thread once started.
+    private var validation = FingerCountValidation()
+    private var blockingStatus = "unavailable"
     private var establishedSwipe = false
     private var filter: AppGestureFilter
     private var machPort: CFMachPort?
@@ -148,20 +171,36 @@ final class AppGestureBlocker: @unchecked Sendable {
     private var thread: Thread?
     private var droppedThisSequence = 0
 
-    private static let gestureTypes: [UInt32] = [
-        18, // rotate
-        30, // magnify
-        31, // swipe
-        32  // smart magnify
-    ]
-    private static let touchType: UInt32 = 29
-    private static let beginGestureType: UInt32 = 19
-    private static let endGestureType: UInt32 = 20
+    private static let gestureTypes = GestureEventType.appGestures
+    private static let touchType = GestureEventType.touch
+    private static let beginGestureType = GestureEventType.begin
+    private static let endGestureType = GestureEventType.end
 
     init(fingers: Int, verbose: Bool) {
         self.fingers = fingers
         self.verbose = verbose
         self.filter = AppGestureFilter(fingers: fingers)
+    }
+
+    var status: String {
+        lock.lock(); defer { lock.unlock() }
+        return blockingStatus
+    }
+
+    func validateFingerCount(_ count: Int, at time: Double) {
+        lock.lock()
+        guard blockingStatus == "active" else { lock.unlock(); return }
+        let wasFailed = validation.failed
+        validation.observe(appKit: count, device: Int(paperi_mt_fingers_down()), at: time)
+        let failed = validation.failed
+        let port = machPort
+        if failed { blockingStatus = "disabled: finger count mismatch" }
+        lock.unlock()
+        if failed, !wasFailed {
+            // Disable immediately; retain the thread/source for normal stop teardown.
+            if let port { CGEvent.tapEnable(tap: port, enable: false) }
+            FileHandle.standardError.write(Data("[paperi] app gesture blocking disabled: independent finger counts disagree\n".utf8))
+        }
     }
 
     func setSwipeEstablished(_ established: Bool) {
@@ -233,6 +272,7 @@ final class AppGestureBlocker: @unchecked Sendable {
         CGEvent.tapEnable(tap: port, enable: true)
         lock.lock()
         machPort = port
+        blockingStatus = "active"
         runLoop = loop
         lock.unlock()
         ready.signal()
@@ -242,6 +282,9 @@ final class AppGestureBlocker: @unchecked Sendable {
     }
 
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        lock.lock(); let unsafe = validation.failed; lock.unlock()
+        if unsafe { return Unmanaged.passUnretained(event) }
+
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             lock.lock(); let port = machPort; lock.unlock()
             if let port { CGEvent.tapEnable(tap: port, enable: true) }
@@ -282,4 +325,16 @@ final class AppGestureBlocker: @unchecked Sendable {
         }
         return drop ? nil : Unmanaged.passUnretained(event)
     }
+}
+
+/// Trackpad gesture events as event-tap types. The numbers are the public
+/// `NSEvent.EventType` raw values; AppKit delivers these events, but their
+/// use as `CGEventType`s in a tap mask is undocumented (there is no public
+/// alternative for seeing or withholding another app's gestures).
+enum GestureEventType {
+    /// A touch frame (`NSEvent.EventType.gesture`).
+    static let touch = UInt32(NSEvent.EventType.gesture.rawValue)
+    static let begin = UInt32(NSEvent.EventType.beginGesture.rawValue)
+    static let end = UInt32(NSEvent.EventType.endGesture.rawValue)
+    static let appGestures = [NSEvent.EventType.rotate, .magnify, .swipe, .smartMagnify].map { UInt32($0.rawValue) }
 }

@@ -185,19 +185,24 @@ struct SlotSwipeTests {
         #expect(swipe.end(at: 0.002) == .snapBack)
     }
 
-    @Test func visualSpeedIsLimitedAndNeverOvershoots() {
-        #expect(SlotSwipe.advanceVisualProgress(0, toward: 1, elapsed: 0.01) == 0.08)
-        #expect(SlotSwipe.advanceVisualProgress(0, toward: -1, elapsed: 0.01) == -0.08)
-        #expect(SlotSwipe.advanceVisualProgress(0.49, toward: 0.5, elapsed: 0.01) == 0.5)
-        #expect(SlotSwipe.advanceVisualProgress(0, toward: 1, elapsed: 1) < 0.27)
-        #expect(SlotSwipe.advanceVisualProgress(0.5, toward: 0, elapsed: 0) == 0.5)
+    @Test func springPreservesReleaseVelocity() {
+        for speed in [-2.0, 0, 0.5, 6] {
+            let spring = SlotSwipe.Spring(distance: 0.5, speed: speed, response: 0.22)
+            let dt = 1e-7
+            let initialSpeed = spring.fraction(at: dt) * 0.5 / dt
+            #expect(abs(initialSpeed - speed) < 0.001)
+            #expect(spring.velocity(at: 0) == speed)
+        }
     }
 
-    @Test func settlingHasTimeToAnimateAndIsBounded() {
-        #expect(SlotSwipe.settleDuration(distance: 0, base: 0.22) == 0)
-        #expect(SlotSwipe.settleDuration(distance: 0.01, base: 0.22) == 0.16)
-        #expect(SlotSwipe.settleDuration(distance: 1.3, base: 0.22) == 0.325)
-        #expect(SlotSwipe.settleDuration(distance: 2, base: 2) == 0.5)
+    @Test func springSettlesAndStops() {
+        #expect(SlotSwipe.Spring(distance: 0, speed: 0, response: 0.22).duration == 0)
+        for distance in [0.01, 0.5, 1.3, 2] {
+            let spring = SlotSwipe.Spring(distance: distance, speed: 0, response: 0.22)
+            #expect(spring.duration > 0 && spring.duration <= 1)
+            #expect(spring.fraction(at: spring.duration) == 1)
+            #expect(spring.velocity(at: spring.duration) == 0)
+        }
     }
 
     @Test func ambiguousDiagonalCanResolveHorizontally() {
@@ -273,29 +278,23 @@ struct SlotSwipeTests {
         } else { Issue.record("Expected closing state") }
     }
 
-    @Test func followVisualProgressEasesWithoutOvershoot() {
-        // One 120 Hz frame covers part of the gap, never all of it or beyond.
-        let first = SlotSwipe.followVisualProgress(0, toward: 0.04, elapsed: 1.0 / 120)
-        #expect(first > 0.01 && first < 0.04)
-        var p = 0.0
-        for _ in 0..<60 { p = SlotSwipe.followVisualProgress(p, toward: 0.5, elapsed: 1.0 / 120) }
-        #expect(p == 0.5)
-        // The speed limit still holds for a large jump.
-        #expect(SlotSwipe.followVisualProgress(0, toward: 5, elapsed: 1.0 / 60) <= SlotSwipe.maximumVisualSpeed / 60 + 1e-9)
+    @Test func springMovingAwayTurnsBack() {
+        let spring = SlotSwipe.Spring(distance: 0.5, speed: -2, response: 0.22)
+        #expect(spring.fraction(at: 0.001) < 0)
+        #expect(spring.velocity(at: 0.1) > 0)
+        #expect(spring.fraction(at: spring.duration) == 1)
     }
 
-    @Test func settleMatchesReleaseSpeed() {
-        // Slow release: gentle start, slope well under ease-out's 1.7.
-        let slowDuration = SlotSwipe.settleDuration(distance: 0.5, speed: 0.5, base: 0.22)
-        let slow = SlotSwipe.settleCurve(speed: 0.5, distance: 0.5, duration: slowDuration)
-        #expect(slow.1 / slow.0 < 1.0)
-        // Fast release: shorter, and the curve starts steep to keep the speed.
-        let fastDuration = SlotSwipe.settleDuration(distance: 0.5, speed: 6, base: 0.22)
-        #expect(fastDuration < slowDuration)
-        let fast = SlotSwipe.settleCurve(speed: 6, distance: 0.5, duration: fastDuration)
-        #expect(abs(fast.1 / fast.0 - 6 * fastDuration / 0.5) < 1e-9)
-        // Moving the other way (or not at all) starts from rest.
-        #expect(SlotSwipe.settleCurve(speed: -2, distance: 0.5, duration: 0.2).1 == 0)
+    @Test func springDoesNotOvershootAtOrdinaryReleaseSpeeds() {
+        for speed in [0.0, 0.5, 6, 20, 200] {
+            let spring = SlotSwipe.Spring(distance: 0.5, speed: speed, response: 0.22)
+            var previous = 0.0
+            for step in 0...240 {
+                let fraction = spring.fraction(at: Double(step) / 240)
+                #expect(fraction >= previous && fraction <= 1)
+                previous = fraction
+            }
+        }
     }
 
     @Test func fastUpwardFlickCloses() {
@@ -471,21 +470,13 @@ struct SlotSwipeCatchTests {
         }
     }
 
-    @Test func settleFractionFollowsTheCurve() {
-        let easeOut = (0.25, 0.6, 0.4, 1.0)
-        #expect(SlotSwipe.settleFraction(elapsed: 0, duration: 0.2, curve: easeOut) == 0)
-        #expect(SlotSwipe.settleFraction(elapsed: 0.3, duration: 0.2, curve: easeOut) == 1)
-        let half = SlotSwipe.settleFraction(elapsed: 0.1, duration: 0.2, curve: easeOut)
-        #expect(half > 0.5 && half < 1)
-        // Linear control points give linear timing.
-        let linear = SlotSwipe.settleFraction(elapsed: 0.05, duration: 0.2, curve: (1.0 / 3, 1.0 / 3, 2.0 / 3, 2.0 / 3))
-        #expect(abs(linear - 0.25) < 1e-6)
-        var previous = 0.0
-        for step in 1...20 {
-            let value = SlotSwipe.settleFraction(elapsed: Double(step) / 100, duration: 0.2, curve: easeOut)
-            #expect(value >= previous)
-            previous = value
-        }
+    @Test func directionalTravelKeepsGainAcrossZero() {
+        var swipe = SlotSwipe(config: .init(lockThreshold: 0.01, travelLeft: 0.2, travelRight: 0.4))
+        swipe.begin(at: 0)
+        _ = swipe.move(dx: -0.04, dy: 0, at: 0.1)
+        _ = swipe.move(dx: 0.08, dy: 0, at: 0.2)
+        guard case .active(let raw, _, _, _) = swipe.state else { Issue.record("active"); return }
+        #expect(abs(raw + 0.2) < 1e-9)
     }
 
     @Test func nearestSlotPrefersAvailableColumns() {

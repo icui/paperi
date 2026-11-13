@@ -13,43 +13,55 @@
 #include <pthread.h>
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static void *sky;
-static void load(void) { sky = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY | RTLD_LOCAL); }
+// Resolved once: these run per window on every refresh and in swipe paths.
+static int (*sls_connection)(void);
+static CFArrayRef (*sls_display_spaces)(int);
+static CFArrayRef (*sls_window_spaces)(int, int, CFArrayRef);
+static int (*sls_space_type)(int, uint64_t);
+static uint64_t (*sls_active_space)(int);
+static AXError (*ax_get_window)(AXUIElementRef, uint32_t *);
+static void load(void) {
+    sky = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY | RTLD_LOCAL);
+    if (sky) {
+        sls_connection = dlsym(sky, "SLSMainConnectionID");
+        sls_display_spaces = dlsym(sky, "SLSCopyManagedDisplaySpaces");
+        sls_window_spaces = dlsym(sky, "SLSCopySpacesForWindows");
+        sls_space_type = dlsym(sky, "SLSSpaceGetType");
+        sls_active_space = dlsym(sky, "SLSGetActiveSpace");
+    }
+    ax_get_window = dlsym(RTLD_DEFAULT, "_AXUIElementGetWindow");
+}
 static int connection(void) {
     pthread_once(&once, load);
-    int (*fn)(void) = sky ? dlsym(sky, "SLSMainConnectionID") : NULL;
-    return fn ? fn() : 0;
+    return sls_connection ? sls_connection() : 0;
 }
 uint32_t paperi_window_id(AXUIElementRef element) {
-    AXError (*fn)(AXUIElementRef, uint32_t *) = dlsym(RTLD_DEFAULT, "_AXUIElementGetWindow");
+    pthread_once(&once, load);
     uint32_t wid = 0;
-    return fn && fn(element, &wid) == kAXErrorSuccess ? wid : 0;
+    return ax_get_window && ax_get_window(element, &wid) == kAXErrorSuccess ? wid : 0;
 }
 CFArrayRef paperi_copy_display_spaces(void) {
     int cid = connection();
-    CFArrayRef (*fn)(int) = sky ? dlsym(sky, "SLSCopyManagedDisplaySpaces") : NULL;
-    return cid && fn ? fn(cid) : NULL;
+    return cid && sls_display_spaces ? sls_display_spaces(cid) : NULL;
 }
 CFArrayRef paperi_copy_window_spaces(uint32_t window) {
     int cid = connection();
-    CFArrayRef (*fn)(int, int, CFArrayRef) = sky ? dlsym(sky, "SLSCopySpacesForWindows") : NULL;
-    if (!cid || !fn || !window) return NULL;
+    if (!cid || !sls_window_spaces || !window) return NULL;
     int64_t value = window;
     CFNumberRef number = CFNumberCreate(NULL, kCFNumberSInt64Type, &value);
     const void *values[] = { number };
     CFArrayRef windows = CFArrayCreate(NULL, values, 1, &kCFTypeArrayCallBacks);
-    CFArrayRef result = fn(cid, 7, windows);
+    CFArrayRef result = sls_window_spaces(cid, 7, windows);
     CFRelease(windows); CFRelease(number);
     return result;
 }
 int paperi_space_type(uint64_t space) {
     int cid = connection();
-    int (*fn)(int, uint64_t) = sky ? dlsym(sky, "SLSSpaceGetType") : NULL;
-    return cid && fn && space ? fn(cid, space) : -1;
+    return cid && sls_space_type && space ? sls_space_type(cid, space) : -1;
 }
 uint64_t paperi_active_space(void) {
     int cid = connection();
-    uint64_t (*fn)(int) = sky ? dlsym(sky, "SLSGetActiveSpace") : NULL;
-    return cid && fn ? fn(cid) : 0;
+    return cid && sls_active_space ? sls_active_space(cid) : 0;
 }
 int paperi_skylight_connection(void) { return connection(); }
 CFArrayRef paperi_copy_missing_private_functions(void) {
@@ -66,7 +78,7 @@ CFArrayRef paperi_copy_missing_private_functions(void) {
             CFRelease(name);
         }
     }
-    if (!dlsym(RTLD_DEFAULT, "_AXUIElementGetWindow")) CFArrayAppendValue(missing, CFSTR("_AXUIElementGetWindow"));
+    if (!ax_get_window) CFArrayAppendValue(missing, CFSTR("_AXUIElementGetWindow"));
     return missing;
 }
 

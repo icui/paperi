@@ -42,54 +42,54 @@ import PaperiCore
     public private(set) var options: Options
     public private(set) var paused = false
     private(set) var coordinator: DisplaySpaceCoordinator
-    private var recorder: EventRecorder!
-    private var references: [UInt32: AXUIElement] = [:]
-    private var pidForWindow: [UInt32: pid_t] = [:]
-    private var journal: [UInt32: (pid: pid_t, frame: Rect)] = [:]
-    private var userFloating: Set<UInt32> = []
-    private var destroyedNotified: Set<UInt32> = []
+    var recorder: EventRecorder!
+    var references: [UInt32: AXUIElement] = [:]
+    var pidForWindow: [UInt32: pid_t] = [:]
+    var journal: [UInt32: (pid: pid_t, frame: Rect)] = [:]
+    var userFloating: Set<UInt32> = []
+    var destroyedNotified: Set<UInt32> = []
     /// Neighbour chosen when the focused window closed (`focusAfterClose`). It
     /// overrides the OS focus briefly, while its raise and app activation land.
-    private var closeFocus: (window: UInt32, until: Double)?
-    private var expected: [UInt32: (frame: Rect, at: Double)] = [:]
+    var closeFocus: (window: UInt32, until: Double)?
+    var expected: [UInt32: (frame: Rect, at: Double)] = [:]
     /// Managed window the user is dragging (moved while the left button is
     /// down). It is not written until mouse up, so it follows the pointer.
     /// While the pointer is over a neighbouring window (adjacent column or
     /// same stack) it is highlighted with a preview of the drop armed by the
     /// pointer's zone (`hovered`); releasing there swaps, stacks or splits out.
-    private struct Drag {
+    struct Drag {
         let windowID: UInt32; let space: UInt64; let targets: [SwapTarget]
         var hovered: (target: SwapTarget, action: DropAction)?
     }
-    private var drag: Drag?
-    private var dragging: UInt32? { drag?.windowID }
-    private var dragTimer: Timer?
-    private let highlight = DropHighlight()
-    private let windowIndicators = WindowIndicators()
-    private var mouseUpWatch = false
+    var drag: Drag?
+    var dragging: UInt32? { drag?.windowID }
+    var dragTimer: Timer?
+    let highlight = DropHighlight()
+    let windowIndicators = WindowIndicators()
+    var mouseUpWatch = false
     /// Last off-slot frame acted on per window, so an app that clamps its
     /// position is rewritten once rather than on every refresh.
-    private var displaced: [UInt32: Rect] = [:]
-    private var refreshScheduled = false
+    var displaced: [UInt32: Rect] = [:]
+    var refreshScheduled = false
     /// Apps whose AX requests timed out are skipped briefly so one hung app
     /// cannot stall management of every other app.
-    private var slowUntil: [pid_t: Double] = [:]
-    private var forceApply = true
+    var slowUntil: [pid_t: Double] = [:]
+    var forceApply = true
     /// After an active-Space change, refreshes re-check real frames for a short
     /// while: macOS and apps (e.g. leaving a fullscreen Space) may move
     /// off-canvas windows on screen once their Space is shown again.
-    private var forceUntil: Double = 0
+    var forceUntil: Double = 0
     /// Last column width of every managed member, kept after the window leaves
     /// the strip (minimize, hide, fullscreen, float) so it returns at that
     /// width, as in PaperWM.
-    private var preferredWidth: [UInt32: Double] = [:]
-    private var timer: Timer?
-    private var workspaceTokens: [NSObjectProtocol] = []
+    var preferredWidth: [UInt32: Double] = [:]
+    var timer: Timer?
+    var workspaceTokens: [NSObjectProtocol] = []
     private(set) var running = false
-    private var busy = false
+    var busy = false
     public private(set) var lastRefreshMS: Double = 0
 
-    private static let tiled = WindowPolicy.classify(WindowFacts(bundleID: "live", role: "AXWindow",
+    static let tiled = WindowPolicy.classify(WindowFacts(bundleID: "live", role: "AXWindow",
         subrole: "AXStandardWindow", isRoot: true, movable: true, resizable: true, level: 0))
 
     public init(options: Options) {
@@ -223,7 +223,7 @@ import PaperiCore
         return result
     }
 
-    private func restoreJournal(_ restore: Bool) -> [String: Any] {
+    func restoreJournal(_ restore: Bool) -> [String: Any] {
         var restored = 0, failed = 0
         if restore {
             for (wid, entry) in journal {
@@ -253,7 +253,7 @@ import PaperiCore
         return ["restored": restored, "restoreFailed": failed, "journal": "removed"]
     }
 
-    private func restoreStaleJournal() throws {
+    func restoreStaleJournal() throws {
         guard FileManager.default.fileExists(atPath: options.journalURL.path) else { return }
         let result = Self.restore(journalURL: options.journalURL)
         log("restored stale journal: \(result)")
@@ -261,7 +261,7 @@ import PaperiCore
 
     // MARK: events
 
-    private func receive(_ event: [String: Any]) {
+    func receive(_ event: [String: Any]) {
         guard running, let name = event["event"] as? String else { return }
         if name == kAXUIElementDestroyedNotification, let wid = event["windowID"] as? UInt32, wid > 0 {
             // The window a swipe-up is closing: its release finishes the overlay.
@@ -291,7 +291,7 @@ import PaperiCore
         scheduleRefresh()
     }
 
-    private func activeSpaceChanged() {
+    func activeSpaceChanged() {
         windowIndicators.hide()
         cancelMotion(); motionFrames.removeAll()
         forceUntil = ProcessInfo.processInfo.systemUptime + 1.6
@@ -307,7 +307,7 @@ import PaperiCore
     /// Follows the pointer during a drag: highlights the neighbour under it,
     /// previewing the drop its zone arms, and on mouse up finishes the drag
     /// and places the window.
-    private func trackDrag() {
+    func trackDrag() {
         guard running, var current = drag else { endDrag(); return }
         if NSEvent.pressedMouseButtons & 1 == 0 { finishDrag(); refresh(); return }
         let pointer = NSEvent.mouseLocation
@@ -325,7 +325,7 @@ import PaperiCore
 
     /// Applies the drop armed over the hovered window, if any, and forces a
     /// placement pass.
-    private func finishDrag() {
+    func finishDrag() {
         guard let current = drag else { endDrag(); return }
         endDrag()
         forceApply = true
@@ -335,7 +335,7 @@ import PaperiCore
         }
     }
 
-    private func endDrag() {
+    func endDrag() {
         drag = nil
         dragTimer?.invalidate(); dragTimer = nil
         highlight.hide()
@@ -343,7 +343,7 @@ import PaperiCore
 
     /// No AX event may follow a release, so poll for mouse up and refresh once
     /// to apply what was deferred (step 8).
-    private func refreshOnMouseUp() {
+    func refreshOnMouseUp() {
         guard !mouseUpWatch else { return }
         mouseUpWatch = true
         func poll() {
@@ -372,7 +372,7 @@ import PaperiCore
 
     // MARK: discovery
 
-    private func topologies() -> [DisplaySpaceTopology] {
+    func topologies() -> [DisplaySpaceTopology] {
         let inset = options.outerGap
         return DisplaySpaceCoordinator.liveTopologies().map { display in
             let c = display.canvas
@@ -387,14 +387,14 @@ import PaperiCore
             config.manages(bundleID: app.bundleIdentifier, regular: app.activationPolicy == .regular)
     }
 
-    private func allowlistedApps() -> [NSRunningApplication] {
+    func allowlistedApps() -> [NSRunningApplication] {
         NSWorkspace.shared.runningApplications.filter { Self.considered($0, config: options.config) }
     }
 
     /// Apps worth an AX survey this pass: those with a normal-level window on
     /// screen (cheap window-server query) or with containers already managed.
     /// Everything else (dozens of background apps) costs nothing.
-    private func appsToSurvey(_ apps: [NSRunningApplication]) -> [NSRunningApplication] {
+    func appsToSurvey(_ apps: [NSRunningApplication]) -> [NSRunningApplication] {
         let rows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
         var onScreen: Set<pid_t> = []
         for row in rows where (row[kCGWindowLayer as String] as? Int ?? -1) == 0 {
@@ -409,12 +409,12 @@ import PaperiCore
         }
     }
 
-    private static func windowSpace(_ wid: UInt32) -> UInt64? {
+    static func windowSpace(_ wid: UInt32) -> UInt64? {
         guard let spaces = paperi_copy_window_spaces(wid) as? [NSNumber], spaces.count == 1 else { return nil }
         return spaces[0].uint64Value
     }
 
-    private func survey(_ app: NSRunningApplication, levels: [UInt32: Int]) -> [Survey] {
+    func survey(_ app: NSRunningApplication, levels: [UInt32: Int]) -> [Survey] {
         let pid = app.processIdentifier
         let application = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(application, 0.2)
@@ -457,7 +457,7 @@ import PaperiCore
     }
 
     /// Absent attribute → false; read failure (timeout) → unknown.
-    private static func hasFullScreenButton(_ window: AXUIElement) -> Bool? {
+    static func hasFullScreenButton(_ window: AXUIElement) -> Bool? {
         var value: CFTypeRef?
         switch AXUIElementCopyAttributeValue(window, "AXFullScreenButton" as CFString, &value) {
         case .success: return value != nil
@@ -762,7 +762,7 @@ import PaperiCore
     /// surviving column on the configured side, else the other side. A
     /// surviving tab or stacked window keeps the column, so macOS's choice
     /// stands. Chosen before removal, while the closed column's index exists.
-    private func neighbourAfterClose(_ gone: Set<UInt32>) -> UInt32? {
+    func neighbourAfterClose(_ gone: Set<UInt32>) -> UInt32? {
         let preference = options.config.focusAfterClose
         guard preference != .system else { return nil }
         for session in coordinator.sessions.values {
@@ -780,13 +780,13 @@ import PaperiCore
         return nil
     }
 
-    private func isActiveRepresentative(_ wid: UInt32) -> Bool {
+    func isActiveRepresentative(_ wid: UInt32) -> Bool {
         guard let session = coordinator.session(containing: wid), let slot = session.slots[wid],
               let loc = session.state.layout.index(of: slot) else { return false }
         return session.state.layout.columns[loc.column].slots[loc.row].activeMember == wid
     }
 
-    private func admitSingleton(_ wid: UInt32, pid: pid_t, space: UInt64, byID: [UInt32: Survey]) {
+    func admitSingleton(_ wid: UInt32, pid: pid_t, space: UInt64, byID: [UInt32: Survey]) {
         guard let row = byID[wid], row.classification.eligibility == .tiled,
               let canvas = coordinator.sessions[space]?.canvas else { return }
         if (try? coordinator.insertSingleton(windowID: wid, ownerPID: pid, spaceID: space, classification: row.classification,
@@ -798,17 +798,17 @@ import PaperiCore
 
     /// Remembered width of any member, else the active window's own width,
     /// capped so neighbouring edges and margins stay visible.
-    private func admissionWidth(_ members: [UInt32], active: UInt32, byID: [UInt32: Survey], canvas: Rect) -> Double? {
+    func admissionWidth(_ members: [UInt32], active: UInt32, byID: [UInt32: Survey], canvas: Rect) -> Double? {
         let own = ([active] + members).lazy.compactMap({ self.preferredWidth[$0] }).first
             ?? byID[active]?.frame.flatMap { $0.isValid ? $0.width : nil }
         return own.map { min($0, maxColumnWidth(canvas)) }
     }
 
-    private func maxColumnWidth(_ canvas: Rect) -> Double {
+    func maxColumnWidth(_ canvas: Rect) -> Double {
         Layout.maxColumnWidth(in: canvas, edgeMargin: options.gap)
     }
 
-    private func rememberWidths() {
+    func rememberWidths() {
         for session in coordinator.sessions.values {
             for column in session.state.layout.columns {
                 for slot in column.slots { for member in slot.members { preferredWidth[member] = column.width } }
@@ -816,7 +816,7 @@ import PaperiCore
         }
     }
 
-    private func removeMembers(_ gone: Set<UInt32>) {
+    func removeMembers(_ gone: Set<UInt32>) {
         let spaces = Set(gone.compactMap { coordinator.spaceForWindow[$0] })
         for space in spaces {
             guard let session = coordinator.sessions[space] else { continue }
@@ -833,7 +833,7 @@ import PaperiCore
         log("removed destroyed members \(gone.sorted())")
     }
 
-    private func reveal(_ session: ScopedLayoutSession) {
+    func reveal(_ session: ScopedLayoutSession) {
         var layout = session.state.layout
         if (try? layout.reveal(in: session.canvas, gap: options.gap)) == true {
             session.setOffset(layout.offset, ticket: session.ticket)
@@ -842,1580 +842,56 @@ import PaperiCore
 
     // MARK: effects
 
-    private var phaseMS: [String: Double] = [:]
-    private var axWriteCalls = 0
-    private var axWriteMS = 0.0
-    private var latestSurvey: [UInt32: Survey] = [:]
-    private var motionBegan: Double?
-    private var motionFailed: Set<UInt32> = []
-    private var motionBlocked: Set<UInt32> = []
-    private var motionTicks = 0
-    private var motionSpace: UInt64?
-    private var motionTimer: Timer?
-    private var motionBounce: Direction?
-    private var motionGeneration: UInt64 = 0
-    private var motionFrames: [UInt32: Rect] = [:]
-    private var commandStarted = 0.0
-    private var firstWriteMS: Double?
-    private var finalWriteMS: Double?
-    private var confirmedMS: Double?
-    private var tickMS = 0.0
-    private var missedTicks = 0
+    var phaseMS: [String: Double] = [:]
+    var axWriteCalls = 0
+    var axWriteMS = 0.0
+    var latestSurvey: [UInt32: Survey] = [:]
+    var motionBegan: Double?
+    var motionFailed: Set<UInt32> = []
+    var motionBlocked: Set<UInt32> = []
+    var motionTicks = 0
+    var motionSpace: UInt64?
+    var motionTimer: Timer?
+    var motionBounce: Direction?
+    var motionGeneration: UInt64 = 0
+    var motionFrames: [UInt32: Rect] = [:]
+    var commandStarted = 0.0
+    var firstWriteMS: Double?
+    var finalWriteMS: Double?
+    var confirmedMS: Double?
+    var tickMS = 0.0
+    var missedTicks = 0
 
-    private func cancelMotion() {
-        cancelSwipe()
-        motionGeneration &+= 1
-        motionTimer?.invalidate(); motionTimer = nil
-        motionBounce = nil
-    }
+    // MARK: swipe state (logic in LiveManager+Swipe.swift)
 
-    /// Reveal an existing representative before the expensive all-app survey.
-    /// WindowServer supplies current frames; unknown windows still take the full
-    /// reconciliation path. A normal refresh follows animation completion.
-    private func animateCachedFocus() -> Bool {
-        // A pending close must go through the full pass so the gap is removed.
-        guard !forceApply, ProcessInfo.processInfo.systemUptime >= forceUntil, destroyedNotified.isEmpty, closeFocus == nil,
-              NSEvent.pressedMouseButtons == 0, drag == nil,
-              (options.config.focusScrollDuration ?? 0.22) > 0,
-              DisplayArrangement.currentProblem() == nil,
-              let front = NSWorkspace.shared.frontmostApplication else { return false }
-        let application = AXUIElementCreateApplication(front.processIdentifier)
-        AXUIElementSetMessagingTimeout(application, 0.02)
-        guard let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
-              CFGetTypeID(value) == AXUIElementGetTypeID() else { return false }
-        let wid = paperi_window_id((value as! AXUIElement))
-        guard pidForWindow[wid] == front.processIdentifier, isActiveRepresentative(wid),
-              let space = coordinator.spaceForWindow[wid],
-              Self.windowSpace(wid) == space,
-              coordinator.display(forSpace: space)?.activeSpaceID == space,
-              let session = coordinator.sessions[space], !session.state.interactionSuppressed,
-              let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap),
-              let surveys = cachedStripSurveys(space: space, placements: placements) else { return false }
-        let offset = session.state.layout.offset
-        try? session.focus(windowID: wid, ownerPID: front.processIdentifier,
-                           classification: Self.tiled, ticket: session.ticket)
-        reveal(session)
-        guard session.state.layout.offset != offset else { return false }
-        commandStarted = ProcessInfo.processInfo.systemUptime
-        firstWriteMS = nil; finalWriteMS = nil; confirmedMS = nil
-        animateFocus(space: space, byID: surveys)
-        return true
-    }
-
-    /// Cached surveys for every window placed on `space`, carrying current
-    /// WindowServer frames; nil when any of them is unknown, not tiled, or
-    /// not on that Space (the caller then takes the full refresh path).
-    private func cachedStripSurveys(space: UInt64, placements: [Placement]) -> [UInt32: Survey]? {
-        guard let rows = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else { return nil }
-        var frames: [UInt32: Rect] = [:]
-        for row in rows {
-            guard let id = row[kCGWindowNumber as String] as? UInt32,
-                  let bounds = row[kCGWindowBounds as String] as? [String: Any],
-                  let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { continue }
-            frames[id] = Rect(x: frame.origin.x, y: frame.origin.y, width: frame.width, height: frame.height)
-        }
-        var surveys: [UInt32: Survey] = [:]
-        for placement in placements {
-            let id = placement.windowID
-            guard let cached = latestSurvey[id], cached.spaceID == space,
-                  cached.classification.eligibility == .tiled,
-                  let frame = frames[id], Self.windowSpace(id) == space else { return nil }
-            surveys[id] = Survey(windowID: id, pid: cached.pid, element: cached.element,
-                                 classification: cached.classification, facts: cached.facts,
-                                 floatRequested: cached.floatRequested, spaceID: space, frame: frame)
-        }
-        return surveys
-    }
-
-    /// One target calculation, position-only ticks, no discovery in the scheduler.
-    private func animateFocus(space: UInt64, byID: [UInt32: Survey], bounce: Direction? = nil) {
-        // Key repeat must not stack excursions or keep restarting the return.
-        if let bounce, motionTimer != nil, motionBounce == bounce, motionSpace == space { return }
-        let configuredDuration = options.config.focusScrollDuration ?? 0.22
-        let duration = bounce == nil || configuredDuration == 0 ? configuredDuration : max(0.28, configuredDuration)
-        guard NSEvent.pressedMouseButtons == 0 else { cancelMotion(); refreshOnMouseUp(); return }
-        guard duration > 0, let session = coordinator.sessions[space],
-              let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else {
-            apply(space: space, byID: byID)
-            if let session = coordinator.sessions[space],
-               let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) {
-                let targets = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
-                confirmFocus(targets: targets, generation: motionGeneration, attempts: 3)
-            }
-            return
-        }
-        let targets = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
-        var starts: [UInt32: Rect] = [:]
-        for placement in placements {
-            let wid = placement.windowID
-            guard let row = byID[wid], row.spaceID == space, row.classification.eligibility == .tiled,
-                  let frame = motionFrames[wid] ?? row.frame, let target = targets[wid] else {
-                cancelMotion(); apply(space: space, byID: byID); return
-            }
-            // Position-only animation cannot apply admission or resize changes.
-            guard LiveReconciliation.animationSizeMatches(frame, target) else {
-                cancelMotion(); apply(space: space, byID: byID); return
-            }
-            if bounce != nil || !matches(frame, target) { starts[wid] = frame }
-        }
-        cancelMotion()
-        guard !starts.isEmpty else { return }
-        let generation = motionGeneration
-        motionBegan = nil; motionFailed.removeAll(); motionBlocked.removeAll(); motionTicks = 0
-        let origins = starts
-        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.motionGeneration == generation else { return }
-                guard self.running, NSEvent.pressedMouseButtons == 0, AXIsProcessTrusted(),
-                      self.coordinator.display(forSpace: space)?.activeSpaceID == space else {
-                    self.cancelMotion(); self.motionFrames.removeAll(); self.scheduleRefresh(); return
-                }
-                let tick = ProcessInfo.processInfo.systemUptime
-                if self.motionBegan == nil { self.motionBegan = tick }
-                let progress = min(1, (tick - (self.motionBegan ?? tick)) / duration)
-                let eased = progress * progress * (3 - 2 * progress)
-                self.motionTicks += 1
-                for (wid, origin) in origins where !self.motionBlocked.contains(wid) {
-                    guard NSEvent.pressedMouseButtons == 0 else {
-                        self.cancelMotion(); self.motionFrames.removeAll(); self.refreshOnMouseUp(); return
-                    }
-                    guard let target = targets[wid], let element = self.references[wid] else { continue }
-                    var frame = origin
-                    frame.x = origin.x + (target.x - origin.x) * eased
-                    frame.y = origin.y + (target.y - origin.y) * eased
-                    if let bounce {
-                        frame = LiveReconciliation.edgeBounce(frame, toward: bounce, progress: progress)
-                    }
-                    if let last = self.motionFrames[wid], last == frame { continue }
-                    var point = CGPoint(x: frame.x, y: frame.y)
-                    guard let value = AXValueCreate(.cgPoint, &point) else { continue }
-                    session.expect(windowID: wid, frame: frame, now: tick, ticket: session.ticket)
-                    self.expected[wid] = (frame, tick)
-                    let writeStart = ProcessInfo.processInfo.systemUptime
-                    AXUIElementSetMessagingTimeout(element, 0.02)
-                    let result = AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, value)
-                    AXUIElementSetMessagingTimeout(element, 0.2)
-                    self.axWriteCalls += 1
-                    self.axWriteMS += (ProcessInfo.processInfo.systemUptime - writeStart) * 1000
-                    if self.firstWriteMS == nil { self.firstWriteMS = (writeStart - self.commandStarted) * 1000 }
-                    if result != .success {
-                        self.motionFailed.insert(wid)
-                        // A busy app can time out during activation. Retry at
-                        // the next tick's current position instead of leaving
-                        // it stationary for the rest of the animation. Each
-                        // attempt remains bounded by the 20 ms timeout.
-                        if result != .cannotComplete { self.motionBlocked.insert(wid) }
-                        continue
-                    }
-                    self.motionFailed.remove(wid)
-                    self.motionFrames[wid] = frame
-                }
-                self.tickMS = (ProcessInfo.processInfo.systemUptime - tick) * 1000
-                if self.tickMS > 1000 / 60 { self.missedTicks += 1 }
-                if progress >= 1 {
-                    self.finalWriteMS = (ProcessInfo.processInfo.systemUptime - self.commandStarted) * 1000
-                    self.cancelMotion(); self.motionFrames.removeAll()
-                    self.applied.removeValue(forKey: space)
-                    self.confirmFocus(targets: targets, generation: self.motionGeneration, attempts: 3)
-                    self.scheduleRefresh()
-                }
-            }
-        }
-        motionSpace = space
-        motionBounce = bounce
-        motionTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
-    }
-
-    /// Bounded observation, reported separately from the time of the final write.
-    private func confirmFocus(targets: [UInt32: Rect], generation: UInt64, attempts: Int) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.running, self.motionGeneration == generation,
-                      NSEvent.pressedMouseButtons == 0 else { return }
-                let confirmed = targets.allSatisfy { wid, target in
-                    guard let element = self.references[wid], let frame = Diagnostics.frame(element) else { return false }
-                    return self.matches(frame, target)
-                }
-                if confirmed {
-                    self.confirmedMS = (ProcessInfo.processInfo.systemUptime - self.commandStarted) * 1000
-                } else if attempts > 1 {
-                    self.confirmFocus(targets: targets, generation: generation, attempts: attempts - 1)
-                }
-            }
-        }
-    }
-
-    // MARK: swipe (snapshot renderer)
-
-    /// One swipe: the strip's images follow `progress` towards at most one
-    /// neighbour (−1 = left neighbour fully revealed, 1 = right). Nothing real
-    /// moves and nothing logical changes until a committed release.
-    private struct Swipe {
-        let space: UInt64
-        let generation: UInt64
-        let overlay: SnapshotTransition
-        let surveys: [UInt32: Survey]
-        let ends: [Direction: [UInt32: Rect]]
-        let neighbours: [Direction: UInt32]
-        let canvas: Rect
-        /// The focused window a swipe up would close, if it is on screen.
-        let closeWindow: UInt32?
-        /// The fingers locked vertically: images track a close (up) or a
-        /// pull (down, `pulling`: minimize or new window), not the strip.
-        var closing = false
-        var pulling = false
-        var pullAction: LiveConfig.SwipeDownAction = .minimize
-        /// A downward pull that has turned left or right.
-        var turned = false
-        var turnDirection: Direction = .right
-        /// The close-tab indicator replaces moving the window.
-        var showsTabClose: Bool { closing && (pulling ? pullAction == .closeTab : tabCloseMode != nil) }
-        /// Without a known native tab group, a downward close-tab action
-        /// sends the app's own close-tab shortcut, ⌘W.
-        var tabCloseMode: TabClose? { pulling ? tabClose ?? .app : tabClose }
-        /// The new-window indicator replaces moving the window.
-        var showsNewWindow: Bool { closing && pulling && (pullAction == .newWindow || pullAction == .openApp) }
-        var showsIndicator: Bool { showsTabClose || showsNewWindow || (closing && pulling && pullAction == .minimize) }
-        var indicatorStyle: GestureIndicatorStyle {
-            var style: GestureIndicatorStyle = pullAction == .minimize && pulling ? .minimize : showsNewWindow ? .newWindow : .closeTab
-            if pulling { style.direction = turned ? CGVector(dx: turnDirection == .left ? -1 : 1, dy: 0) : CGVector(dx: 0, dy: -1) }
-            return style
-        }
-        /// When the indicator may first appear (media time). A fast flick
-        /// releases before then and acts without flashing the indicator.
-        var indicatorDue = 0.0
-        var indicatorShown = false
-        /// Set when a swipe up closes a tab rather than the window: the window
-        /// stays put and a close-tab indicator tracks the fingers instead.
-        let tabClose: TabClose?
-        var starts: [UInt32: Rect] = [:]
-        var progress = 0.0
-        var targetProgress = 0.0
-        var lastVisualTime = 0.0
-        /// On-screen speed of the images, progress per second (smoothed).
-        var visualVelocity = 0.0
-        /// Tracking frame pacing, as the display clock delivered it.
-        var lastFrameTime = 0.0
-        var frames = 0
-        var droppedFrames = 0
-        var maxFrameMS = 0.0
-        var ready = false
-        var tracking = true
-        var failed = false
-        var released: Bool?
-        var releaseDirection: Direction?
-        /// The layout progress 0 stands for, and those of the neighbours at
-        /// ∓1 (keyed like `ends`): what a release settles on.
-        var base = Layout()
-        var baseWindow: UInt32?
-        var layouts: [Direction: Layout] = [:]
-        /// A swipe that caught a landing in flight: `starts` are the frames
-        /// the images were caught at, `origin` (progress) where that was,
-        /// and `center` the frames at progress 0. Its release always writes
-        /// the layout it settles on, even its own column.
-        var caught = false
-        var origin = 0.0
-        var center: [UInt32: Rect]?
-        /// A horizontal release sliding to its column; a new swipe may catch it.
-        var landing: Landing?
-    }
-    /// A horizontal release on screen: progress `from` → `to` along `curve`.
-    struct Landing {
-        let began: Double
-        let duration: Double
-        let curve: (Double, Double, Double, Double)
-        let from: Double
-        let to: Double
-        /// Where the images end up.
-        let frames: [UInt32: Rect]
-        func progress(at time: Double) -> Double {
-            from + (to - from) * SlotSwipe.settleFraction(elapsed: time - began, duration: duration, curve: curve)
-        }
-    }
-    enum TabClose: String {
-        /// The window is the front tab of a native tab group (AX press).
-        case native
-        /// The app is listed in `gesture.tabCloseApps`; its tabs close with ⌘W.
-        case app
-    }
-    private var swipe: Swipe?
-    private var swipeTask: Task<Void, Never>?
-    private var neighbourTask: Task<Void, Never>?
-    private var swipeGuard: Timer?
-    private var swipeSimulation: Timer?
-    private var swipeMetrics: [String: Any] = [:]
-    private var swipeBegan = 0.0
-    private var touchSource: TouchSource?
-    private var slotSwipe: SlotSwipe?
-    private var lastGestureConflicts: [String]?
-    /// Travel past the strip's ends, in points, at full progress.
-    private static let swipeEdgeResistance = 40.0
-    /// Delay before the close-tab / new-window indicator appears after the lock.
-    private static let indicatorDelay = 0.12
-
-    private var motionActive: Bool { motionTimer != nil || swipe != nil }
-    /// A focus scroll or a released swipe's landing/snap-back is on screen.
-    /// Gesture input is ignored until it finishes; live finger tracking is not
-    /// an animation.
-    private var gestureBlockedByAnimation: Bool { motionTimer != nil || swipe?.released != nil }
-    /// A horizontal landing is on screen that a new swipe may take over.
-    private var landingCatchable: Bool {
-        guard motionTimer == nil, let state = swipe, state.released != nil, !state.closing else { return false }
-        return state.landing != nil && state.ready && !state.failed
-    }
+    var swipe: Swipe?
+    var swipeTask: Task<Void, Never>?
+    var neighbourTask: Task<Void, Never>?
+    var swipeGuard: Timer?
+    var swipeSimulation: Timer?
+    var swipeMetrics: [String: Any] = [:]
+    var swipeBegan = 0.0
+    var touchSource: TouchSource?
+    var slotSwipe: SlotSwipe?
+    var lastGestureConflicts: [String]?
     /// The current touch sequence began during a catchable landing and has
     /// not locked an axis yet; the landing goes on until it locks horizontally.
-    private var catchPending = false
+    var catchPending = false
+    /// The current touch sequence began (or locked vertically) while an
+    /// animation was on screen. Its reducer keeps following the fingers; the
+    /// gesture takes effect when the animation has finished.
+    var gestureDeferred = false
+    /// That sequence was released meanwhile with this decision.
+    var deferredEnd: SlotSwipe.Decision?
+    var resumingGesture = false
+    var standaloneOverlay: SnapshotTransition?
+    var standaloneAction: LiveConfig.SwipeDownAction = .none
+    var standalonePull = false
+    var standaloneHintDirection = CGVector(dx: 0, dy: -1)
 
-    private func cancelSwipe() {
-        standaloneOverlay?.fadeOut(); standaloneOverlay = nil
-        standalonePull = false
-        swipeGuard?.invalidate(); swipeGuard = nil
-        swipeSimulation?.invalidate(); swipeSimulation = nil
-        swipeTask?.cancel(); swipeTask = nil
-        slotSwipe?.cancel(); slotSwipe = nil
-        guard let state = swipe else { return }
-        state.overlay.hide()
-        swipe = nil
-        swipeMetrics["state"] = "cancelled"
-    }
+    var applied: [UInt64: [Placement]] = [:]
 
-    static let fullScreenRefusal = "pointer is over a full-screen Space"
-
-    /// The display under the pointer, as SkyLight reports it.
-    private func pointerDisplay() -> DisplaySpaceTopology? {
-        let mouseLoc = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLoc) }) else { return nil }
-        let screenID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
-        let uuid = CGDisplayCreateUUIDFromDisplayID(screenID).map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String } ?? "Main"
-        return coordinator.displays.first(where: { $0.displayUUID == uuid })
-    }
-
-    /// The display under the pointer is showing a Space without a strip
-    /// (full-screen apps and other non-desktop Spaces).
-    private func pointerOverUnmanagedSpace() -> Bool {
-        guard let display = pointerDisplay(), let space = display.activeSpaceID else { return false }
-        return !display.userSpaces.contains(space)
-    }
-
-    private func pointerContext() -> (session: ScopedLayoutSession, space: UInt64, pid: pid_t, window: UInt32)? {
-        guard let display = pointerDisplay(),
-              let space = display.activeSpaceID,
-              let session = coordinator.sessions[space],
-              let focused = session.state.layout.focused,
-              let loc = session.state.layout.index(of: focused) else { return nil }
-        let wid = session.state.layout.columns[loc.column].slots[loc.row].activeMember
-        guard let pid = pidForWindow[wid] else { return nil }
-        return (session, space, pid, wid)
-    }
-
-    func updateTouchSource() {
-        touchSource?.stop()
-        touchSource = nil
-        guard running, !paused, options.config.gesture.enabled else { return }
-        let conflicts = GestureConflict.checkLive(fingers: options.config.gesture.fingers)
-        guard conflicts.isEmpty else {
-            if options.verbose { log("trackpad swipe disabled due to conflicts: \(conflicts.joined(separator: ", "))") }
-            return
-        }
-        let source = EventTapTouchSource(fingers: options.config.gesture.fingers, verbose: options.verbose)
-        let tapConflicts = GestureConflict.checkLiveTap(fingers: options.config.gesture.fingers)
-        source.recognizesTaps = options.config.gesture.tap != .none && tapConflicts.isEmpty
-        if !tapConflicts.isEmpty, options.config.gesture.tap != .none {
-            log("trackpad tap disabled due to conflicts: \(tapConflicts.joined(separator: ", "))")
-        }
-        source.onEvent = { [weak self] event in
-            MainActor.assumeIsolated {
-                self?.handleTouchEvent(event)
-            }
-        }
-        source.start()
-        touchSource = source
-    }
-
-    func checkGestureSettings() {
-        let conflicts = GestureConflict.checkLive(fingers: options.config.gesture.fingers)
-            + GestureConflict.checkLiveTap(fingers: options.config.gesture.fingers)
-        if conflicts != lastGestureConflicts {
-            lastGestureConflicts = conflicts
-            updateTouchSource()
-        }
-    }
-
-    private var standaloneOverlay: SnapshotTransition?
-    private var standaloneAction: LiveConfig.SwipeDownAction = .none
-    private var standalonePull = false
-
-    private func updateStandaloneHint(_ progress: Double, direction: Direction? = nil) {
-        guard standalonePull else { return }
-        let config = options.config.gesture
-        let action = direction.map { $0 == .left ? config.swipeDownLeft : config.swipeDownRight } ?? standaloneAction
-        if standaloneOverlay == nil {
-            let overlay = SnapshotTransition()
-            overlay.prepareStandaloneIndicator()
-            standaloneOverlay = overlay
-        }
-        if action != standaloneAction || direction != nil {
-            standaloneOverlay?.replaceIndicator(duration: 0.14)
-        }
-        standaloneAction = action
-        guard action != .none else { return }
-        var style: GestureIndicatorStyle = (action == .newWindow || action == .openApp) ? .newWindow : action == .minimize ? .minimize : .closeTab
-        style.direction = direction.map { CGVector(dx: $0 == .left ? -1 : 1, dy: 0) } ?? standaloneHintDirection
-        standaloneHintDirection = style.direction
-        standaloneOverlay?.trackIndicator(style, window: 0, progress: progress, threshold: config.commitThreshold)
-    }
-
-    private var standaloneHintDirection = CGVector(dx: 0, dy: -1)
-
-    private func handleTouchEvent(_ event: TouchEvent) {
-        guard running, !paused, DisplayArrangement.currentProblem() == nil else {
-            cancelSwipe()
-            slotSwipe?.cancel()
-            slotSwipe = nil
-            catchPending = false
-            return
-        }
-        // A sequence that began during a landing leaves it alone until it
-        // locks horizontally: resting fingers, taps and vertical swipes
-        // must not stop a strip on its way to a column.
-        let landingInFlight = swipe?.released != nil
-        if catchPending {
-            switch event {
-            case .begin, .tap: catchPending = false
-            case .cancel:
-                catchPending = false; slotSwipe = nil; return
-            case .end:
-                // Lifted before an axis locked (or after a vertical lock).
-                guard landingInFlight else { catchPending = false; break }
-                catchPending = false; slotSwipe = nil; return
-            case .move: break
-            }
-        }
-        switch event {
-        case .begin(let time):
-            // A sequence starting during a focus scroll or a close/pull is
-            // ignored whole: a focus scroll must not be cancelled by a touch.
-            // A horizontal landing can be caught once the fingers lock.
-            let catching = landingCatchable
-            guard catching || !gestureBlockedByAnimation else { return }
-            standalonePull = false
-            if !catching {
-                // Capture while determining the axis, but keep the overlay hidden
-                // until horizontal movement locks. This overlaps input with capture.
-                let started = beginSwipe(pendingLock: true)
-                // Nothing to swipe on a full-screen Space; a retry on horizontal
-                // lock would refuse again (and refresh again).
-                if started["error"] as? String == Self.fullScreenRefusal { return }
-            }
-            let cfg = SlotSwipe.Configuration(
-                travel: options.config.gesture.columnTravel,
-                commitThreshold: options.config.gesture.commitThreshold,
-                flickVelocity: options.config.gesture.flickVelocity,
-                invert: options.config.gesture.invert,
-                closeTravel: options.config.gesture.swipeUpToClose ? options.config.gesture.travel : nil,
-                pullTravel: options.config.gesture.travel,
-                turnTravel: options.config.gesture.travel
-            )
-            var swipeReducer = SlotSwipe(config: cfg)
-            swipeReducer.begin(at: time)
-            slotSwipe = swipeReducer
-            catchPending = catching
-
-        case .move(let dx, let dy, let time):
-            guard var swipeReducer = slotSwipe else { return }
-            if let action = swipeReducer.move(dx: dx, dy: dy, at: time) {
-                if catchPending {
-                    catchPending = false
-                    // Locked while the landing is still on screen: only a
-                    // horizontal swipe takes it over. (If it has finished,
-                    // this is an ordinary swipe from a strip at rest.)
-                    if swipe?.released != nil {
-                        guard action == .started, let offset = catchLanding() else { slotSwipe = nil; return }
-                        swipeReducer.anchor(offset: offset)
-                    }
-                }
-                switch action {
-                case .started:
-                    let res: [String: Any] = swipe != nil ? ["ok": true] : beginSwipe()
-                    if res["ok"] as? Bool != true {
-                        swipeReducer.cancel()
-                        slotSwipe = nil
-                        return
-                    }
-                    if case .active(_, let progress, _, _) = swipeReducer.state {
-                        updateSwipe(progress)
-                    }
-                case .updated(let progress):
-                    updateSwipe(progress)
-                case .closeStarted:
-                    let res: [String: Any] = swipe != nil ? ["ok": true] : beginSwipe()
-                    guard res["ok"] as? Bool == true, startClosing() else {
-                        cancelSwipe()
-                        slotSwipe = nil
-                        return
-                    }
-                    if case .closing(_, let progress, _, _) = swipeReducer.state {
-                        updateSwipe(progress)
-                    }
-                case .closeUpdated(let progress), .pullUpdated(let progress):
-                    updateSwipe(progress)
-                    updateStandaloneHint(progress)
-                case .pullStarted:
-                    if swipe == nil { _ = beginSwipe() }
-                    if swipe == nil {
-                        standalonePull = true
-                    } else if !startClosing(pull: true) {
-                        cancelSwipe()
-                        standalonePull = true
-                    }
-                    if standalonePull {
-                        standaloneAction = options.config.gesture.swipeDown
-                        standaloneHintDirection = CGVector(dx: 0, dy: -1)
-                    }
-                    if case .pulling(_, let progress, _, _) = swipeReducer.state {
-                        updateStandaloneHint(progress)
-                        updateSwipe(progress)
-                    }
-                case .turnStarted:
-                    guard standalonePull || startTurn(direction: swipeReducer.turnDirection) else {
-                        cancelSwipe()
-                        slotSwipe = nil
-                        return
-                    }
-                    if case .turning(_, let progress, _, _) = swipeReducer.state {
-                        updateStandaloneHint(progress, direction: swipeReducer.turnDirection)
-                        updateSwipe(progress)
-                    }
-                case .turnUpdated(let progress):
-                    updateSwipe(progress)
-                    updateStandaloneHint(progress)
-                case .cancelled:
-                    cancelSwipe()
-                    slotSwipe = nil
-                    return
-                case .finished:
-                    break
-                }
-            }
-            slotSwipe = swipeReducer
-
-        case .end(let time):
-            guard var swipeReducer = slotSwipe else { return }
-            let decision = swipeReducer.end(at: time)
-            slotSwipe = nil
-            if standalonePull {
-                standaloneOverlay?.fadeOut(); standaloneOverlay = nil
-                standalonePull = false
-                if decision == .pull || decision == .turn {
-                    let cfg = options.config.gesture
-                    let action = decision == .pull ? cfg.swipeDown : (swipeReducer.turnDirection == .left ? cfg.swipeDownLeft : cfg.swipeDownRight)
-                    performStandalonePull(action)
-                }
-                return
-            }
-            switch decision {
-            case .commit(let direction):
-                endSwipe(commit: true, direction: direction)
-            case .close, .pull, .turn:
-                endSwipe(commit: true)
-            case .snapBack:
-                endSwipe(commit: false)
-            }
-
-        case .tap:
-            guard options.config.gesture.tap == .tray else { return }
-            log(showTray() ? "tap: tray at pointer" : "tap: no tray on this display")
-
-        case .cancel:
-            // Only a sequence we are tracking may cancel; an ignored one must
-            // not tear down a running landing.
-            guard slotSwipe != nil else { return }
-            cancelSwipe()
-            slotSwipe?.cancel()
-            slotSwipe = nil
-        }
-    }
-
-    /// Shows the thumbnail tray of the display under the pointer, centred on
-    /// the pointer. Returns false when that display has no tray to show.
-    @discardableResult private func showTray() -> Bool {
-        guard let display = pointerDisplay() else { return false }
-        return windowIndicators.summon(display: display.displayUUID, at: NSEvent.mouseLocation, coordinator: coordinator)
-    }
-
-    /// App actions remain available when no tiled window can supply a strip.
-    private func performStandalonePull(_ action: LiveConfig.SwipeDownAction) {
-        if action == .openApp { _ = openConfiguredApp(); return }
-        guard let app = NSWorkspace.shared.frontmostApplication else { return }
-        let pid = app.processIdentifier
-        let application = AXUIElementCreateApplication(pid)
-        let focused = Diagnostics.attribute(application, kAXFocusedWindowAttribute)
-        let window = focused.flatMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil }
-        switch action {
-        case .none, .openApp: break
-        case .minimize:
-            if let window { _ = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue) }
-        case .newWindow:
-            if let item = Self.newWindowMenuItem(pid: pid),
-               AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { return }
-            Self.postAppCommand(Self.keyN, pid: pid)
-        case .closeTab: Self.postAppCommand(Self.keyW, pid: pid)
-        }
-        scheduleRefresh()
-    }
-
-    /// Always opens a new window of the configured app. Launching an app
-    /// creates its initial window. A running app is never reopened through
-    /// `NSWorkspace`: that sends a reopen event, which apps answer by
-    /// restoring a minimized window instead. It is activated directly and
-    /// asked for a new window (menu item, else ⌘N once it is frontmost).
-    @discardableResult private func openConfiguredApp() -> Bool {
-        guard let bundleID = options.config.gesture.swipeDownApp else { return false }
-        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
-            .first(where: { !$0.isTerminated }) {
-            let pid = app.processIdentifier
-            let pressed = Self.newWindowMenuItem(pid: pid)
-                .map { AXUIElementPerformAction($0, kAXPressAction as CFString) == .success } ?? false
-            app.activate(options: [])
-            if !pressed {
-                Task { @MainActor in
-                    // ⌘N needs keyboard focus; wait briefly for activation.
-                    for _ in 0..<20 where NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
-                        try? await Task.sleep(for: .milliseconds(25))
-                    }
-                    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
-                    Self.postAppCommand(Self.keyN, pid: pid)
-                }
-            }
-            return true
-        }
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return false }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in }
-        return true
-    }
-
-    private static func postAppCommand(_ key: CGKeyCode, pid: pid_t) {
-        let source = CGEventSource(stateID: .hidSystemState)
-        for down in [true, false] {
-            guard let event = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down) else { return }
-            event.flags = .maskCommand
-            event.postToPid(pid)
-        }
-    }
-
-    /// Captures the strip of the focused window's Space and shows it frozen
-    /// in place. Updates and a release may arrive before the capture finishes.
-    @discardableResult func beginSwipe(isSimulation: Bool = false, pendingLock: Bool = false) -> [String: Any] {
-        defer { if running { windowIndicators.update(coordinator, mode: options.config.bottom) } }
-        func fail(_ reason: String) -> [String: Any] {
-            swipeMetrics = ["state": "refused", "reason": reason]
-            return ["ok": false, "error": reason]
-        }
-        guard !gestureBlockedByAnimation else { return ["ok": false, "error": "animation in progress"] }
-        cancelMotion(); motionFrames.removeAll()
-        guard running, AXIsProcessTrusted(), NSEvent.pressedMouseButtons == 0, drag == nil else { return fail("mouse interaction") }
-        guard DisplayArrangement.currentProblem() == nil else { return fail("display arrangement") }
-        if !isSimulation {
-            guard options.config.gesture.enabled else { return fail("gesture disabled") }
-            let conflicts = GestureConflict.checkLive(fingers: options.config.gesture.fingers)
-            guard conflicts.isEmpty else { return fail("blocked by system gestures: \(conflicts.joined(separator: ", "))") }
-        }
-        // The swipe belongs to the display under the pointer. If that display
-        // shows a full-screen Space there is no strip, and falling back to the
-        // focused window could scroll another display's strip.
-        guard !pointerOverUnmanagedSpace() else { return fail(Self.fullScreenRefusal) }
-        let ctx: (session: ScopedLayoutSession, space: UInt64, pid: pid_t, window: UInt32)
-        if let pointer = pointerContext() {
-            ctx = pointer
-        } else {
-            // focusedContext refreshes first, so the Spaces may have changed
-            // (e.g. the app under the pointer has just entered full screen).
-            guard let focused = focusedContext() else { return fail("no managed window focused") }
-            guard !pointerOverUnmanagedSpace() else { return fail(Self.fullScreenRefusal) }
-            ctx = focused
-        }
-        let session = ctx.session, space = ctx.space
-        guard coordinator.display(forSpace: space)?.activeSpaceID == space, !session.state.interactionSuppressed,
-              let current = try? session.state.layout.placements(in: session.canvas, gap: options.gap),
-              let surveys = cachedStripSurveys(space: space, placements: current) else {
-            scheduleRefresh(); return fail("strip not settled")
-        }
-        guard let destinations = swipeDestinations(from: session.state.layout, session: session, surveys: surveys) else {
-            scheduleRefresh(); return fail("strip not settled")
-        }
-        let ends = destinations.ends, neighbours = destinations.neighbours
-        let generation = motionGeneration
-        let overlay = SnapshotTransition()
-        // Only the focused tiled window closes, and only if its image is captured.
-        let closeWindow = session.state.layout.focused == nil || surveys[ctx.window] == nil ? nil : ctx.window
-        let tabClose: TabClose? = closeWindow.flatMap { wid in
-            let bundleID = NSRunningApplication(processIdentifier: ctx.pid)?.bundleIdentifier
-            if let bundleID, options.config.gesture.tabCloseApps.contains(bundleID) { return .app }
-            return tabGroup(wid).count > 1 ? .native : nil
-        }
-        swipe = Swipe(space: space, generation: generation, overlay: overlay, surveys: surveys,
-                      ends: ends, neighbours: neighbours, canvas: session.canvas, closeWindow: closeWindow,
-                      tabClose: tabClose, tracking: !pendingLock)
-        swipe?.base = session.state.layout
-        swipe?.baseWindow = ctx.window
-        swipe?.layouts = destinations.layouts
-        motionSpace = space
-        swipeBegan = ProcessInfo.processInfo.systemUptime
-        swipeMetrics = ["state": "capturing", "windows": surveys.count]
-        let guardTimer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                guard self.swipe != nil else {
-                    self.swipeGuard?.invalidate(); self.swipeGuard = nil; return
-                }
-                if NSEvent.pressedMouseButtons != 0 || !AXIsProcessTrusted()
-                    || self.coordinator.display(forSpace: space)?.activeSpaceID != space
-                    || DisplayArrangement.currentProblem() != nil {
-                    self.cancelMotion(); self.scheduleRefresh()
-                }
-            }
-        }
-        swipeGuard = guardTimer
-        RunLoop.main.add(guardTimer, forMode: .common)
-        let canvas = session.canvas
-        let starts = surveys.compactMapValues(\.frame)
-        var captureIDs = LiveReconciliation.swipeCaptureIDs(starts: starts, destinations: Array(ends.values), canvas: canvas)
-        if let closeWindow { captureIDs.insert(closeWindow) }
-        let snapshotIDs = captureIDs
-        swipeTask = Task { [weak self] in
-            do {
-                try await overlay.prepare(windows: snapshotIDs, excluding: Set(surveys.keys), canvas: canvas)
-                guard let self, var state = self.swipe, state.generation == generation else { overlay.hide(); return }
-                guard self.running, AXIsProcessTrusted(), NSEvent.pressedMouseButtons == 0,
-                      self.coordinator.display(forSpace: space)?.activeSpaceID == space else {
-                    self.cancelMotion(); self.scheduleRefresh(); return
-                }
-                state.starts = starts.merging(overlay.captured) { _, captured in captured }
-                state.ready = true
-                self.swipe = state
-                self.swipeMetrics = ["state": "tracking", "windows": surveys.count, "captureMS": overlay.captureMS,
-                                     "textureBytes": overlay.textureBytes, "capturedWindows": snapshotIDs.count]
-                // A quick gesture can finish before capture. Begin that release
-                // at the real windows instead of flashing a displaced snapshot.
-                overlay.place(state.starts)
-                state.lastVisualTime = CACurrentMediaTime()
-                self.swipe = state
-                if state.tracking { overlay.show() }
-                overlay.startFrameClock { [weak self] link in self?.advanceSwipeVisuals(link) }
-                if let commit = state.released { state.released = nil; self.swipe = state; self.endSwipe(commit: commit, direction: state.releaseDirection) }
-            } catch {
-                overlay.hide()
-                guard let self, var state = self.swipe, state.generation == generation else { return }
-                state.failed = true
-                self.swipe = state
-                self.swipeMetrics = ["state": "fallback", "reason": String(describing: error)]
-                if let commit = state.released { state.released = nil; self.swipe = state; self.endSwipe(commit: commit, direction: state.releaseDirection) }
-            }
-        }
-        return ["ok": true, "neighbours": neighbours.count]
-    }
-
-    /// Where a swipe from `base` lands either way: for each direction the
-    /// nearest column that needs scrolling to reveal (if every column that way
-    /// is already fully visible, the adjacent one), as frames, its window and
-    /// its layout. Nil when a target size differs from the window's, as
-    /// images keep their size and cannot show that by sliding.
-    private func swipeDestinations(from base: Layout, session: ScopedLayoutSession, surveys: [UInt32: Survey])
-        -> (ends: [Direction: [UInt32: Rect]], neighbours: [Direction: UInt32], layouts: [Direction: Layout])? {
-        var ends: [Direction: [UInt32: Rect]] = [:], neighbours: [Direction: UInt32] = [:], layouts: [Direction: Layout] = [:]
-        for direction in [Direction.left, .right] {
-            var candidate = base
-            var firstStep: Layout?
-            var scrolled = false
-            while let id = candidate.neighbor(direction) {
-                candidate.focused = id
-                if firstStep == nil { firstStep = candidate }
-                if (try? candidate.reveal(in: session.canvas, gap: options.gap)) == true { scrolled = true; break }
-            }
-            guard var layout = scrolled ? candidate : firstStep else { continue }
-            _ = try? layout.reveal(in: session.canvas, gap: options.gap)
-            guard let id = layout.focused, let loc = layout.index(of: id) else { continue }
-            guard let placements = try? layout.placements(in: session.canvas, gap: options.gap) else { continue }
-            let targets = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
-            guard surveys.allSatisfy({ wid, row in
-                guard let frame = row.frame, let target = targets[wid] else { return false }
-                return LiveReconciliation.animationSizeMatches(frame, target)
-            }) else { return nil }
-            ends[direction] = targets
-            neighbours[direction] = layout.columns[loc.column].slots[loc.row].activeMember
-            layouts[direction] = layout
-        }
-        return (ends, neighbours, layouts)
-    }
-
-    /// The window in `layout`'s focused slot.
-    private static func focusedWindow(_ layout: Layout) -> UInt32? {
-        guard let id = layout.focused, let loc = layout.index(of: id) else { return nil }
-        return layout.columns[loc.column].slots[loc.row].activeMember
-    }
-
-    /// A new swipe takes over the horizontal landing on screen, as on a
-    /// phone's home screen: the images stop where they are, and the swipe
-    /// continues from the column nearest to there. Nothing real moves until
-    /// its release. Returns where the strip was caught, in progress from that
-    /// column; nil (the landing goes on) when it cannot be taken over.
-    private func catchLanding() -> Double? {
-        guard landingCatchable, let old = swipe, let landing = old.landing,
-              running, NSEvent.pressedMouseButtons == 0, drag == nil,
-              DisplayArrangement.currentProblem() == nil,
-              coordinator.display(forSpace: old.space)?.activeSpaceID == old.space,
-              let session = coordinator.sessions[old.space], !session.state.interactionSuppressed,
-              // Windows came or went since the strip was captured: no images for that.
-              session.state.layout.columns == old.base.columns else { return nil }
-        let now = CACurrentMediaTime()
-        let caughtAt = landing.progress(at: now)
-        var columns: [Int: Layout] = [0: old.base]
-        if let layout = old.layouts[.left] { columns[-1] = layout }
-        if let layout = old.layouts[.right] { columns[1] = layout }
-        let slot = SlotSwipe.nearestSlot(caughtAt, available: Set(columns.keys))
-        guard let base = columns[slot], let baseWindow = Self.focusedWindow(base),
-              let placements = try? base.placements(in: session.canvas, gap: options.gap),
-              let destinations = swipeDestinations(from: base, session: session, surveys: old.surveys) else { return nil }
-        let center = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
-        guard old.surveys.keys.allSatisfy({ center[$0] != nil }) else { return nil }
-        // Catch the images exactly where they are on screen; the rest of
-        // the strip (no image) where the path has it.
-        let shown = old.overlay.freeze()
-        let starts = swipeFrames(old, progress: caughtAt).merging(shown) { _, frame in frame }
-        swipeTask?.cancel(); swipeTask = nil
-        motionGeneration &+= 1
-        var next = Swipe(space: old.space, generation: motionGeneration, overlay: old.overlay, surveys: old.surveys,
-                         ends: destinations.ends, neighbours: destinations.neighbours, canvas: session.canvas,
-                         closeWindow: nil, tabClose: nil)
-        next.base = base
-        next.baseWindow = baseWindow
-        next.layouts = destinations.layouts
-        next.caught = true
-        next.origin = caughtAt - Double(slot)
-        next.center = center
-        next.starts = starts
-        next.progress = next.origin
-        next.targetProgress = next.origin
-        next.lastVisualTime = now
-        next.ready = true
-        swipe = next
-        swipeBegan = ProcessInfo.processInfo.systemUptime
-        swipeMetrics = ["state": "caught", "caughtAt": caughtAt, "column": slot, "windows": old.surveys.count]
-        old.overlay.startFrameClock { [weak self] link in self?.advanceSwipeVisuals(link) }
-        captureReachable(from: base, ends: destinations.ends, state: next)
-        return next.origin
-    }
-
-    /// Adds images, in the background, for strip windows a swipe from
-    /// `layout` could bring on screen but the overlay has none of (a caught
-    /// swipe reaches further along the strip than the first capture).
-    private func captureReachable(from layout: Layout, ends: [Direction: [UInt32: Rect]], state: Swipe) {
-        guard let session = coordinator.sessions[state.space],
-              let placements = try? layout.placements(in: session.canvas, gap: options.gap) else { return }
-        let center = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
-        let ids = LiveReconciliation.swipeCaptureIDs(starts: center, destinations: Array(ends.values), canvas: session.canvas)
-            .intersection(state.surveys.keys)
-        let overlay = state.overlay
-        guard !ids.subtracting(overlay.captured.keys).isEmpty else { return }
-        Task { [weak self] in
-            await overlay.capture(more: ids, at: { wid in
-                // Where the image belongs now: on the tracking path, or where
-                // a landing ends (such windows are off screen until then).
-                guard let self, let state = self.swipe, state.overlay === overlay else { return nil }
-                if state.released == nil { return self.swipeFrames(state)[wid] }
-                return state.landing?.frames[wid] ?? state.starts[wid]
-            })
-        }
-    }
-
-    /// Switches a tracking swipe to closing its focused window, or to the
-    /// configured downward action.
-    private func startClosing(pull: Bool = false) -> Bool {
-        guard var state = swipe, state.released == nil, state.closeWindow != nil else { return false }
-
-        state.closing = true
-        state.pulling = pull
-        state.pullAction = options.config.gesture.swipeDown
-        swipe = state
-        // Nothing moves: show only the indicator over the live windows.
-        if state.showsIndicator {
-            state.indicatorDue = CACurrentMediaTime() + Self.indicatorDelay
-            swipe = state
-            state.overlay.showIndicatorOnly()
-        }
-        return true
-    }
-
-    /// Switches a pull to the configured left or right action, with a fresh
-    /// indicator following the fingers from rest.
-    private func startTurn(direction: Direction) -> Bool {
-        guard var state = swipe, state.released == nil, state.pulling else { return false }
-        state.turned = true
-        state.turnDirection = direction
-        state.pullAction = direction == .left ? options.config.gesture.swipeDownLeft : options.config.gesture.swipeDownRight
-        state.progress = 0
-        state.targetProgress = 0
-        state.visualVelocity = 0
-        state.indicatorShown = false
-        // Already past the delay; a turn released at once has no indicator to flash.
-        state.indicatorDue = min(state.indicatorDue, CACurrentMediaTime())
-        swipe = state
-        state.overlay.replaceIndicator(duration: 0.14)
-        swipeMetrics["turned"] = true
-        return true
-    }
-
-    /// Keep only the newest finger target; the visual clock limits travel speed.
-    func updateSwipe(_ progress: Double) {
-        guard var state = swipe, state.released == nil, progress.isFinite else { return }
-        let wasTracking = state.tracking
-        state.tracking = true
-        state.targetProgress = state.closing ? min(1.3, max(0, progress)) : min(1.3, max(-1.3, progress))
-        // Time the first tracked frame from now, not from when the capture
-        // finished, so it takes a normal step rather than a catch-up one.
-        if !wasTracking { state.lastVisualTime = CACurrentMediaTime() }
-        swipe = state
-        if state.ready && !wasTracking { state.overlay.show() }
-    }
-
-    /// One display frame: move the images to where they will be when it is shown.
-    private func advanceSwipeVisuals(_ link: CADisplayLink) {
-        guard var state = swipe, state.ready, state.tracking, state.released == nil else { return }
-        let period = link.targetTimestamp - link.timestamp
-        if state.lastFrameTime > 0, period > 0 {
-            let interval = link.timestamp - state.lastFrameTime
-            state.frames += 1
-            state.maxFrameMS = max(state.maxFrameMS, interval * 1000)
-            state.droppedFrames += max(0, Int((interval / period).rounded()) - 1)
-        }
-        state.lastFrameTime = link.timestamp
-        let now = link.targetTimestamp
-        let elapsed = now - state.lastVisualTime
-        let next = SlotSwipe.followVisualProgress(state.progress, toward: state.targetProgress, elapsed: elapsed)
-        if elapsed > 0 {
-            let instant = (next - state.progress) / elapsed
-            state.visualVelocity += (1 - exp(-elapsed / 0.03)) * (instant - state.visualVelocity)
-        }
-        state.lastVisualTime = now
-        let changed = next != state.progress
-        state.progress = next
-        if state.showsIndicator {
-            // Held still past the delay: show the indicator without waiting for movement.
-            guard now >= state.indicatorDue, changed || !state.indicatorShown, let wid = state.closeWindow else {
-                swipe = state; return
-            }
-            state.indicatorShown = true
-            swipe = state
-            state.overlay.trackIndicator(state.indicatorStyle, window: wid, progress: next,
-                                         threshold: options.config.gesture.commitThreshold)
-            return
-        }
-        swipe = state
-        guard changed else { return }
-        state.overlay.place(swipeFrames(state))
-        if state.closing, let wid = state.closeWindow { state.overlay.setOpacity(wid, closeOpacity(next)) }
-    }
-
-    private func swipeFrames(_ state: Swipe) -> [UInt32: Rect] { swipeFrames(state, progress: state.progress) }
-
-    private func swipeFrames(_ state: Swipe, progress: Double) -> [UInt32: Rect] {
-        // Closing a tab leaves the window where it is.
-        if state.closing { return state.showsIndicator ? state.starts : closeFrames(state, progress: progress) }
-        let center = state.center ?? state.starts
-        // From `from` towards the neighbour on `side`, `travelled` progress
-        // since `from`; past the neighbour (or at a strip end) resist,
-        // moving at most a few points.
-        func towards(_ side: Direction, from: [UInt32: Rect], fraction: Double, travelled: Double) -> [UInt32: Rect] {
-            guard let ends = state.ends[side] else {
-                let shift = -Self.swipeEdgeResistance * travelled
-                return from.mapValues { var frame = $0; frame.x += shift; return frame }
-            }
-            let frames = LiveReconciliation.interpolate(from, ends, progress: min(1, fraction), canvas: state.canvas)
-            let excess = max(0, abs(progress) - 1)
-            guard excess > 0 else { return frames }
-            let extraShift = (side == .left ? 1.0 : -1.0) * excess * Self.swipeEdgeResistance
-            return frames.mapValues { var frame = $0; frame.x += extraShift; return frame }
-        }
-        switch SlotSwipe.leg(progress, offset: state.origin) {
-        case .toColumn(let fraction):
-            return LiveReconciliation.interpolate(state.starts, center, progress: fraction, canvas: state.canvas)
-        case .fromColumn(let side, let fraction):
-            return towards(side, from: center, fraction: fraction, travelled: progress)
-        case .fromCaught(let side, let fraction):
-            return towards(side, from: state.starts, fraction: fraction, travelled: progress - state.origin)
-        }
-    }
-
-    /// Swipe up (down): only the window being closed (minimized) moves,
-    /// straight up (down). At 1 it and its shadow are just past that edge of
-    /// its display; going down, it passes under the Dock.
-    private func closeFrames(_ state: Swipe, progress: Double) -> [UInt32: Rect] {
-        guard let wid = state.closeWindow, var frame = state.starts[wid] else { return state.starts }
-        let distance = state.pulling
-            ? state.overlay.screenBottom - frame.y + Self.closeShadowClearance
-            : frame.y + frame.height - state.overlay.screenTop + Self.closeShadowClearance
-        let absP = min(1, progress)
-        frame.y -= (state.pulling ? -1 : 1) * (distance * absP + max(0, progress - 1) * Self.swipeEdgeResistance)
-        var frames = state.starts
-        frames[wid] = frame
-        return frames
-    }
-
-    /// A closing window stays opaque until release would close it (the
-    /// commit threshold), then fades slightly as it rises: 70% once fully off.
-    private func closeOpacity(_ progress: Double) -> Double {
-        let threshold = min(0.99, options.config.gesture.commitThreshold)
-        return 1 - 0.3 * min(1, max(0, (progress - threshold) / (1 - threshold)))
-    }
-
-    /// Room for the active window shadow (radius 16, offset 8) above the display.
-    private static let closeShadowClearance = 32.0
-
-    enum CloseMethod: String { case press, key, none }
-
-    /// Every native tab in the window's slot, itself included.
-    private func tabGroup(_ wid: UInt32) -> Set<UInt32> {
-        guard let space = coordinator.spaceForWindow[wid], let session = coordinator.sessions[space],
-              let slot = session.state.layout.columns.lazy.flatMap(\.slots).first(where: { $0.members.contains(wid) })
-        else { return [wid] }
-        return Set(slot.members)
-    }
-
-    /// Presses the window's close button through Accessibility; in a native
-    /// tab group that closes only the front tab. Without a usable close
-    /// button (custom window controls), ⌘W goes to the app, but only while
-    /// this window is its focused window, so it cannot close a different one.
-    private func pressClose(_ wid: UInt32) -> CloseMethod {
-        guard let pid = pidForWindow[wid], let element = references[wid] ?? findWindow(wid, pid: pid) else { return .none }
-        // AppKit reports a disabled close button for windows without one, and
-        // pressing it reports success while doing nothing.
-        if let value = Diagnostics.attribute(element, kAXCloseButtonAttribute), CFGetTypeID(value) == AXUIElementGetTypeID(),
-           Diagnostics.attribute(value as! AXUIElement, kAXEnabledAttribute) as? Bool != false {
-            if AXUIElementPerformAction(value as! AXUIElement, kAXPressAction as CFString) == .success { return .press }
-        }
-        return Self.sendCommandW(to: pid, window: wid) ? .key : .none
-    }
-
-    static let keyW: CGKeyCode = 13, keyN: CGKeyCode = 45
-
-    private static func sendCommandW(to pid: pid_t, window wid: UInt32) -> Bool { sendCommand(keyW, to: pid, window: wid) }
-
-    /// ⌘`key` to the app, only while `wid` is its focused window.
-    private static func sendCommand(_ key: CGKeyCode, to pid: pid_t, window wid: UInt32) -> Bool {
-        let application = AXUIElementCreateApplication(pid)
-        guard let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
-              CFGetTypeID(value) == AXUIElementGetTypeID(),
-              paperi_window_id(value as! AXUIElement) == wid else { return false }
-        // A private-state source is ignored as a key equivalent; HID state is not.
-        let source = CGEventSource(stateID: .hidSystemState)
-        for down in [true, false] {
-            guard let event = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down) else { return false }
-            event.flags = .maskCommand
-            event.postToPid(pid)
-            if down { usleep(15_000) }
-        }
-        return true
-    }
-
-    /// Whether WindowServer still shows the window.
-    private static func windowOnScreen(_ wid: UInt32) -> Bool {
-        let rows = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(wid)) as? [[String: Any]] ?? []
-        return rows.contains { ($0[kCGWindowIsOnscreen as String] as? Bool) == true }
-    }
-
-    /// Committed swipe up: the image leaves through the top while the app
-    /// closes the window underneath. The overlay goes once the window has
-    /// gone, so the survivors' gap animation plays on the real windows. A
-    /// window that stays (an unsaved-changes prompt) is revealed by fading
-    /// the overlay, without bringing its old snapshot back on screen.
-    private func finishClose(_ state: Swipe, settle: Double) {
-        guard let wid = state.closeWindow else { return }
-        if state.pulling && state.pullAction == .none { cancelSwipe(); return }
-        if state.showsTabClose, let mode = state.tabCloseMode { finishTabClose(state, window: wid, mode: mode); return }
-        if state.showsNewWindow { finishNewWindow(state, window: wid); return }
-        if state.pulling { finishMinimize(state, window: wid, settle: settle); return }
-        let generation = state.generation, overlay = state.overlay
-        let from = state.progress, path = state
-        // Leave at the speed the window had on screen, then slow to the edge.
-        let distance = max(0, 1 - from)
-        let duration = SlotSwipe.settleDuration(distance: distance, speed: state.visualVelocity, base: settle)
-        let curve = SlotSwipe.settleCurve(speed: state.visualVelocity, distance: distance, duration: duration)
-        overlay.slide(along: { u in self.closeFrames(path, progress: from + (1 - from) * u) },
-                      to: closeFrames(path, progress: 1), duration: duration, curve: curve)
-        overlay.fade(wid, to: closeOpacity(1), duration: duration, curve: curve)
-        let released = ProcessInfo.processInfo.systemUptime
-        let method = pressClose(wid)
-        let pressed = method != .none
-        swipeMetrics["closeMethod"] = method.rawValue
-        swipeTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
-            var gone = false
-            if pressed {
-                // Apps may finish their own work first; wait at most a second.
-                for _ in 0..<40 {
-                    guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
-                    if self.destroyedNotified.contains(wid) || !Self.windowOnScreen(wid) { gone = true; break }
-                    try? await Task.sleep(for: .milliseconds(25))
-                }
-            }
-            guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
-            // A timeout is not a refusal: the app may still be closing, or
-            // WindowServer may still report its closing animation. Returning
-            // the snapshot here can resurrect a successfully closed window.
-            // Reveal any surviving window or save prompt under the overlay.
-            overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
-            self.swipeMetrics["state"] = gone ? "closed" : (pressed ? "closeRefused" : "noCloseButton")
-            self.swipeMetrics["closeMS"] = (ProcessInfo.processInfo.systemUptime - released) * 1000
-            self.swipeMetrics["totalMS"] = (ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 1000
-            self.scheduleRefresh()
-        }
-    }
-
-    /// Minimizes through Accessibility. False when the window refuses.
-    private func minimize(_ wid: UInt32) -> Bool {
-        guard let pid = pidForWindow[wid], let element = references[wid] ?? findWindow(wid, pid: pid) else { return false }
-        var settable = DarwinBoolean(false)
-        guard AXUIElementIsAttributeSettable(element, kAXMinimizedAttribute as CFString, &settable) == .success,
-              settable.boolValue else { return false }
-        return AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanTrue) == .success
-    }
-
-    /// Committed swipe down: the image leaves through the bottom (under the
-    /// Dock) while macOS minimizes the window underneath. Its Genie/Scale
-    /// effect plays below the overlay (measured: only the Dock changes on
-    /// screen), and the window stays on screen until the effect ends (~0.55 s
-    /// for Genie), so the overlay waits for that before fading.
-    private func finishMinimize(_ state: Swipe, window wid: UInt32, settle: Double) {
-        let generation = state.generation, overlay = state.overlay
-        let from = state.progress, path = state
-        let distance = max(0, 1 - from)
-        let duration = SlotSwipe.settleDuration(distance: distance, speed: state.visualVelocity, base: settle)
-        let curve = SlotSwipe.settleCurve(speed: state.visualVelocity, distance: distance, duration: duration)
-        overlay.slide(along: { u in self.closeFrames(path, progress: from + (1 - from) * u) },
-                      to: closeFrames(path, progress: 1), duration: duration, curve: curve)
-        overlay.fade(wid, to: closeOpacity(1), duration: duration, curve: curve)
-        let released = ProcessInfo.processInfo.systemUptime
-        let done = minimize(wid)
-        swipeMetrics["minimize"] = done
-        swipeTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
-            var gone = false
-            if done {
-                for _ in 0..<60 {
-                    guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
-                    if !Self.windowOnScreen(wid) { gone = true; break }
-                    try? await Task.sleep(for: .milliseconds(25))
-                }
-            }
-            guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
-            var instantSpace: UInt64?
-            if gone {
-                // Close the gap inside the overlay, as a swipe lands: a refresh
-                // after the fade would race it and could show a snap.
-                let collapse = self.collapseGap(after: wid, state: path)
-                self.swipeMetrics["gap"] = collapse.map { _ in "animated" } ?? "instant"
-                if let collapse {
-                    let duration = collapse.duration
-                    try? await Task.sleep(for: .milliseconds(Int(duration * 1000)))
-                    guard self.swipe?.generation == generation, !Task.isCancelled else { return }
-                    await self.finishHandoff(overlay: overlay, targets: collapse.targets, generation: generation)
-                    guard self.swipe?.generation == generation, !Task.isCancelled else { return }
-                } else {
-                    instantSpace = path.space
-                }
-            } else {
-                overlay.slide(to: path.starts, duration: 0.18)
-                overlay.fade(wid, to: 1, duration: 0.18)
-                try? await Task.sleep(for: .milliseconds(190))
-            }
-            guard self.swipe?.generation == generation, !Task.isCancelled else { return }
-            overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
-            // Sizes changed (e.g. a stacked column): images cannot show that,
-            // so the real windows move after the fade.
-            if let space = instantSpace { self.animateFocus(space: space, byID: self.latestSurvey) }
-            self.swipeMetrics["state"] = gone ? "minimized" : (done ? "minimizeUnconfirmed" : "minimizeRefused")
-            self.swipeMetrics["minimizeMS"] = (ProcessInfo.processInfo.systemUptime - released) * 1000
-            self.swipeMetrics["totalMS"] = (ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 1000
-            self.scheduleRefresh()
-        }
-    }
-
-    /// The minimized window leaves the strip now, as a refresh would remove
-    /// it, with focus per `focusAfterClose`. When the survivors keep their
-    /// sizes, their images slide into the gap while the real windows are
-    /// placed once underneath; returns the slide's targets and duration.
-    /// Otherwise (or with animation off) returns nil after the logical
-    /// removal, leaving placement to the caller.
-    private func collapseGap(after wid: UInt32, state: Swipe) -> (targets: [UInt32: Rect], duration: Double)? {
-        guard let session = coordinator.sessions[state.space], isActiveRepresentative(wid) else { return nil }
-        let members = Set(session.members(of: wid) ?? [wid])
-        let target = neighbourAfterClose(members)
-        guard (try? coordinator.removeContainer(containing: wid, classification: Self.tiled)) != nil else { return nil }
-        if let target {
-            try? session.focus(windowID: target, ownerPID: pidForWindow[target], classification: Self.tiled, ticket: session.ticket)
-            closeFocus = (target, ProcessInfo.processInfo.systemUptime + 0.8)
-            log("focus after minimize: \(target)")
-        }
-        reveal(session)
-        applied.removeValue(forKey: state.space)
-        let duration = options.config.focusScrollDuration ?? 0.22
-        guard duration > 0, let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { return nil }
-        let targets = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
-        // Every survivor needs an image of the right size to slide.
-        guard targets.allSatisfy({ id, frame in
-            guard let start = state.starts[id] else { return false }
-            return LiveReconciliation.animationSizeMatches(start, frame)
-        }) else { return nil }
-        state.overlay.slide(to: targets, duration: duration, easeIn: true)
-        apply(space: state.space, byID: state.surveys)
-        if let target { _ = raise(target) }
-        return (targets, duration)
-    }
-
-    /// After a slide under the overlay: wait for the real windows to stop at
-    /// their targets (up to 0.4 s), correct the images onto where they
-    /// actually landed, and hold two frames for apps to redraw.
-    private func finishHandoff(overlay: SnapshotTransition, targets: [UInt32: Rect], generation: UInt64) async {
-        var previous: [UInt32: Rect] = [:]
-        var result = (settled: false, landing: targets, maxDeviation: 0.0)
-        for _ in 0..<16 {
-            guard swipe?.generation == generation, !Task.isCancelled else { return }
-            var current: [UInt32: Rect] = [:]
-            for id in targets.keys {
-                guard let element = references[id] else { continue }
-                AXUIElementSetMessagingTimeout(element, 0.02)
-                if let frame = Diagnostics.frame(element) { current[id] = frame }
-                AXUIElementSetMessagingTimeout(element, 0.2)
-            }
-            result = LiveReconciliation.handoff(previous: previous, current: current, targets: targets)
-            if result.settled { break }
-            previous = current
-            try? await Task.sleep(for: .milliseconds(25))
-        }
-        if result.maxDeviation > 0.5 {
-            overlay.slide(to: result.landing, duration: 0.08)
-            try? await Task.sleep(for: .milliseconds(90))
-        }
-        try? await Task.sleep(for: .milliseconds(34))
-    }
-
-    enum NewWindowMethod: String { case menu, key, launch, none }
-
-    /// Opens a new window of the app: its "New Window" menu item when it has
-    /// one (it means a window even where ⌘N opens a document or message, and
-    /// needs no keyboard focus), else ⌘N while `wid` is its focused window.
-    private static func openNewWindow(pid: pid_t, window wid: UInt32) -> NewWindowMethod {
-        if let item = newWindowMenuItem(pid: pid),
-           AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { return .menu }
-        return sendCommand(keyN, to: pid, window: wid) ? .key : .none
-    }
-
-    /// The app's English "New Window" menu item, else a "New … Window" one
-    /// (e.g. Finder's "New Finder Window"; never private or incognito). For
-    /// a submenu (Terminal's profiles), its first enabled item. Titles are
-    /// localised, so other languages fall back to ⌘N.
-    private static func newWindowMenuItem(pid: pid_t) -> AXUIElement? {
-        let application = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(application, 0.25)
-        func children(_ element: AXUIElement) -> [AXUIElement] {
-            Diagnostics.attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
-        }
-        func enabled(_ element: AXUIElement) -> Bool { Diagnostics.attribute(element, kAXEnabledAttribute) as? Bool != false }
-        guard let bar = Diagnostics.attribute(application, kAXMenuBarAttribute),
-              CFGetTypeID(bar) == AXUIElementGetTypeID() else { return nil }
-        var exact: AXUIElement?, loose: AXUIElement?
-        // Skip the Apple menu; look one level into each menu.
-        for top in children(bar as! AXUIElement).dropFirst() {
-            for menu in children(top) {
-                for item in children(menu) where enabled(item) {
-                    guard let title = (Diagnostics.attribute(item, kAXTitleAttribute) as? String)?
-                        .trimmingCharacters(in: .whitespaces).lowercased() else { continue }
-                    if title == "new window" { exact = exact ?? item }
-                    else if title.hasPrefix("new "), title.hasSuffix(" window"),
-                            !title.contains("private"), !title.contains("incognito") { loose = loose ?? item }
-                }
-            }
-            if exact != nil { break }
-        }
-        guard let found = exact ?? loose else { return nil }
-        if let submenu = children(found).first, let first = children(submenu).first(where: enabled) { return first }
-        return found
-    }
-
-    /// Committed swipe down with `swipeDown: newWindow`: the app opens a new
-    /// window (menu item, else ⌘N) and the overlay fades; the new window is
-    /// admitted to the strip like any other.
-    private func finishNewWindow(_ state: Swipe, window wid: UInt32) {
-        let generation = state.generation, overlay = state.overlay
-        let method: NewWindowMethod = state.pullAction == .openApp
-            ? (openConfiguredApp() ? .launch : .none)
-            : (pidForWindow[wid].map { Self.openNewWindow(pid: $0, window: wid) } ?? .none)
-        let sent = method != .none
-        if !sent { overlay.retractIndicator(duration: 0.18) }
-        swipeMetrics["newWindow"] = method.rawValue
-        swipeTask = Task { [weak self] in
-            // One frame for the action to land before the fade.
-            try? await Task.sleep(for: .milliseconds(16))
-            guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
-            overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
-            self.swipeMetrics["state"] = sent ? "newWindow" : "newWindowRefused"
-            self.swipeMetrics["totalMS"] = (ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 1000
-            self.scheduleRefresh()
-        }
-    }
-
-    /// Committed tab close: the app closes the front tab under the overlay,
-    /// and the overlay fades onto the next tab. A
-    /// native tab is pressed shut (⌘W without a close button); a listed
-    /// app's in-content tab gets ⌘W. A tab that stays (an unsaved-changes
-    /// prompt) is simply revealed again.
-    private func finishTabClose(_ state: Swipe, window wid: UInt32, mode: TabClose) {
-        let generation = state.generation, overlay = state.overlay
-        let released = ProcessInfo.processInfo.systemUptime
-        let method: CloseMethod
-        switch mode {
-        case .native: method = pressClose(wid)
-        case .app: method = pidForWindow[wid].map { Self.sendCommandW(to: $0, window: wid) ? .key : .none } ?? .none
-        }
-        swipeMetrics["closeMethod"] = method.rawValue
-        swipeMetrics["tabClose"] = mode.rawValue
-        if method == .none { overlay.retractIndicator(duration: 0.18) }
-        swipeTask = Task { [weak self] in
-            var gone = false
-            if method != .none {
-                if mode == .native {
-                    // The closed tab's window leaves; the next tab is a different one.
-                    for _ in 0..<32 {
-                        guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
-                        if self.destroyedNotified.contains(wid) || !Self.windowOnScreen(wid) { gone = true; break }
-                        try? await Task.sleep(for: .milliseconds(25))
-                    }
-                } else {
-                    // In-content tabs give no signal; allow one redraw.
-                    gone = true
-                    try? await Task.sleep(for: .milliseconds(50))
-                }
-            }
-            guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
-            overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
-            self.swipeMetrics["state"] = gone ? "tabClosed" : (method == .none ? "noCloseButton" : "closeRefused")
-            self.swipeMetrics["closeMS"] = (ProcessInfo.processInfo.systemUptime - released) * 1000
-            self.swipeMetrics["totalMS"] = (ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 1000
-            self.scheduleRefresh()
-        }
-    }
-
-    /// Release towards the reducer’s chosen neighbour, or the progress side
-    /// for simulations. A rejected commit slides back with no writes.
-    func endSwipe(commit requested: Bool, direction requestedDirection: Direction? = nil) {
-        defer {
-            if running { windowIndicators.update(coordinator, mode: options.config.bottom) }
-        }
-        guard var state = swipe, state.released == nil else { return }
-        let direction: Direction = requestedDirection ?? (state.targetProgress < 0 ? .left : .right)
-        let target = state.closing ? state.closeWindow : state.neighbours[direction]
-        let commit = requested && (state.closing || requestedDirection != nil || state.targetProgress != 0) && target != nil
-        // A caught swipe settles on its own column for real: the landing
-        // it caught has already moved the windows to a different one.
-        if state.caught && !commit { endCaughtSwipe(state, settle: max(0.12, options.config.focusScrollDuration ?? 0.22)); return }
-        state.releaseDirection = direction
-        let settle = max(0.12, options.config.focusScrollDuration ?? 0.22)
-        if !state.ready && !state.failed { state.released = commit; swipe = state; return }
-        if state.failed {
-            swipe = nil
-            swipeTask = nil
-            scheduleRefresh()
-            if commit, state.pulling, state.pullAction == .openApp {
-                _ = openConfiguredApp()
-            } else if commit, state.showsNewWindow, let wid = target, let pid = pidForWindow[wid] {
-                _ = Self.openNewWindow(pid: pid, window: wid)
-            } else if commit, state.pulling, state.pullAction == .minimize, let wid = target { _ = minimize(wid) }
-            else if commit, state.closing, (!state.pulling || state.pullAction == .closeTab), let wid = target {
-                if state.showsTabClose && state.tabCloseMode == .app, let pid = pidForWindow[wid] { _ = Self.sendCommandW(to: pid, window: wid) }
-                else { _ = pressClose(wid) }
-            }
-            else if commit { _ = handle(["focus", direction == .left ? "left" : "right"]) }
-            return
-        }
-        state.released = commit
-        swipe = state
-        let generation = state.generation, space = state.space, overlay = state.overlay
-        overlay.stopFrameClock()
-        swipeMetrics["trackingFrames"] = state.frames
-        swipeMetrics["trackingDroppedFrames"] = state.droppedFrames
-        swipeMetrics["trackingMaxFrameMS"] = state.maxFrameMS
-        if commit && state.closing { finishClose(state, settle: settle); return }
-        guard commit, let wid = target, let session = coordinator.sessions[space],
-              let ends = state.ends[direction], let layout = state.layouts[direction] else {
-            // Drop back from the speed the images had on screen.
-            let back = state.progress < 0 ? state.visualVelocity : -state.visualVelocity
-            let duration = SlotSwipe.settleDuration(distance: abs(state.progress), speed: back, base: settle)
-            let curve = SlotSwipe.settleCurve(speed: back, distance: abs(state.progress), duration: duration)
-            // Follow the tracking path back so every image keeps the strip's speed.
-            let from = state.progress, path = state
-            overlay.slide(along: { u in self.swipeFrames(path, progress: from * (1 - u)) },
-                          to: state.starts, duration: duration, curve: curve)
-            if !state.closing {
-                swipe?.landing = Landing(began: CACurrentMediaTime(), duration: duration, curve: curve,
-                                         from: from, to: 0, frames: state.starts)
-            }
-            if state.showsIndicator { overlay.retractIndicator(duration: duration) }
-            else if state.closing, let wid = state.closeWindow { overlay.fade(wid, to: 1, duration: duration, curve: curve) }
-            swipeTask = Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
-                guard let self, self.swipe?.generation == generation else { return }
-                overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
-                self.swipeMetrics["state"] = "snappedBack"
-                self.swipeMetrics["totalMS"] = (ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 1000
-                self.scheduleRefresh()
-            }
-            return
-        }
-        land(state, on: layout, window: wid, at: direction == .left ? -1 : 1, frames: ends, session: session, settle: settle)
-    }
-
-    /// A caught swipe released short of a neighbour settles on its own column.
-    private func endCaughtSwipe(_ state: Swipe, settle: Double) {
-        var state = state
-        guard let wid = state.baseWindow, let session = coordinator.sessions[state.space] else {
-            cancelSwipe(); scheduleRefresh(); return
-        }
-        state.released = true
-        swipe = state
-        state.overlay.stopFrameClock()
-        land(state, on: state.base, window: wid, at: 0, frames: state.center ?? state.starts, session: session, settle: settle)
-    }
-
-    /// Slides the images from where they are to `frames` (progress
-    /// `destination`) while the real windows are placed once underneath for
-    /// `layout`, then hands over to them. A new swipe may catch the slide.
-    private func land(_ state: Swipe, on layout: Layout, window wid: UInt32, at destinationProgress: Double,
-                      frames ends: [UInt32: Rect], session: ScopedLayoutSession, settle: Double) {
-        let generation = state.generation, space = state.space, overlay = state.overlay
-        if state.caught, session.state.layout.columns != layout.columns {
-            // The strip changed under a caught swipe; let a refresh place it.
-            cancelSwipe(); scheduleRefresh(); return
-        }
-        // Land from the speed the strip had on screen, then slow onto the column.
-        let distance = abs(destinationProgress - state.progress)
-        let speed = destinationProgress > state.progress ? state.visualVelocity : -state.visualVelocity
-        let duration = SlotSwipe.settleDuration(distance: distance, speed: speed, base: settle)
-        let curve = SlotSwipe.settleCurve(speed: speed, distance: distance, duration: duration)
-        let from = state.progress, path = state
-        // Start the landing first: it runs off the main thread, so the
-        // synchronous window writes below cannot freeze it at release.
-        overlay.slide(along: { u in
-            self.swipeFrames(path, progress: from + (destinationProgress - from) * u)
-        }, to: ends, duration: duration, curve: curve)
-        swipe?.landing = Landing(began: CACurrentMediaTime(), duration: duration, curve: curve,
-                                 from: from, to: destinationProgress, frames: ends)
-        let released = ProcessInfo.processInfo.systemUptime
-        // Same logical result as `focus`; one real placement under the overlay.
-        try? session.focus(windowID: wid, ownerPID: pidForWindow[wid], classification: Self.tiled, ticket: session.ticket)
-        if state.caught {
-            // The column a caught swipe settles on may be revealed from a
-            // different scroll position than the one the strip is at now.
-            session.setOffset(layout.offset, ticket: session.ticket)
-        } else {
-            reveal(session)
-        }
-        applied.removeValue(forKey: space)
-        // A caught swipe's survey frames are from before the landing it
-        // caught moved the windows. `apply` skips a window whose target
-        // matches its surveyed frame, so with those it would leave windows
-        // where that landing put them (all of them when swiping back to the
-        // start). Without a frame, every window is written.
-        let byID = !state.caught ? state.surveys : state.surveys.mapValues {
-            Survey(windowID: $0.windowID, pid: $0.pid, element: $0.element, classification: $0.classification,
-                   facts: $0.facts, floatRequested: $0.floatRequested, spaceID: $0.spaceID, frame: nil)
-        }
-        apply(space: space, byID: byID)
-        _ = raise(wid)
-        let writesMS = (ProcessInfo.processInfo.systemUptime - released) * 1000
-        swipeMetrics["releaseWritesMS"] = writesMS
-        // Images for a further swipe from here, ready before it can begin.
-        if let next = swipeDestinations(from: layout, session: session, surveys: state.surveys) {
-            captureReachable(from: layout, ends: next.ends, state: state)
-        }
-        swipeTask = Task { [weak self] in
-            // The slide began before the writes; wait out only what is left of it.
-            try? await Task.sleep(for: .milliseconds(max(0, Int(duration * 1000 - writesMS))))
-            // Hand off only once the real windows have stopped moving, then
-            // finish the images on the frames they actually took.
-            var previous: [UInt32: Rect] = [:]
-            var result = (settled: false, landing: ends, maxDeviation: 0.0)
-            for _ in 0..<16 {
-                guard let self, self.swipe?.generation == generation, !Task.isCancelled else { return }
-                guard NSEvent.pressedMouseButtons == 0 else {
-                    self.cancelMotion(); self.refreshOnMouseUp(); return
-                }
-                var current: [UInt32: Rect] = [:]
-                for wid in ends.keys {
-                    if let element = self.references[wid] {
-                        AXUIElementSetMessagingTimeout(element, 0.02)
-                        if let frame = Diagnostics.frame(element) { current[wid] = frame }
-                        AXUIElementSetMessagingTimeout(element, 0.2)
-                    }
-                }
-                result = LiveReconciliation.handoff(previous: previous, current: current, targets: ends)
-                if result.settled { break }
-                previous = current
-                try? await Task.sleep(for: .milliseconds(25))
-            }
-            guard let self, self.swipe?.generation == generation else { return }
-            if result.maxDeviation > 0.5 {
-                overlay.slide(to: result.landing, duration: 0.08)
-                try? await Task.sleep(for: .milliseconds(90))
-                guard self.swipe?.generation == generation else { return }
-            }
-            // AX geometry can settle before WindowServer presents the apps'
-            // newly drawn surfaces. Keep the mask for two 60 Hz frames.
-            try? await Task.sleep(for: .milliseconds(34))
-            guard self.swipe?.generation == generation, !Task.isCancelled else { return }
-            overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil
-            self.swipeMetrics["state"] = result.settled ? (result.maxDeviation <= 0.5 ? "completed" : "landedAdjusted") : "handoffUnsettled"
-            self.swipeMetrics["handoffMS"] = (ProcessInfo.processInfo.systemUptime - released) * 1000 - duration * 1000
-            self.swipeMetrics["landingCorrectionPT"] = result.maxDeviation
-            self.swipeMetrics["totalMS"] = (ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 1000
-            self.scheduleRefresh()
-        }
-    }
-
-    /// `paperi msg swipe left|right|up|down [travel]`: the gesture without a trackpad.
-    /// Fingers move `travel` (fraction of one slot) over 0.25 s, then lift;
-    /// at least half a slot commits.
-    private func simulateSwipe(_ direction: Direction, travel: Double) -> [String: Any] {
-        let reply = beginSwipe(isSimulation: true)
-        guard reply["ok"] as? Bool == true else { return reply }
-        if (direction == .up || direction == .down) && !startClosing(pull: direction == .down) {
-            cancelSwipe()
-            return ["ok": false, "error": direction == .up ? "no focused window on screen to close" : "swipe down is off or no window is focused"]
-        }
-        let sign = direction == .left ? -1.0 : 1.0
-        let started = ProcessInfo.processInfo.systemUptime
-        let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.swipe != nil else { return }
-                let t = min(1, (ProcessInfo.processInfo.systemUptime - started) / 0.25)
-                self.updateSwipe(sign * travel * t * (2 - t))
-                if t >= 1 {
-                    self.swipeSimulation?.invalidate(); self.swipeSimulation = nil
-                    self.endSwipe(commit: travel >= 0.5)
-                }
-            }
-        }
-        swipeSimulation = timer
-        RunLoop.main.add(timer, forMode: .common)
-        return reply
-    }
-
-    private var applied: [UInt64: [Placement]] = [:]
-
-    private func apply(space: UInt64, byID: [UInt32: Survey]) {
+    func apply(space: UInt64, byID: [UInt32: Survey]) {
         guard let session = coordinator.sessions[space],
               let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { return }
         let forced = forceApply || ProcessInfo.processInfo.systemUptime < forceUntil
@@ -2464,16 +940,16 @@ import PaperiCore
 
     /// Window IDs in stacking order. Only the on-screen list is ordered front
     /// to back (`.optionAll` is not); managed windows always keep a sliver on screen.
-    private static func frontToBack() -> [UInt32] {
+    static func frontToBack() -> [UInt32] {
         (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? [])
             .compactMap { $0[kCGWindowNumber as String] as? UInt32 }
     }
 
-    private func matches(_ a: Rect, _ b: Rect) -> Bool {
+    func matches(_ a: Rect, _ b: Rect) -> Bool {
         zip([a.x, a.y, a.width, a.height], [b.x, b.y, b.width, b.height]).allSatisfy { abs($0 - $1) <= 2 }
     }
 
-    @discardableResult private static func write(_ frame: Rect, to element: AXUIElement) -> Bool {
+    @discardableResult static func write(_ frame: Rect, to element: AXUIElement) -> Bool {
         var point = CGPoint(x: frame.x, y: frame.y)
         var size = CGSize(width: frame.width, height: frame.height)
         guard let p = AXValueCreate(.cgPoint, &point), let s = AXValueCreate(.cgSize, &size) else { return false }
@@ -2485,7 +961,7 @@ import PaperiCore
         }
         return ok
     }
-    private func write(_ frame: Rect, to element: AXUIElement) -> Bool {
+    func write(_ frame: Rect, to element: AXUIElement) -> Bool {
         let start = ProcessInfo.processInfo.systemUptime
         let result = Self.write(frame, to: element)
         if commandStarted > 0 {
@@ -2496,23 +972,23 @@ import PaperiCore
         return result
     }
 
-    private static func findWindow(_ wid: UInt32, pid: pid_t) -> AXUIElement? {
+    static func findWindow(_ wid: UInt32, pid: pid_t) -> AXUIElement? {
         let application = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(application, 0.2)
         return (Diagnostics.attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? [])
             .first { paperi_window_id($0) == wid }
     }
-    private func findWindow(_ wid: UInt32, pid: pid_t) -> AXUIElement? { Self.findWindow(wid, pid: pid) }
+    func findWindow(_ wid: UInt32, pid: pid_t) -> AXUIElement? { Self.findWindow(wid, pid: pid) }
 
     // MARK: journal
 
-    private func remember(_ wid: UInt32, pid: pid_t, frame: Rect?) {
+    func remember(_ wid: UInt32, pid: pid_t, frame: Rect?) {
         guard let frame, frame.isValid, journal[wid] == nil else { return }
         journal[wid] = (pid, frame)
         persistJournal()
     }
 
-    private func persistJournal() {
+    func persistJournal() {
         let rows: [[String: Any]] = journal.map { wid, entry in
             ["windowID": wid, "pid": entry.pid, "frame": [entry.frame.x, entry.frame.y, entry.frame.width, entry.frame.height]]
         }
@@ -2523,336 +999,10 @@ import PaperiCore
         } catch { log("cannot persist restore journal: \(error)") }
     }
 
-    private func log(_ message: String) {
+    func log(_ message: String) {
         guard options.verbose else { return }
         let t = String(format: "%.3f", ProcessInfo.processInfo.systemUptime)
         FileHandle.standardError.write(Data("[paperi \(t)] \(message)\n".utf8))
     }
 
-    // MARK: commands
-
-    public enum LiveError: Error, CustomStringConvertible {
-        case accessibility
-        public var description: String { "Accessibility trust is required (System Settings › Privacy & Security › Accessibility)" }
-    }
-
-    private func focusedContext() -> (session: ScopedLayoutSession, space: UInt64, pid: pid_t, window: UInt32)? {
-        if motionActive, let space = motionSpace, let session = coordinator.sessions[space],
-           let focused = session.state.layout.focused, let loc = session.state.layout.index(of: focused) {
-            let wid = session.state.layout.columns[loc.column].slots[loc.row].activeMember
-            if let pid = pidForWindow[wid] { return (session, space, pid, wid) }
-        }
-        refresh()
-        guard let front = NSWorkspace.shared.frontmostApplication else { return nil }
-        let pid = front.processIdentifier
-        let application = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(application, 0.2)
-        guard let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
-              CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
-        let focusedElement = value as! AXUIElement
-        let wid = paperi_window_id(focusedElement)
-        guard let space = coordinator.spaceForWindow[wid], let session = coordinator.sessions[space] else { return nil }
-        return (session, space, pid, wid)
-    }
-
-    private func focusThumbnail(_ wid: UInt32, in space: UInt64) {
-        guard running, !paused, DisplayArrangement.currentProblem() == nil,
-              coordinator.spaceForWindow[wid] == space,
-              coordinator.display(forSpace: space)?.activeSpaceID == space,
-              let session = coordinator.sessions[space], !session.state.interactionSuppressed,
-              isActiveRepresentative(wid), let pid = pidForWindow[wid] else { return }
-        cancelMotion(); motionFrames.removeAll()
-        commandStarted = ProcessInfo.processInfo.systemUptime
-        firstWriteMS = nil; finalWriteMS = nil; confirmedMS = nil
-        try? session.focus(windowID: wid, ownerPID: pid, classification: Self.tiled, ticket: session.ticket)
-        reveal(session)
-        animateFocus(space: space, byID: latestSurvey)
-        _ = raise(wid)
-        raiseNeighbours(of: wid, pid: pid, in: space)
-        windowIndicators.update(coordinator, mode: options.config.bottom)
-        scheduleRefresh()
-    }
-
-    /// After a jump, a parked window's sliver can lie over a visible
-    /// neighbour, since stacking follows recency, not the strip. Once the
-    /// target's app is active, its raised windows go on top and other apps'
-    /// land just under its front window. So raise the target app's
-    /// neighbours, then the target, then the other neighbours. Apps apply
-    /// raises asynchronously, so each is awaited, and the result is checked
-    /// and retried.
-    private func raiseNeighbours(of wid: UInt32, pid: pid_t, in space: UInt64) {
-        neighbourTask?.cancel()
-        neighbourTask = Task { [weak self] in
-            for _ in 0..<20 where NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
-                try? await Task.sleep(for: .milliseconds(25))
-            }
-            for _ in 0..<3 {
-                guard let self, !Task.isCancelled, self.running,
-                      NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
-                      let layout = self.coordinator.sessions[space]?.state.layout,
-                      let at = layout.focused.flatMap(layout.index(of:)),
-                      layout.columns[at.column].slots[at.row].activeMember == wid else { return }
-                let strip = Set(layout.columns.flatMap(\.slots).map(\.activeMember))
-                let neighbours = layout.neighbours()
-                @MainActor func stack() -> [UInt32] { Self.frontToBack().filter(strip.contains) }
-                // In order: every neighbour above every parked window.
-                let order = stack()
-                let lowest = neighbours.compactMap { order.firstIndex(of: $0) }.max() ?? 0
-                let highestParked = order.indices.first { !neighbours.contains(order[$0]) && order[$0] != wid } ?? order.count
-                if lowest < highestParked { return }
-                @MainActor func raise(_ id: UInt32, until done: ([UInt32]) -> Bool) async {
-                    guard let element = self.references[id] else { return }
-                    AXUIElementPerformAction(element, kAXRaiseAction as CFString)
-                    for _ in 0..<10 where !done(stack()) { try? await Task.sleep(for: .milliseconds(10)) }
-                }
-                let siblings = neighbours.filter { self.pidForWindow[$0] == pid }
-                for id in siblings { await raise(id) { $0.first == id } }
-                if !siblings.isEmpty {
-                    if let element = self.references[wid] {
-                        AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
-                    }
-                    await raise(wid) { $0.first == wid }
-                }
-                for id in neighbours where self.pidForWindow[id] != pid {
-                    await raise(id) { $0.dropFirst().first == id }
-                }
-            }
-        }
-    }
-
-    /// Reorders the strip after a thumbnail drag and places windows in the
-    /// new order; focus stays where it was.
-    private func moveThumbnail(_ wid: UInt32, to position: Int, in space: UInt64) {
-        guard running, !paused, DisplayArrangement.currentProblem() == nil,
-              coordinator.spaceForWindow[wid] == space,
-              let session = coordinator.sessions[space], !session.state.interactionSuppressed,
-              session.move(windowID: wid, to: position, ticket: session.ticket) else {
-            windowIndicators.update(coordinator, mode: options.config.bottom, redrawSpace: space)
-            return
-        }
-        log("moved \(wid) to tray position \(position)")
-        cancelMotion(); motionFrames.removeAll()
-        forceApply = true
-        reveal(session)
-        refresh()
-        windowIndicators.update(coordinator, mode: options.config.bottom, redrawSpace: space)
-    }
-
-    private func raise(_ wid: UInt32) -> Bool {
-        guard let pid = pidForWindow[wid], let element = references[wid] ?? findWindow(wid, pid: pid) else { return false }
-        AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
-        AXUIElementPerformAction(element, kAXRaiseAction as CFString)
-        NSRunningApplication(processIdentifier: pid)?.activate()
-        return true
-    }
-
-    /// Executes one CLI command and returns a JSON-serialisable reply.
-    public func handle(_ args: [String]) -> [String: Any] {
-        if let problem = LiveCommand.validate(args) { return ["ok": false, "error": problem] }
-        switch args.first {
-        case "pause": return pause()
-        case "resume": return resume()
-        case "stop": return ["ok": true, "stop": true]
-        case "status" where paused:
-            let gestureConflicts = GestureConflict.checkLive(fingers: options.config.gesture.fingers)
-            let gestureStatus: [String: Any] = [
-                "enabled": false,
-                "blockedBy": gestureConflicts
-            ]
-            return ["ok": true, "paused": true, "gesture": gestureStatus,
-                    "problem": DisplayArrangement.currentProblem() ?? NSNull()]
-        default: break
-        }
-        guard running else { return ["ok": false, "error": paused ? "paused (paperi msg resume)" : "not running"] }
-        guard let verb = args.first else { return ["ok": false, "error": "empty command"] }
-        let rest = Array(args.dropFirst())
-        func direction(_ s: String?) -> Direction? {
-            switch s { case "left": .left; case "right": .right; case "up": .up; case "down": .down; default: nil }
-        }
-        func fail(_ message: String) -> [String: Any] { ["ok": false, "error": message] }
-        if verb != "focus" && verb != "status" { cancelMotion(); motionFrames.removeAll() }
-        switch verb {
-        case "status":
-            return status()
-        case "retile", "refresh":
-            forceApply = true; refresh(); return ["ok": true]
-        case "stop":
-            return ["ok": true, "stop": true]
-        case "focus":
-            if swipe != nil { cancelMotion(); motionFrames.removeAll() }
-            commandStarted = ProcessInfo.processInfo.systemUptime
-            firstWriteMS = nil; finalWriteMS = nil; confirmedMS = nil
-            guard let dir = direction(rest.first) else { return fail("usage: focus left|right|up|down") }
-            // Focus never leaves the strip or switches Spaces: at its end (or
-            // with no managed window focused) focus stays put. A managed strip bounces.
-            guard let ctx = focusedContext() else {
-                return ["ok": true, "changed": false, "edge": true, "managed": false]
-            }
-            guard let target = ctx.session.state.layout.neighbor(dir),
-                  let loc = ctx.session.state.layout.index(of: target) else {
-                animateFocus(space: ctx.space, byID: latestSurvey, bounce: dir)
-                return ["ok": true, "changed": false, "edge": true]
-            }
-            let wid = ctx.session.state.layout.columns[loc.column].slots[loc.row].activeMember
-            try? ctx.session.focus(windowID: wid, ownerPID: pidForWindow[wid], classification: Self.tiled, ticket: ctx.session.ticket)
-            reveal(ctx.session)
-            animateFocus(space: ctx.space, byID: latestSurvey)
-            return ["ok": raise(wid), "windowID": wid]
-        case "swipe":
-            guard let dir = direction(rest.first) else { return fail("usage: swipe left|right|up|down [travel]") }
-            return simulateSwipe(dir, travel: rest.count > 1 ? Double(rest[1]) ?? 1 : 1)
-        case "swap", "move":
-            guard let dir = direction(rest.first) else { return fail("usage: swap left|right|up|down") }
-            return layoutCommand { layout, _ in layout.swap(dir) }
-        case "width", "height":
-            guard let sign = rest.first, sign == "+" || sign == "-" else { return fail("usage: \(verb) +|-") }
-            let fraction = Double(rest.dropFirst().first ?? "") ?? 0.1
-            let delta = sign == "+" ? fraction : -fraction
-            if verb == "width" { return layoutCommand { layout, canvas in try layout.resizeWidth(by: delta, in: canvas, edgeMargin: self.options.gap) } }
-            return layoutCommand { layout, canvas in try layout.resizeHeight(by: delta, in: canvas, gap: self.options.gap) }
-        case "center":
-            return layoutCommand(reveal: false) { layout, canvas in try layout.center(in: canvas, gap: self.options.gap) }
-        case "split":
-            return layoutCommand(reveal: false) { layout, canvas in try layout.split(in: canvas, gap: self.options.gap) }
-        case "slurp":
-            return layoutCommand { layout, _ in layout.slurp() }
-        case "barf":
-            return layoutCommand { layout, _ in layout.barf() }
-        case "float":
-            return toggleFloat()
-        case "tray":
-            return showTray() ? ["ok": true] : fail("no tray on the display under the pointer")
-        default:
-            return fail("unknown command \(verb)")
-        }
-    }
-
-    private func surveyByID() -> [UInt32: Survey] {
-        var levels: [UInt32: Int] = [:]
-        for row in CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? [] {
-            if let id = row[kCGWindowNumber as String] as? UInt32 { levels[id] = row[kCGWindowLayer as String] as? Int ?? 0 }
-        }
-        let rows = appsToSurvey(allowlistedApps()).filter { !$0.isHidden }.flatMap { survey($0, levels: levels) }
-        for row in rows { references[row.windowID] = row.element; pidForWindow[row.windowID] = row.pid }
-        return Dictionary(rows.map { ($0.windowID, $0) }, uniquingKeysWith: { a, _ in a })
-    }
-
-    private func layoutCommand(reveal shouldReveal: Bool = true,
-                               _ body: (inout Layout, Rect) throws -> Void) -> [String: Any] {
-        guard let ctx = focusedContext() else { return ["ok": false, "error": "no managed focused window"] }
-        let canvas = ctx.session.canvas
-        do {
-            let changed = try ctx.session.command(frontmostPID: ctx.pid, ticket: ctx.session.ticket) { try body(&$0, canvas) }
-            if changed && shouldReveal { reveal(ctx.session) }
-            if changed { apply(space: ctx.space, byID: surveyByID()); rememberWidths() }
-            return ["ok": true, "changed": changed]
-        } catch {
-            return ["ok": false, "error": "\(error)"]
-        }
-    }
-
-    private func toggleFloat() -> [String: Any] {
-        refresh()
-        guard let front = NSWorkspace.shared.frontmostApplication else { return ["ok": false, "error": "no frontmost app"] }
-        let application = AXUIElementCreateApplication(front.processIdentifier)
-        AXUIElementSetMessagingTimeout(application, 0.2)
-        guard let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
-              CFGetTypeID(value) == AXUIElementGetTypeID() else { return ["ok": false, "error": "no focused window"] }
-        let focusedElement = value as! AXUIElement
-        let wid = paperi_window_id(focusedElement)
-        if userFloating.remove(wid) != nil {
-            refresh()
-            return ["ok": true, "floating": false, "windowID": wid]
-        }
-        guard coordinator.spaceForWindow[wid] != nil else { return ["ok": false, "error": "window is not managed"] }
-        let members = (try? coordinator.removeContainer(containing: wid, classification: Self.tiled)) ?? []
-        userFloating.formUnion(members)
-        refresh()
-        return ["ok": !members.isEmpty, "floating": true, "members": members]
-    }
-
-    /// Read-only: what live mode would decide for each current-Space window of
-    /// the given apps (eligibility, singleton proof, native tab groups).
-    /// Empty `bundleIDs` checks every app live mode would consider (config applied).
-    public static func checkApps(_ bundleIDs: [String], config: LiveConfig = LiveConfig()) -> [String: Any] {
-        var config = config
-        if !bundleIDs.isEmpty { config.include = bundleIDs }
-        let considered = NSWorkspace.shared.runningApplications.filter { Self.considered($0, config: config) }
-        let pids = Set(considered.map(\.processIdentifier))
-        let recorder = EventRecorder(workspaceCenter: NotificationCenter(),
-                                     runningApplications: { NSWorkspace.shared.runningApplications },
-                                     filter: { pids.contains($0.processIdentifier) },
-                                     observeWorkspaceEvents: false, emit: { _ in })
-        recorder.start(); defer { recorder.stop() }
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.3))
-        let probe = LiveManager(options: Options(config: config))
-        var levels: [UInt32: Int] = [:]
-        for row in CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? [] {
-            if let id = row[kCGWindowNumber as String] as? UInt32 { levels[id] = row[kCGWindowLayer as String] as? Int ?? 0 }
-        }
-        var apps: [[String: Any]] = []
-        for app in probe.appsToSurvey(considered) {
-            let evidence = (recorder.tabEvidence(processID: app.processIdentifier)["applications"] as? [[String: Any]])?.first ?? [:]
-            let singletons = Set(NativeTabMembership.inspectSingletons(evidence))
-            let groups = NativeTabMembership.inspect(evidence, requireComplete: false)
-            var tabGroupChildren: [UInt32: Bool] = [:]
-            if let nodes = evidence["nodes"] as? [[String: Any]], let roots = evidence["roots"] as? [Int] {
-                for root in roots where nodes.indices.contains(root) {
-                    guard let wid = nodes[root]["windowID"] as? UInt32,
-                          let children = (nodes[root]["AXChildren"] as? [String: Any])?["nodes"] as? [Int] else { continue }
-                    tabGroupChildren[wid] = children.contains { nodes.indices.contains($0) && nodes[$0]["AXRole"] as? String == "AXTabGroup" }
-                }
-            }
-            let windows = probe.survey(app, levels: levels).map { row -> [String: Any] in
-                let group = groups.first { $0.members.contains(row.windowID) }
-                let decision: String
-                if row.classification.reason == "user floating" { decision = "floating (config rule)" }
-                else if row.classification.eligibility == .floating { decision = "floating: \(row.classification.reason)" }
-                else if row.classification.eligibility != .tiled { decision = "skipped: \(row.classification.reason)" }
-                else if let group { decision = "tab container \(group.members)" }
-                else if singletons.contains(row.windowID) { decision = "managed as window" }
-                else { decision = "withheld: tab membership unknown (use --singleton-app if it has no native tabs)" }
-                return ["windowID": row.windowID, "title": Diagnostics.attribute(row.element, kAXTitleAttribute) as? String ?? "",
-                        "decision": decision, "directAXTabGroup": tabGroupChildren[row.windowID] as Any? ?? NSNull()]
-            }
-            apps.append(["bundleID": app.bundleIdentifier ?? "", "windowsError": evidence["windowsError"] ?? NSNull(),
-                         "truncated": evidence["truncated"] ?? NSNull(), "windows": windows])
-        }
-        return ["apps": apps, "note": "Current Space only; read-only"]
-    }
-
-    public func status() -> [String: Any] {
-        let displays = coordinator.displays.map { d -> [String: Any] in
-            ["uuid": d.displayUUID, "canvas": [d.canvas.x, d.canvas.y, d.canvas.width, d.canvas.height],
-             "activeSpace": d.activeSpaceID ?? 0, "userSpaces": d.userSpaces]
-        }
-        let sessions = coordinator.sessions.filter { !$0.value.slots.isEmpty }.map { space, session -> [String: Any] in
-            ["space": space, "offset": session.state.layout.offset, "focused": session.state.layout.focused ?? NSNull(),
-             "suppressed": session.state.interactionSuppressed,
-             "columns": session.state.layout.columns.map { column -> [String: Any] in
-                 ["width": column.width, "slots": column.slots.map { slot -> [String: Any] in
-                     ["id": slot.id, "members": slot.members, "active": slot.activeMember,
-                      "pid": pidForWindow[slot.activeMember] ?? 0,
-                      "title": references[slot.activeMember].flatMap { Diagnostics.attribute($0, kAXTitleAttribute) as? String } ?? ""]
-                 }]
-             }]
-        }
-        let gestureConflicts = GestureConflict.checkLive(fingers: options.config.gesture.fingers)
-        let gestureEnabled = options.config.gesture.enabled && gestureConflicts.isEmpty
-        let gestureStatus: [String: Any] = [
-            "enabled": gestureEnabled,
-            "blockedBy": gestureConflicts
-        ]
-        return ["ok": true, "paused": false, "apps": options.config.include?.sorted() ?? ["all regular apps"], "displays": displays, "sessions": sessions,
-                "floating": userFloating.sorted(), "journaled": journal.count, "lastRefreshMS": lastRefreshMS,
-                "gesture": gestureStatus,
-                "performance": ["phaseMS": phaseMS, "axWriteCalls": axWriteCalls, "axWriteMS": axWriteMS,
-                    "commandToFirstWriteMS": firstWriteMS as Any? ?? NSNull(),
-                    "commandToFinalWriteMS": finalWriteMS as Any? ?? NSNull(),
-                    "commandToConfirmedFrameMS": confirmedMS as Any? ?? NSNull(),
-                    "animationTicks": motionTicks, "failedAnimationWindows": motionFailed.sorted(),
-                    "lastTickMS": tickMS, "overBudgetTicks": missedTicks,
-                    "swipe": swipeMetrics,
-                    "animationActive": motionActive]]
-    }
 }

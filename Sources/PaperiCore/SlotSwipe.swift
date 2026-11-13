@@ -52,6 +52,12 @@ public struct SlotSwipe: Equatable, Sendable {
 
     public struct Configuration: Equatable, Sendable {
         public var travel: Double
+        /// Finger travel for a full step towards the left / right neighbour
+        /// when it differs from `travel`. The caller sets these from how far
+        /// the strip scrolls each way, so the strip moves the same distance
+        /// per unit of finger travel whatever the column widths.
+        public var travelLeft: Double?
+        public var travelRight: Double?
         public var commitThreshold: Double
         public var flickVelocity: Double
         public var lockThreshold: Double
@@ -77,8 +83,12 @@ public struct SlotSwipe: Equatable, Sendable {
                     closeTravel: Double? = nil,
                     pullTravel: Double? = nil,
                     turnTravel: Double? = nil,
-                    startOffset: Double = 0) {
+                    startOffset: Double = 0,
+                    travelLeft: Double? = nil,
+                    travelRight: Double? = nil) {
             self.travel = travel
+            self.travelLeft = travelLeft
+            self.travelRight = travelRight
             self.commitThreshold = commitThreshold
             self.flickVelocity = flickVelocity
             self.lockThreshold = lockThreshold
@@ -111,59 +121,57 @@ public struct SlotSwipe: Equatable, Sendable {
         return sign * resisted
     }
 
-    /// At most eight slots per second, even if input arrives in one large jump.
-    public static let maximumVisualSpeed = 8.0
+    /// A critically damped spring carrying a released swipe to its target:
+    /// `distance` (progress units) still to go, entered at `speed` towards
+    /// the target (negative: moving away). The motion continues at exactly
+    /// the release speed and slows onto the target without passing it.
+    public struct Spring: Equatable, Sendable {
+        public let distance: Double
+        public let speed: Double
+        public let omega: Double
+        /// When what is left drops below `tolerance`; the caller ends there.
+        public let duration: Double
 
-    public static func advanceVisualProgress(_ current: Double, toward target: Double, elapsed: Double) -> Double {
-        guard current.isFinite, target.isFinite, elapsed.isFinite, elapsed > 0 else { return current }
-        // Never catch up a stalled run loop in one visible jump.
-        let step = maximumVisualSpeed * min(elapsed, 1.0 / 30.0)
-        return current + min(step, max(-step, target - current))
-    }
+        public static let tolerance = 0.001
 
-    /// Visual time constant: absorbs touch reports that beat against the
-    /// display (one unit is a whole column or window height) at the cost of
-    /// ~16 ms of lag.
-    public static let visualSmoothing = 0.016
+        /// `response`: seconds for a spring starting from rest to cover 99%.
+        public init(distance: Double, speed: Double, response: Double) {
+            let d = distance.isFinite ? max(0, distance) : 0
+            let base = 6.64 / max(0.05, response.isFinite ? response : 0.22)
+            let v = speed.isFinite ? speed : 0
+            // Too fast to stop in time at the usual stiffness: stiffen until
+            // it just arrives (a plain exponential) rather than overshoot.
+            let omega = d > 1e-9 ? max(base, v / d) : base
+            self.distance = d
+            self.omega = omega
+            // Moving away, it turns round within about a fifth of the distance.
+            self.speed = max(v, -omega * d)
+            var t = 0.0
+            if d > 1e-9 {
+                let step = 1.0 / 240
+                while t < 1, t * omega < 1 || abs(Self.remaining(d, self.speed, omega, t)) > Self.tolerance { t += step }
+            }
+            duration = t
+        }
 
-    /// Like `advanceVisualProgress`, but approaches the target exponentially
-    /// so frames without new input still move a little and the next one does
-    /// not jump. The speed limit still applies.
-    public static func followVisualProgress(_ current: Double, toward target: Double, elapsed: Double,
-                                            timeConstant: Double = visualSmoothing) -> Double {
-        guard current.isFinite, target.isFinite, elapsed.isFinite, elapsed > 0, timeConstant > 0 else { return current }
-        let dt = min(elapsed, 1.0 / 30.0)
-        let eased = current + (target - current) * (1 - exp(-dt / timeConstant))
-        // Snap the last fraction of a point's worth instead of creeping forever.
-        let next = abs(target - eased) < 1e-4 ? target : eased
-        return advanceVisualProgress(current, toward: next, elapsed: dt)
-    }
+        private static func remaining(_ d: Double, _ v: Double, _ omega: Double, _ t: Double) -> Double {
+            (d + (omega * d - v) * t) * exp(-omega * t)
+        }
 
-    /// Bezier control points for a settle that starts at `speed` (progress
-    /// per second, along the motion) and decelerates to rest over `distance`
-    /// in `duration`. Matching the on-screen speed avoids a lurch at release.
-    public static func settleCurve(speed: Double, distance: Double, duration: Double) -> (Double, Double, Double, Double) {
-        guard speed.isFinite, distance > 0, duration > 0 else { return (0, 0, 0.58, 1) }
-        // Initial slope of the normalised curve; ease-out's is about 1.7.
-        let slope = min(4, max(0, speed * duration / distance))
-        let x1 = 0.25
-        return (x1, min(1, x1 * slope), 0.4, 1)
-    }
+        /// Fraction of the distance covered `elapsed` seconds in: 0 at the
+        /// start, 1 from `duration` on. Negative while still moving away.
+        public func fraction(at elapsed: Double) -> Double {
+            guard distance > 1e-9, elapsed.isFinite, elapsed < duration else { return 1 }
+            if elapsed <= 0 { return 0 }
+            return 1 - Self.remaining(distance, speed, omega, elapsed) / distance
+        }
 
-    /// Duration for a settle that starts at `speed` and stops: about twice
-    /// distance / speed, within the usual settle bounds.
-    public static func settleDuration(distance: Double, speed: Double, base: Double) -> Double {
-        let usual = settleDuration(distance: distance, base: base)
-        guard speed.isFinite, speed > 0.01, distance > 0 else { return usual }
-        return min(usual, max(0.12, 1.8 * distance / speed, 2 * distance / maximumVisualSpeed))
-    }
-
-    /// The ease-out curve peaks below twice its average speed. Budget enough
-    /// time for that peak too, so releasing cannot bypass the tracking limit.
-    public static func settleDuration(distance: Double, base: Double) -> Double {
-        guard distance.isFinite, base.isFinite, distance > 0 else { return 0 }
-        return max(0.16, min(0.4, max(0.16, base)) * sqrt(min(1, distance)),
-                   2 * distance / maximumVisualSpeed)
+        /// Speed towards the target `elapsed` seconds in, progress per second.
+        public func velocity(at elapsed: Double) -> Double {
+            guard distance > 1e-9, elapsed.isFinite, elapsed < duration else { return 0 }
+            let t = max(0, elapsed)
+            return (speed + omega * (omega * distance - speed) * t) * exp(-omega * t)
+        }
     }
 
     public mutating func begin(at time: Double) {
@@ -187,8 +195,7 @@ public struct SlotSwipe: Equatable, Sendable {
                 if absX > 1.2 * absY {
                     // Locked horizontal! As for closes, the shown progress
                     // starts from rest here instead of jumping the lead-in.
-                    let dirFactor = config.invert ? 1.0 : -1.0
-                    let rawProg = (newX * dirFactor) / max(0.01, config.travel)
+                    let rawProg = advance(0, by: newX * (config.invert ? 1.0 : -1.0))
                     origin = max(-0.5, min(0.5, rawProg))
                     let clamped = Self.rubberBand(config.startOffset + Self.shown(rawProg, origin: origin))
                     let dt = max(1.0 / 120.0, time - start)
@@ -227,9 +234,8 @@ public struct SlotSwipe: Equatable, Sendable {
             }
 
         case .active(let rawProg, _, let lastVel, let lastTime):
-            let dirFactor = config.invert ? 1.0 : -1.0
-            let deltaProg = (dx * dirFactor) / max(0.01, config.travel)
-            let newRaw = rawProg + deltaProg
+            let newRaw = advance(rawProg, by: dx * (config.invert ? 1.0 : -1.0))
+            let deltaProg = newRaw - rawProg
             let clamped = Self.rubberBand(config.startOffset + Self.shown(newRaw, origin: origin))
             guard time > lastTime else { return nil }
             let dt = time - lastTime
@@ -266,6 +272,19 @@ public struct SlotSwipe: Equatable, Sendable {
             state = .turning(rawProgress: next.raw, clampedProgress: next.shown, velocity: next.velocity, lastTime: time)
             return .turnUpdated(progress: next.shown)
         }
+    }
+
+    /// Finger travel for a full step on the side `raw` is on.
+    private func travel(side raw: Double) -> Double {
+        max(0.01, (raw < 0 ? config.travelLeft : config.travelRight) ?? config.travel)
+    }
+
+    /// Horizontal progress after `fingers` more travel (signed, along
+    /// progress). The two sides may need different travel for a full step;
+    /// crossing the start keeps the fingers' position continuous.
+    private func advance(_ raw: Double, by fingers: Double) -> Double {
+        let position = raw * travel(side: raw) + fingers
+        return position / travel(side: position)
     }
 
     /// One close, pull or turn update; `delta` is in progress units.
@@ -322,18 +341,30 @@ public struct SlotSwipe: Equatable, Sendable {
         return max(0, rubberBand(progress))
     }
 
-    /// Shared release rule: a long enough aligned flick, or enough travel
-    /// without a fast retreat.
-    private func releases(raw: Double, clamped: Double, velocity: Double, lastTime: Double, at time: Double) -> Bool {
+    /// Travel below which release speed is ignored: a tiny twitch must not
+    /// act, however fast.
+    public static let flickTravel = 0.12
+
+    /// Seconds of coasting credited to the release speed. A release commits
+    /// when travel plus coast reaches the commit threshold, so at the least
+    /// travel that counts, `flickVelocity` is exactly the speed that commits,
+    /// and longer swipes need proportionally less.
+    private var coastTime: Double {
+        max(0, config.commitThreshold - Self.flickTravel) / max(0.01, config.flickVelocity)
+    }
+
+    /// How much further the release speed would carry, in progress units.
+    private func coast(travel: Double, velocity: Double, lastTime: Double, at time: Double) -> Double {
         // Stationary touches produce no move events. Fade stale velocity out
         // over 100 ms so a hold before release cannot act as a flick.
         let releaseVelocity = velocity * max(0, 1 - max(0, time - lastTime) / 0.1)
-        let aligned = releaseVelocity * raw > 0
-        // Require intentional travel as well as speed. A tiny twitch must
-        // not jump a whole slot, nor should reversing select an unseen slot.
-        let flick = abs(raw) >= 0.12 && aligned && abs(releaseVelocity) >= config.flickVelocity
-        let retreating = releaseVelocity * raw < 0 && abs(releaseVelocity) >= config.flickVelocity
-        return flick || (abs(clamped) >= config.commitThreshold && !retreating)
+        return abs(travel) >= Self.flickTravel ? releaseVelocity * coastTime : 0
+    }
+
+    /// Release rule for closes, pulls and turns: where the fingers were
+    /// heading reaches the commit threshold. Moving back fast cancels.
+    private func releases(raw: Double, clamped: Double, velocity: Double, lastTime: Double, at time: Double) -> Bool {
+        clamped + coast(travel: raw, velocity: velocity, lastTime: lastTime, at: time) >= config.commitThreshold
     }
 
     public mutating func end(at time: Double) -> Decision {
@@ -387,49 +418,40 @@ public struct SlotSwipe: Equatable, Sendable {
         }
     }
 
-    /// A flick (enough travel, fast, aligned) steps one slot its way from
+    /// A swipe heading far enough its own way steps one slot that way from
     /// this swipe's column, even if the strip has not passed that column yet:
     /// two quick swipes move two columns. Otherwise the strip settles where
-    /// it was left: past the commit threshold of a neighbour, unless moving
-    /// fast back, it goes there, else back to its column. At rest at the
-    /// start this is the plain one-slot rule.
+    /// it was heading: past the commit threshold of a neighbour it goes
+    /// there, else back to its column. Speed never selects the side the
+    /// strip is not on.
     private func horizontalDecision(raw: Double, velocity: Double, lastTime: Double, at time: Double) -> Decision {
-        // Stationary touches produce no move events. Fade stale velocity out
-        // over 100 ms so a hold before release cannot act as a flick.
-        let releaseVelocity = velocity * max(0, 1 - max(0, time - lastTime) / 0.1)
-        // Require intentional travel as well as speed. A tiny twitch must
-        // not jump a whole slot, nor should reversing select an unseen slot.
-        if abs(raw) >= 0.12, releaseVelocity * raw > 0, abs(releaseVelocity) >= config.flickVelocity {
+        let coast = coast(travel: raw, velocity: velocity, lastTime: lastTime, at: time)
+        if coast * raw > 0, abs(raw + coast) >= config.commitThreshold {
             return .commit(raw > 0 ? .right : .left)
         }
         // Decide on the whole finger travel, including the lead-in.
         let position = config.startOffset + raw
-        let retreating = releaseVelocity * position < 0 && abs(releaseVelocity) >= config.flickVelocity
-        guard abs(Self.rubberBand(position)) >= config.commitThreshold, !retreating else { return .snapBack }
+        let rest = Self.rubberBand(position) + coast
+        guard abs(rest) >= config.commitThreshold, rest * position > 0 else { return .snapBack }
         return .commit(position > 0 ? .right : .left)
     }
 
-    // MARK: catching a landing
-
-    /// Progress along a settle animation `elapsed` seconds in, for the
-    /// cubic Bézier timing curve `curve` (control points as for
-    /// `CAMediaTimingFunction`). 0 at the start, 1 from `duration` on.
-    public static func settleFraction(elapsed: Double, duration: Double, curve: (Double, Double, Double, Double)) -> Double {
-        guard elapsed.isFinite, duration.isFinite, duration > 0 else { return 1 }
-        let x = min(1, max(0, elapsed / duration))
-        if x <= 0 || x >= 1 { return x }
-        func bezier(_ s: Double, _ p1: Double, _ p2: Double) -> Double {
-            let r = 1 - s
-            return 3 * r * r * s * p1 + 3 * r * s * s * p2 + s * s * s
+    /// Sets the finger travel for a full step each way once the caller knows
+    /// how far the strip scrolls, keeping the fingers' position.
+    public mutating func retarget(travelLeft: Double?, travelRight: Double?) {
+        guard case .active(let raw, _, let velocity, let lastTime) = state else {
+            config.travelLeft = travelLeft; config.travelRight = travelRight; return
         }
-        // x(s) is monotonic for control x within 0…1: bisect for s.
-        var lo = 0.0, hi = 1.0
-        for _ in 0..<40 {
-            let mid = (lo + hi) / 2
-            if bezier(mid, curve.0, curve.2) < x { lo = mid } else { hi = mid }
-        }
-        return bezier((lo + hi) / 2, curve.1, curve.3)
+        let fingers = raw * travel(side: raw), lead = origin * travel(side: origin)
+        let scale = travel(side: raw)
+        config.travelLeft = travelLeft; config.travelRight = travelRight
+        let next = fingers / travel(side: fingers)
+        origin = max(-0.5, min(0.5, lead / travel(side: lead)))
+        state = .active(rawProgress: next, clampedProgress: Self.rubberBand(config.startOffset + Self.shown(next, origin: origin)),
+                        velocity: velocity * scale / travel(side: next), lastTime: lastTime)
     }
+
+    // MARK: catching a landing
 
     /// The column (-1, 0 or 1 from a landing's own) a new swipe takes over
     /// from at `position`: the nearest one there is.

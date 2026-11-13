@@ -47,6 +47,7 @@ public final class EventTapTouchSource: TouchSource {
     private var pendingReleaseTime: Double?
     private var releaseTask: Task<Void, Never>?
     private var appGestureBlocker: AppGestureBlocker?
+    var appGestureBlockingStatus: String { appGestureBlocker?.status ?? "inactive" }
     private static var activeInstance: EventTapTouchSource?
     /// Report `.tap` for quick taps of all `fingers`.
     public var recognizesTaps = false
@@ -71,7 +72,7 @@ public final class EventTapTouchSource: TouchSource {
         let blocker = AppGestureBlocker(fingers: fingers, verbose: verbose)
         blocker.start()
         appGestureBlocker = blocker
-        let mask = CGEventMask(1 << 29)
+        let mask = CGEventMask(1) << CGEventMask(GestureEventType.touch)
         guard let port = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -84,10 +85,14 @@ public final class EventTapTouchSource: TouchSource {
                     }
                     return Unmanaged.passUnretained(event)
                 }
-                guard type.rawValue == 29 else { return Unmanaged.passUnretained(event) }
+                guard type.rawValue == GestureEventType.touch else { return Unmanaged.passUnretained(event) }
                 if let nsEvent = NSEvent(cgEvent: event) {
                     let touches = nsEvent.allTouches()
                     let timestamp = nsEvent.timestamp
+                    if !touches.isEmpty {
+                        let down = touches.filter { $0.phase != .ended && $0.phase != .cancelled }.count
+                        EventTapTouchSource.activeInstance?.appGestureBlocker?.validateFingerCount(down, at: timestamp)
+                    }
                     EventTapTouchSource.activeInstance?.processTouches(touches, at: timestamp)
                 }
                 return Unmanaged.passUnretained(event)

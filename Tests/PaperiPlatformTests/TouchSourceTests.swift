@@ -300,3 +300,23 @@ struct AppGestureFilterTests {
         #expect(drop(&f, .touchFrame))
     }
 }
+
+struct FingerCountValidationTests {
+    @Test func transientDisagreementRecovers() {
+        var validation = FingerCountValidation()
+        validation.observe(appKit: 2, device: 3, at: 0)
+        validation.observe(appKit: 3, device: 3, at: 0.02)
+        validation.observe(appKit: 2, device: 3, at: 1)
+        #expect(!validation.failed)
+    }
+
+    @Test func sustainedDisagreementDisablesUntilRestart() {
+        var validation = FingerCountValidation()
+        for time in [0.0, 0.05, 0.10, 0.16] {
+            validation.observe(appKit: 2, device: 3, at: time)
+        }
+        #expect(validation.failed)
+        validation.observe(appKit: 2, device: 2, at: 1)
+        #expect(validation.failed)
+    }
+}
