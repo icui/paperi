@@ -253,6 +253,19 @@ struct SlotSwipeTests {
         #expect(swipe.move(dx: 0, dy: -0.02, at: 0.01) == .cancelled)
     }
 
+    @Test func upwardCloseRequiresNarrowerAngleThanDownwardPull() {
+        for dx in [-0.02, 0.02] {
+            var up = SlotSwipe(config: .init(closeTravel: 0.2))
+            up.begin(at: 0)
+            #expect(up.move(dx: dx, dy: 0.03, at: 0.02) == nil)
+            #expect(up.move(dx: 0, dy: 0.01, at: 0.04) == .closeStarted)
+
+            var down = SlotSwipe(config: .init(pullTravel: 0.2))
+            down.begin(at: 0)
+            #expect(down.move(dx: dx, dy: -0.03, at: 0.02) == .pullStarted)
+        }
+    }
+
     @Test func shortOrReturnedCloseSnapsBack() {
         var short = SlotSwipe(config: .init(lockThreshold: 0.01, closeTravel: 0.2))
         short.begin(at: 0.0)

@@ -282,7 +282,8 @@ public struct SlotSwipe: Equatable, Sendable {
                     let vel = rawProg / dt
                     state = .active(rawProgress: rawProg, clampedProgress: clamped, velocity: vel, lastTime: time)
                     return .started
-                } else if absY > 1.2 * absX {
+                } else if absY > (newY > 0 ? 1.7 : 1.2) * absX {
+                    // Closing requires motion within about 30° of straight up.
                     // Touch y grows upwards: up closes, down pulls.
                     guard let travel = newY > 0 ? config.closeTravel : config.pullTravel else {
                         state = .cancelled
