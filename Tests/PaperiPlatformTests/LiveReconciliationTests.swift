@@ -4,6 +4,24 @@ import PaperiCore
 @testable import PaperiPlatform
 
 @MainActor struct LiveReconciliationTests {
+    @Test func snapshotDepthKeepsNearestEdgesAboveParkedWindows() {
+        let canvas = Rect(x: 10, y: 0, width: 1000, height: 800)
+        func depth(_ x: Double, width: Double = 500) -> Double {
+            LiveReconciliation.snapshotDepth(Rect(x: x, y: 0, width: width, height: 800), canvas: canvas)
+        }
+        #expect(depth(-489) > depth(-499))
+        #expect(depth(1009) > depth(1019))
+        #expect(depth(1000) > depth(1009))
+        #expect(depth(-480) > depth(-489))
+        // Width must not let a farther parked column cover its neighbour.
+        #expect(depth(-989, width: 1000) == depth(-489))
+        // Order follows motion on both sides, with no visibility cutoff.
+        for step in 0...10 {
+            #expect(depth(1009 - Double(step)) > depth(1019))
+            #expect(depth(-489 + Double(step)) > depth(-499))
+        }
+    }
+
     @Test func trailingCloseAlignsNeighborRightOnlyWithColumnToItsLeft() {
         let canvas = Rect(x: 10, y: 30, width: 1000, height: 800)
         let columns = (1...4).map { id in

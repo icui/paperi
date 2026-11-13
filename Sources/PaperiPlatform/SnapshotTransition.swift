@@ -20,6 +20,7 @@ import PaperiCore
     private var window: NSWindow?
     private var layers: [UInt32: CALayer] = [:]
     private var root: CALayer?
+    private var canvas: Rect?
     private var tabIndicator: GestureIndicator?
     /// Only the gesture indicator shows: the screenshots are hidden and the
     /// overlay is clear, so the live windows stay visible underneath.
@@ -36,6 +37,7 @@ import PaperiCore
     private(set) var textureBytes = 0
 
     func prepare(windows ids: Set<UInt32>, excluding stripIDs: Set<UInt32> = [], canvas: Rect) async throws {
+        self.canvas = canvas
         let began = ProcessInfo.processInfo.systemUptime
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else { throw Failure.permission }
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
@@ -90,6 +92,7 @@ import PaperiCore
             let layer = CALayer()
             layer.actions = Self.noActions
             layer.frame = local(frame)
+            layer.zPosition = depth(frame)
             Self.install(snapshot, on: layer, scale: scale, active: item.windowID == key)
             root.addSublayer(layer)
             layers[item.windowID] = layer
@@ -284,6 +287,27 @@ import PaperiCore
         window?.orderFrontRegardless()
     }
 
+    private func depth(_ frame: Rect) -> CGFloat {
+        canvas.map { LiveReconciliation.snapshotDepth(frame, canvas: $0) } ?? 0
+    }
+
+    /// Sample depth with position so ordering changes in the render server,
+    /// including while the main thread is placing the real windows underneath.
+    private func animateDepth(_ layer: CALayer, frames: [Rect], duration: Double, began: CFTimeInterval = 0) {
+        guard let last = frames.last else { return }
+        let shown = layer.presentation()?.zPosition ?? layer.zPosition
+        layer.removeAnimation(forKey: "depth")
+        layer.zPosition = depth(last)
+        var values = frames.map(depth)
+        values[0] = shown
+        let animation = CAKeyframeAnimation(keyPath: "zPosition")
+        animation.values = values.map { NSNumber(value: Double($0)) }
+        animation.calculationMode = .linear
+        animation.duration = duration
+        animation.beginTime = began
+        layer.add(animation, forKey: "depth")
+    }
+
     /// Moves images immediately (finger tracking); cancels any running slide.
     func place(_ frames: [UInt32: Rect]) {
         CATransaction.begin()
@@ -292,6 +316,8 @@ import PaperiCore
             guard let frame = frames[wid] else { continue }
             layer.removeAnimation(forKey: "slide")
             layer.position = center(frame)
+            layer.removeAnimation(forKey: "depth")
+            layer.zPosition = depth(frame)
         }
         CATransaction.commit()
     }
@@ -319,6 +345,7 @@ import PaperiCore
             animation.duration = motion.duration
             animation.beginTime = layer.convertTime(began, from: nil)
             layer.add(animation, forKey: "slide")
+            animateDepth(layer, frames: samples.compactMap { $0[wid] }, duration: motion.duration, began: animation.beginTime)
             if wid == fadingWindow {
                 var opacities = progress.map { Float(opacity($0)) }
                 opacities[0] = layer.presentation()?.opacity ?? layer.opacity
@@ -346,6 +373,8 @@ import PaperiCore
         for (wid, layer) in layers {
             let position = layer.presentation()?.position ?? layer.position
             layer.removeAnimation(forKey: "slide")
+            layer.zPosition = layer.presentation()?.zPosition ?? layer.zPosition
+            layer.removeAnimation(forKey: "depth")
             layer.position = position
             let size = layer.bounds.size
             frames[wid] = Rect(x: position.x - size.width / 2 + screenFrame.minX,
@@ -375,6 +404,7 @@ import PaperiCore
             let layer = CALayer()
             layer.actions = Self.noActions
             layer.frame = local(Rect(x: place.x, y: place.y, width: item.frame.width, height: item.frame.height))
+            layer.zPosition = depth(place)
             layer.isHidden = indicatorOnly
             Self.install(snapshot, on: layer, scale: scale, active: false)
             CATransaction.begin()
@@ -425,6 +455,8 @@ import PaperiCore
             guard let frame = frames[wid] else { continue }
             let from = layer.presentation()?.position ?? layer.position
             let to = center(frame)
+            layer.removeAnimation(forKey: "depth")
+            layer.zPosition = depth(frame)
             layer.removeAnimation(forKey: "slide")
             layer.position = to
             guard duration > 0, from != to else { continue }
@@ -461,6 +493,7 @@ import PaperiCore
             var values = samples.map { $0[wid].map(center) ?? from }
             values[0] = from
             values[steps] = to
+            animateDepth(layer, frames: samples.compactMap { $0[wid] }, duration: duration)
             guard values.contains(where: { $0 != to }) else { continue }
             let animation = CAKeyframeAnimation(keyPath: "position")
             animation.values = values.map { NSValue(point: $0) }
@@ -542,6 +575,7 @@ import PaperiCore
         guard let root, let frame = captured[wid], layers[wid] != nil else { return nil }
         let indicator = GestureIndicator(style: style, window: local(frame),
                                          scale: Double(screen?.backingScaleFactor ?? 2))
+        indicator.pill.zPosition = 1_000_000
         root.addSublayer(indicator.pill)
         tabIndicator = indicator
         return indicator

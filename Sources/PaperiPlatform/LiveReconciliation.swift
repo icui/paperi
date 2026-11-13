@@ -35,6 +35,13 @@ enum LiveReconciliation {
         })
     }
 
+    /// At either edge, the window reaching furthest into the canvas covers
+    /// those parked behind it. Use position, not app activation order or a
+    /// visibility threshold, so even a one-point neighbour stays drawable.
+    static func snapshotDepth(_ frame: Rect, canvas: Rect) -> Double {
+        min(frame.x + frame.width - canvas.x, canvas.x + canvas.width - frame.x)
+    }
+
     /// Apps such as Terminal round requested sizes to character-cell boundaries.
     /// A few points of rounding should not disable motion of the entire strip.
     static func animationSizeMatches(_ actual: Rect, _ target: Rect) -> Bool {
