@@ -53,6 +53,7 @@ struct AppGestureFilter: Equatable {
     let fingers: Int
     private(set) var claimed = false
     private var fingersDown = 0
+    private var swallowGestureTail = false
     var swipeEstablished = false
     /// More fingers than the swipe uses were down in this sequence.
     private(set) var systemSequence = false
@@ -75,6 +76,7 @@ struct AppGestureFilter: Equatable {
     mutating func shouldDrop(_ input: Input) -> Bool {
         switch input {
         case .fingers(let down, let landingSpread):
+            if fingersDown == 0, down > 0 { swallowGestureTail = false }
             fingersDown = down
             if down == 0 {
                 claimed = false
@@ -83,6 +85,7 @@ struct AppGestureFilter: Equatable {
             } else if down > fingers, !swipeEstablished {
                 claimed = false
                 systemSequence = true
+                swallowGestureTail = false
                 swallowScrollTail = false
                 swallowMomentum = false
             } else if down == fingers, !claimed, !systemSequence, !staggeredSequence,
@@ -90,6 +93,7 @@ struct AppGestureFilter: Equatable {
                 staggeredSequence = true
             } else if down == fingers, !claimed, !systemSequence, !staggeredSequence {
                 claimed = true
+                swallowGestureTail = true
                 swallowMomentum = true
                 swallowScrollTail = true
             }
@@ -99,7 +103,9 @@ struct AppGestureFilter: Equatable {
             return claimed
 
         case .gesture:
-            return claimed
+            // Discrete swipe events can be delivered after the last contact lifts.
+            // Release this tail only when a new contact sequence starts.
+            return claimed || swallowGestureTail
 
         case .gestureBegin:
             if claimed { return true }
@@ -161,15 +167,32 @@ struct AppGestureFilter: Equatable {
 struct FingerCountValidation {
     private var mismatchSince: Double?
     private var mismatches = 0
+    private var lastObservation: Double?
+    private var agreementSince: Double?
     private(set) var failed = false
 
     mutating func observe(appKit: Int, device: Int, at time: Double) {
-        guard !failed, time.isFinite else { return }
+        guard time.isFinite else { return }
+        // Sparse samples from unrelated actions are not sustained disagreement.
+        if let lastObservation, time < lastObservation || time - lastObservation > 0.15 {
+            mismatchSince = nil
+            mismatches = 0
+            agreementSince = nil
+        }
+        lastObservation = time
         if appKit == device {
             mismatchSince = nil
             mismatches = 0
+            // Idle agreement cannot establish that the contact layout is valid.
+            if appKit > 0 {
+                if agreementSince == nil { agreementSince = time }
+                if time - agreementSince! >= 0.15 { failed = false }
+            } else {
+                agreementSince = nil
+            }
             return
         }
+        agreementSince = nil
         if mismatchSince == nil { mismatchSince = time }
         mismatches += 1
         if mismatches >= 4, time - mismatchSince! >= 0.15 { failed = true }
@@ -211,13 +234,17 @@ final class AppGestureBlocker: @unchecked Sendable {
 
     func validateFingerCount(_ count: Int, at time: Double) {
         lock.lock()
-        guard blockingStatus == "active" else { lock.unlock(); return }
+        guard machPort != nil else { lock.unlock(); return }
         let wasFailed = validation.failed
         validation.observe(appKit: count, device: Int(paperi_mt_fingers_down()), at: time)
         let failed = validation.failed
         let port = machPort
-        if failed { blockingStatus = "disabled: finger count mismatch" }
+        blockingStatus = failed ? "disabled: finger count mismatch" : "active"
         lock.unlock()
+        if !failed, wasFailed {
+            if let port { CGEvent.tapEnable(tap: port, enable: true) }
+            FileHandle.standardError.write(Data("[paperi] app gesture blocking restored: finger counts agree\n".utf8))
+        }
         if failed, !wasFailed {
             // Disable immediately; retain the thread/source for normal stop teardown.
             if let port { CGEvent.tapEnable(tap: port, enable: false) }

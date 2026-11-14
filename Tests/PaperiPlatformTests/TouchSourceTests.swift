@@ -226,6 +226,17 @@ struct AppGestureFilterTests {
         #expect(!drop(&f, .scroll(phase: changed, momentum: 0, continuous: true)))
     }
 
+    @Test func discreteSwipeAfterLiftStaysBlockedUntilNewContact() {
+        var f = AppGestureFilter(fingers: 3)
+        _ = drop(&f, .fingers(down: 3))
+        _ = drop(&f, .fingers(down: 0))
+        #expect(drop(&f, .gesture))
+        _ = drop(&f, .fingers(down: 0))
+        #expect(drop(&f, .gesture))
+        _ = drop(&f, .fingers(down: 2))
+        #expect(!drop(&f, .gesture))
+    }
+
     @Test func slowlyJoinedFingersLeaveScrollToApp() {
         var f = AppGestureFilter(fingers: 3)
         _ = f.shouldDrop(.fingers(down: 2, landingSpread: 0.01))
@@ -347,13 +358,36 @@ struct FingerCountValidationTests {
         #expect(!validation.failed)
     }
 
-    @Test func sustainedDisagreementDisablesUntilRestart() {
+    @Test func sustainedDisagreementRequiresSustainedActiveAgreement() {
         var validation = FingerCountValidation()
         for time in [0.0, 0.05, 0.10, 0.16] {
             validation.observe(appKit: 2, device: 3, at: time)
         }
         #expect(validation.failed)
         validation.observe(appKit: 2, device: 2, at: 1)
+        #expect(validation.failed)
+        for time in [1.05, 1.10, 1.16] {
+            validation.observe(appKit: 2, device: 2, at: time)
+        }
+        #expect(!validation.failed)
+    }
+
+    @Test func separateActionsDoNotAccumulateMismatch() {
+        var validation = FingerCountValidation()
+        for time in [0.0, 1.0, 2.0, 3.0] {
+            validation.observe(appKit: 2, device: 3, at: time)
+        }
+        #expect(!validation.failed)
+    }
+
+    @Test func idleAgreementDoesNotRestoreUnsafeCounts() {
+        var validation = FingerCountValidation()
+        for time in [0.0, 0.05, 0.10, 0.16] {
+            validation.observe(appKit: 2, device: 3, at: time)
+        }
+        for time in [0.2, 0.3, 0.4, 0.5] {
+            validation.observe(appKit: 0, device: 0, at: time)
+        }
         #expect(validation.failed)
     }
 }
