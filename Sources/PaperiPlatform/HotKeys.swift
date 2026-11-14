@@ -34,8 +34,8 @@ public enum HotKeyBindings {
         switch command {
         case "slurp": return "Stack into left column"
         case "barf": return "Unstack into a new column"
-        case "split", "split left": return "Equal widths with left column"
-        case "split right": return "Equal widths with right column"
+        case "split", "split left": return "Split with left"
+        case "split right": return "Split with right"
         case "center": return "Center column"
         case "align left": return "Align column left"
         case "align right": return "Align column right"

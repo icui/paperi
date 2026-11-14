@@ -34,9 +34,11 @@ extension Layout {
         }
     }
 
-    /// Place the focused column and its chosen neighbor across two equal halves.
-    /// Edges with further columns beyond them keep `edgeMargin` (default: `gap`),
-    /// matching `reveal`, so the next refresh does not shift the pair.
+    /// Place the focused column and its chosen neighbor across two halves.
+    /// Each half has the fixed width of a pair with `edgeMargin` (default: `gap`)
+    /// on both sides, so inner columns get the same width wherever they are.
+    /// The first or last column has no margin beyond it and absorbs that space
+    /// instead. Matches `reveal`, so the next refresh does not shift the pair.
     public mutating func split(in canvas: Rect, gap: Double = 8, edgeMargin: Double? = nil, direction: Direction = .left) throws {
         try validate()
         let margin = edgeMargin ?? gap
@@ -49,10 +51,10 @@ extension Layout {
         guard left >= 0, right < columns.count else { return }
         let leading = left > 0 ? margin : 0
         let trailing = right < columns.count - 1 ? margin : 0
-        let width = (canvas.width - gap - leading - trailing) / 2
+        let width = (canvas.width - gap - 2 * margin) / 2
         guard width > 0 else { throw LayoutError.invalidGeometry }
-        columns[left].width = width
-        columns[right].width = width
+        columns[left].width = width + margin - leading
+        columns[right].width = width + margin - trailing
         offset = leading - columns.prefix(left).reduce(0) { $0 + min($1.width, maximum) + gap }
     }
 }

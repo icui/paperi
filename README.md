@@ -49,7 +49,7 @@ Use **three fingers** by default (four is configurable). Horizontal swipes move 
 | Left / right | Move through the strip by one column. |
 | Up | Close the focused window; in a native macOS tab group, close its front tab. |
 | Down | Open a new window of the focused app. |
-| Down, then right without lifting | Equal widths with the right column. |
+| Down, then right without lifting | Split with right. |
 
 ### Flick a window away
 
@@ -61,7 +61,7 @@ The window follows your fingers. Move far enough, or flick, to close it on relea
 
 ![Animated illustration of a downward gesture changing from New Window to Close Tab after turning right](assets/demos/close-tab.gif)
 
-Swipe down to **New Window**, down then right for **Equal widths with right column**, or down then left to **Minimize**. Turn without lifting, then continue in that direction and release to commit; a short turn cancels. Configure each with `gesture.swipeDown`, `gesture.swipeDownRight`, and `gesture.swipeDownLeft`: `closeTab`, `newWindow`, `openApp`, `minimize`, or `none`. Downward gestures also work when a popup or the desktop has focus; actions target the frontmost app unless `openApp` selects a specific app, and minimizing requires a window. Equal-width layouts require a managed focused column with a neighbor.
+Swipe down to **New Window**, down then right for **Split with right**, or down then left to **Minimize**. Turn without lifting, then continue in that direction and release to commit; a short turn cancels. Configure each with `gesture.swipeDown`, `gesture.swipeDownRight`, and `gesture.swipeDownLeft`: `closeTab`, `newWindow`, `openApp`, `minimize`, or `none`. Downward gestures also work when a popup or the desktop has focus; actions target the frontmost app unless `openApp` selects a specific app, and minimizing requires a window. Splits require a managed focused column with a neighbor.
 
 New-window creation uses the app's **New Window** menu item, falling back to ⌘N when no matching item is available. To open a window of a specific app, set `gesture.swipeDown` to `openApp` and `gesture.swipeDownApp` to its bundle ID (for example, `com.apple.Terminal`). Paperi launches the app if needed or requests a new window if it is running. You can also change swipe down to minimize, or disable it.
 
@@ -104,7 +104,7 @@ Default shortcuts use **⌥⌘ (Option–Command)**, with Shift added for swappi
 | T | Show the window tray at the pointer. |
 
 Settings → Shortcuts → **Advanced Layout** offers optional bindings for centering
-(C), equal widths with the left/right column ([ / ]), height (U/N),
+(C), split with left/right ([ / ]), height (U/N),
 stacking and unstacking (I/O), and left/right column alignment
 (Shift-[ / Shift-]). All use ⌥⌘ and are disabled by default; enable them individually.
 Use `paperi msg align left|right|center` to position the focused column without
@@ -112,7 +112,7 @@ changing its width or order. Alignment retains the edge gap beside neighboring c
 
 Existing explicit shortcut overrides are preserved. Defaults have changed:
 arrows now focus, Shift-arrows swap, J/K/S are no longer assigned, and U/N/I/O
-are optional. Centering and equal-width shortcuts are also optional.
+are optional. Centering and split shortcuts are also optional.
 The commands are `paperi msg split left` and `paperi msg split right`;
 `paperi msg split` continues to mean left. Both are also available in
 directional swipe menus under Column Layout.

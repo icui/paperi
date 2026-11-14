@@ -147,7 +147,7 @@ paperi msg reload
 paperi msg status
 ```
 
-Equal-width layouts use `split left` or `split right` (bare `split` means left),
+Split with left/right uses `split left` or `split right` (bare `split` means left),
 with optional bindings ⌥⌘[ and ⌥⌘], disabled by default.
 Centering (⌥⌘C) is also disabled by default under Advanced Layout.
 

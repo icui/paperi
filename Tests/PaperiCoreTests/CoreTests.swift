@@ -56,8 +56,9 @@ struct CoreTests {
         var layout = Layout(columns: (1...3).map { Column(slots: [slot(UInt32($0))], width: 300) }, focused: "1")
         try layout.split(in: canvas, direction: .right)
         let frames = try layout.placements(in: canvas)
-        #expect(frames[0].frame == Rect(x: -1000, y: 20, width: 492, height: 800))
-        #expect(frames[1].frame == Rect(x: -500, y: 20, width: 492, height: 800))
+        // The first column absorbs the missing edge margin; the inner one keeps the fixed width.
+        #expect(frames[0].frame == Rect(x: -1000, y: 20, width: 496, height: 800))
+        #expect(frames[1].frame == Rect(x: -496, y: 20, width: 488, height: 800))
         #expect(layout.columns[2].width == 300)
         #expect(layout.focused == "1")
         #expect(try !layout.reveal(in: canvas))
@@ -67,20 +68,37 @@ struct CoreTests {
         #expect(layout == before)
     }
 
-    @Test func testSplitHasEqualHalvesAndOneGap() throws {
+    @Test func testSplitUsesFixedInnerWidthAndWidensEdgeColumns() throws {
         let canvas = Rect(x: -1000, y: 20, width: 1000, height: 800)
         var layout = Layout(columns: (1...3).map { Column(slots: [slot(UInt32($0))], width: 300) }, focused: "3")
         try layout.split(in: canvas)
         let frames = try layout.placements(in: canvas)
-        // Column 1 remains to the left, so the pair keeps one margin there.
-        checkEqual(frames[1].frame, Rect(x: -992, y: 20, width: 492, height: 800))
-        checkEqual(frames[2].frame, Rect(x: -492, y: 20, width: 492, height: 800))
+        // Column 1 remains to the left, so the pair keeps one margin there;
+        // the last column takes the unused right margin.
+        checkEqual(frames[1].frame, Rect(x: -992, y: 20, width: 488, height: 800))
+        checkEqual(frames[2].frame, Rect(x: -496, y: 20, width: 496, height: 800))
         var revealed = layout
         checkTrue(try !revealed.reveal(in: canvas))
         layout.focused = "1"
         let before = layout
         try layout.split(in: canvas)
         checkEqual(layout, before)
+    }
+
+    @Test func splitBetweenInnerColumnsUsesFixedWidth() throws {
+        let canvas = Rect(x: 0, y: 0, width: 1000, height: 800)
+        var layout = Layout(columns: (1...4).map { Column(slots: [slot(UInt32($0))], width: 300) }, focused: "3")
+        try layout.split(in: canvas)
+        let frames = try layout.placements(in: canvas)
+        checkEqual(frames[1].frame, Rect(x: 8, y: 0, width: 488, height: 800))
+        checkEqual(frames[2].frame, Rect(x: 504, y: 0, width: 488, height: 800))
+    }
+
+    @Test func splitOfOnlyTwoColumnsFillsCanvas() throws {
+        let canvas = Rect(x: 0, y: 0, width: 1000, height: 800)
+        var layout = Layout(columns: (1...2).map { Column(slots: [slot(UInt32($0))], width: 300) }, focused: "2")
+        try layout.split(in: canvas)
+        checkEqual(layout.columns.map(\.width), [496, 496])
     }
     @Test func testFloatingPreservesTabsAndRejectsExcludedWindows() throws {
         let tabs = Slot(id: "tabs", members: [1, 2], activeMember: 2)
