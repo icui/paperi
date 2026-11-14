@@ -234,6 +234,7 @@ private struct SettingsView: View {
             }
             .listStyle(.sidebar)
             .navigationTitle("Settings")
+            .toolbar(removing: .sidebarToggle)
             .searchable(text: $model.search, prompt: "Search settings")
             // Keep the sidebar fixed rather than letting the split view choose a width.
             .frame(width: 180)
