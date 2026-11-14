@@ -404,7 +404,10 @@ extension LiveManager {
         /// A pull without a strip to act on still acts on the frontmost app.
         func enterPull() {
             guard !standalonePull, swipe?.pulling != true else { return }
-            if !begun() {
+            if !focusedWindowIsManaged() {
+                cancelSwipe()
+                standalonePull = true
+            } else if !begun() {
                 standalonePull = true
             } else if !startClosing(pull: true) {
                 cancelSwipe()
@@ -531,15 +534,35 @@ extension LiveManager {
         return windowIndicators.summon(display: display.displayUUID, at: NSEvent.mouseLocation, coordinator: coordinator)
     }
 
-    /// Consult the actual focused window rather than the strip's last focus.
-    func focusedWindowIsManaged() -> Bool {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
-        let application = AXUIElementCreateApplication(app.processIdentifier)
+    /// Accessory apps can own keyboard focus without owning the menu bar.
+    /// Resolve the focused element's process before falling back to the active app.
+    func gestureFocus() -> (pid: pid_t, window: AXUIElement?)? {
+        if NSApp.keyWindow != nil {
+            let application = AXUIElementCreateApplication(ProcessInfo.processInfo.processIdentifier)
+            let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute)
+            let window = value.flatMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil }
+            return (ProcessInfo.processInfo.processIdentifier, window)
+        }
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.2)
+        var pid: pid_t = 0
+        if let value = Diagnostics.attribute(system, kAXFocusedUIElementAttribute),
+           CFGetTypeID(value) == AXUIElementGetTypeID() {
+            _ = AXUIElementGetPid((value as! AXUIElement), &pid)
+        }
+        if pid <= 0 { pid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0 }
+        guard pid > 0 else { return nil }
+        let application = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(application, 0.2)
-        guard let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
-              CFGetTypeID(value) == AXUIElementGetTypeID() else { return false }
-        // Parenthesize the checked CF cast to avoid Swift’s optional-argument cast warning.
-        let wid = paperi_window_id((value as! AXUIElement))
+        let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute)
+        let window = value.flatMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil }
+        return (pid, window)
+    }
+
+    /// Consult keyboard focus rather than the strip's last focus or menu bar.
+    func focusedWindowIsManaged() -> Bool {
+        guard let window = gestureFocus()?.window else { return false }
+        let wid = paperi_window_id(window)
         guard let space = coordinator.spaceForWindow[wid],
               let session = coordinator.sessions[space] else { return false }
         return session.state.layout.columns.contains { column in
@@ -550,11 +573,15 @@ extension LiveManager {
     /// App actions remain available when no tiled window can supply a strip.
     func performStandalonePull(_ action: LiveConfig.SwipeDownAction) {
         if action == .openApp { _ = openConfiguredApp(); return }
-        guard let app = NSWorkspace.shared.frontmostApplication else { return }
-        let pid = app.processIdentifier
-        let application = AXUIElementCreateApplication(pid)
-        let focused = Diagnostics.attribute(application, kAXFocusedWindowAttribute)
-        let window = focused.flatMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil }
+        guard let focus = gestureFocus() else { return }
+        let pid = focus.pid
+        let window = focus.window
+        // Our settings window belongs to an accessory app. Handle it directly:
+        // a process-targeted shortcut need not reach its key window.
+        if pid == ProcessInfo.processInfo.processIdentifier, let keyWindow = NSApp.keyWindow {
+            if action == .closeTab { keyWindow.performClose(nil); scheduleRefresh(); return }
+            if action == .minimize { keyWindow.performMiniaturize(nil); scheduleRefresh(); return }
+        }
         switch action {
         case .none, .openApp: break
         case .minimize:
@@ -564,6 +591,13 @@ extension LiveManager {
                AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { return }
             Self.postAppCommand(Self.keyN, pid: pid)
         case .closeTab:
+            if NSRunningApplication(processIdentifier: pid)?.activationPolicy == .accessory,
+               let window,
+               let value = Diagnostics.attribute(window, kAXCloseButtonAttribute),
+               CFGetTypeID(value) == AXUIElementGetTypeID(),
+               AXUIElementPerformAction((value as! AXUIElement), kAXPressAction as CFString) == .success {
+                break
+            }
             Self.postAppCommand(Self.keyW, pid: pid)
             focusManagedWindowAfterCommandW()
         }
