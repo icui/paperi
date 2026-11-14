@@ -1,9 +1,7 @@
 import Carbon.HIToolbox
 import Foundation
 
-/// Global Option–Command bindings copied from the user's Hammerspoon/PaperWM
-/// configuration (`~/.hammerspoon/init.lua`). Each binding dispatches the same
-/// command vector as `paperi msg`, so CLI and keyboard behaviour cannot drift.
+/// Global shortcuts dispatch the same commands as the CLI.
 public enum HotKeyBindings {
     public struct Binding: Equatable, Sendable {
         /// Normalised spec, e.g. "alt-cmd-j"; also the config key.
@@ -14,17 +12,39 @@ public enum HotKeyBindings {
         public var display: String { HotKeySpec.display(spec) }
     }
 
-    /// Defaults copied from the user's PaperWM configuration.
     public static let defaultTable: [(String, String)] = [
-        ("alt-cmd-j", "focus left"), ("alt-cmd-k", "focus right"), ("alt-cmd-f", "float"),
-        ("alt-cmd-left", "swap left"), ("alt-cmd-right", "swap right"),
-        ("alt-cmd-up", "swap up"), ("alt-cmd-down", "swap down"),
-        ("alt-cmd-c", "center"), ("alt-cmd-s", "split"),
-        ("alt-cmd-l", "width +"), ("alt-cmd-h", "width -"),
-        ("alt-cmd-u", "height +"), ("alt-cmd-n", "height -"),
-        ("alt-cmd-i", "slurp"), ("alt-cmd-o", "barf"),
-        ("alt-cmd-t", "tray"),
+        ("alt-cmd-left", "focus left"), ("alt-cmd-right", "focus right"),
+        ("alt-cmd-up", "focus up"), ("alt-cmd-down", "focus down"),
+        ("alt-shift-cmd-left", "swap left"), ("alt-shift-cmd-right", "swap right"),
+        ("alt-shift-cmd-up", "swap up"), ("alt-shift-cmd-down", "swap down"),
+        ("alt-cmd-h", "width -"), ("alt-cmd-l", "width +"),
+        ("alt-cmd-c", "center"), ("alt-cmd-f", "float"), ("alt-cmd-t", "tray"),
     ]
+
+    /// Suggestions shown in Settings; inactive until explicitly enabled.
+    public static let advancedTable: [(String, String)] = [
+        ("alt-cmd-u", "height +"), ("alt-cmd-n", "height -"),
+        ("alt-cmd-i", "slurp"), ("alt-cmd-o", "barf"), ("alt-cmd-s", "split"),
+        ("alt-cmd-leftbracket", "align left"), ("alt-cmd-rightbracket", "align right"),
+    ]
+
+    public static func actionLabel(_ command: String) -> String {
+        switch command {
+        case "slurp": return "Stack into left column"
+        case "barf": return "Unstack into a new column"
+        case "split": return "Equal widths with left column"
+        case "center": return "Center column"
+        case "align left": return "Align column left"
+        case "align right": return "Align column right"
+        case "height +": return "Make stacked window taller"
+        case "height -": return "Make stacked window shorter"
+        case "width +": return "Make column wider"
+        case "width -": return "Make column narrower"
+        case "float": return "Toggle floating"
+        case "tray": return "Show window tray"
+        default: return command.capitalized
+        }
+    }
 
     public static var defaults: [Binding] { resolve(overrides: [:]).bindings }
 
@@ -120,6 +140,8 @@ public enum LiveCommand {
         switch verb {
         case "status", "retile", "refresh", "stop", "center", "split", "slurp", "barf", "float", "tray", "pause", "resume", "reload":
             return rest.isEmpty ? nil : "\(verb) takes no arguments"
+        case "align":
+            return rest.count == 1 && ["left", "right", "center"].contains(rest[0]) ? nil : "usage: align left|right|center"
         case "focus", "swap", "move":
             return rest.count == 1 && directions.contains(rest[0]) ? nil : "usage: \(verb) left|right|up|down"
         case "swipe":

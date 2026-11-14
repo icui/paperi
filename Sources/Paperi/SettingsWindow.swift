@@ -443,26 +443,74 @@ private struct SettingsView: View {
         let overrides = model.values["hotkeys"] as? [String: Any] ?? [:]
         let defaults = Dictionary(uniqueKeysWithValues: HotKeyBindings.defaultTable)
         let keys = Set(defaults.keys).union(overrides.keys).sorted()
-        return Section("Shortcuts") {
+        return Group {
+            Section("Shortcuts") {
             row(Setting(id: "hotkeysEnabled", title: "Enable shortcuts", detail: "Enable all global keyboard shortcuts. Your bindings are kept when disabled. The --no-hotkeys launch flag overrides this setting."))
             Text("Edit a command, disable a binding, or add a shortcut such as ctrl-alt-j. Restore Default removes its override.").font(.caption).foregroundStyle(.secondary)
             ForEach(keys, id: \.self) { key in
-                HStack {
-                    Text(key).font(.system(.caption, design: .monospaced)).frame(width: 140, alignment: .leading)
-                    TextField("Disabled", text: Binding(get: { overrides[key] as? String ?? (overrides[key] == nil ? defaults[key] ?? "" : "") }, set: { model.set("hotkeys.\(key)", $0.isEmpty ? NSNull() : $0 as Any) })).textFieldStyle(.roundedBorder)
+                HStack(alignment: .center, spacing: 12) {
+                    Text(key).font(.system(.caption, design: .monospaced)).frame(width: 170, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(HotKeyBindings.actionLabel(overrides[key] as? String ?? (overrides[key] == nil ? defaults[key] ?? "" : "Disabled")))
+                            .font(.caption).foregroundStyle(.secondary)
+                    TextField("Command", text: Binding(get: { overrides[key] as? String ?? (overrides[key] == nil ? defaults[key] ?? "" : "") }, set: { model.set("hotkeys.\(key)", $0.isEmpty ? NSNull() : $0 as Any) }), prompt: Text("Disabled"))
+                        .labelsHidden()
+                        .accessibilityLabel("Command for \(key)")
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.leading)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     Button("Disable") { model.set("hotkeys.\(key)", NSNull()) }
                     if overrides[key] != nil { Button("Restore Default") { model.set("hotkeys.\(key)", nil) } }
                 }
             }
-            Divider()
-            HStack {
-                TextField("ctrl-alt-j", text: $model.newKey)
-                TextField("focus left", text: $model.newCommand)
+            }
+            Section("Optional Shortcuts") {
+            DisclosureGroup("Advanced Layout") {
+                Text("These shortcuts are off by default. Enabling one assigns its suggested key combination.")
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach(HotKeyBindings.advancedTable, id: \.0) { key, command in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(HotKeyBindings.actionLabel(command))
+                            Text(key).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if overrides[key] as? String == command {
+                            Button("Disable") { model.set("hotkeys.\(key)", NSNull()) }
+                        } else {
+                            Button(overrides[key] is String ? "Replace Binding" : "Enable") {
+                                model.set("hotkeys.\(key)", command)
+                            }
+                        }
+                    }
+                }
+            }
+            }
+            Section("Add Shortcut") {
+            HStack(alignment: .bottom, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Key combination").font(.caption).foregroundStyle(.secondary)
+                    TextField("Key combination", text: $model.newKey, prompt: Text("ctrl-alt-j"))
+                        .labelsHidden()
+                        .accessibilityLabel("Key combination")
+                }
+                .frame(width: 200)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Command").font(.caption).foregroundStyle(.secondary)
+                    TextField("Command", text: $model.newCommand, prompt: Text("focus left"))
+                        .labelsHidden()
+                        .accessibilityLabel("New shortcut command")
+                }
+                .frame(maxWidth: .infinity)
                 Button("Add") {
                     guard let parsed = HotKeySpec.parse(model.newKey), LiveCommand.validate(model.newCommand.split(separator: " ").map(String.init)) == nil else { model.error = "Enter a valid shortcut and command."; return }
                     model.set("hotkeys.\(parsed.spec)", model.newCommand); model.newKey = ""; model.newCommand = ""; model.error = ""
                 }.disabled(model.newKey.isEmpty || model.newCommand.isEmpty)
-            }.textFieldStyle(.roundedBorder)
+            }
+            .textFieldStyle(.roundedBorder)
+            .multilineTextAlignment(.leading)
+            }
         }
     }
 }

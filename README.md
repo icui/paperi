@@ -93,19 +93,26 @@ Move windows between Spaces and displays with Mission Control; Paperi follows th
 
 ## Keyboard shortcuts
 
-All default shortcuts below use **⌥⌘ (Option–Command)**.
+Default shortcuts use **⌥⌘ (Option–Command)**, with Shift added for swapping.
 
 | Keys | Action |
 | --- | --- |
-| J / K | Focus the column to the left / right. |
-| ← / → / ↑ / ↓ | Swap columns or stacked windows. |
+| ← / → / ↑ / ↓ | Focus a neighboring column or stacked window. |
+| ⇧← / ⇧→ / ⇧↑ / ⇧↓ | Swap columns or stacked windows. |
 | H / L | Make the column narrower / wider. |
-| U / N | Make a stacked window taller / shorter. |
 | C | Center the focused column. |
-| S | Split the available width with the left neighbor. |
-| I / O | Stack into the left column / move out into a separate column. |
 | F | Toggle floating for the focused window. |
 | T | Show the window tray at the pointer. |
+
+Settings → Shortcuts → **Advanced Layout** offers optional bindings for height
+(U/N), stacking and unstacking (I/O), equal widths with the left column (S),
+and left/right column alignment ([/]). These are off by default.
+Use `paperi msg align left|right|center` to position the focused column without
+changing its width or order. Alignment retains the edge gap beside neighboring columns.
+
+Existing explicit shortcut overrides are preserved. Defaults have changed:
+arrows now focus, Shift-arrows swap, J/K are no longer assigned, and U/N/I/O/S
+are optional.
 
 Dialogs, sheets, menus, and popovers stay outside the strip. Utility windows without a fullscreen button float by default. Native macOS tab groups share one position in the layout.
 
@@ -163,3 +170,10 @@ Turns begin with a vertical swipe, followed by a deliberate sideways motion.
 Command assignments are retained when switching to Window Animation.
 Defaults retain upward animation and downward commands; `openApp` commands
 share the application bundle ID in `gesture.swipeDownApp`.
+
+CLI help is grouped by purpose: `paperi help` lists everyday commands,
+`paperi help diagnostics` lists troubleshooting tools, and
+`paperi help developer` lists integration probes and animation tools.
+The compatibility aliases `msg move` (for `swap`) and `msg refresh`
+(for `retile`) remain accepted. The obsolete `--menu` diagnostic shell
+has been removed; use `paperi run` to launch the live app.

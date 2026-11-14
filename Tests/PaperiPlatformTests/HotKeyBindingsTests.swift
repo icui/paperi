@@ -4,23 +4,22 @@ import Testing
 @testable import PaperiPlatform
 
 struct HotKeyBindingsTests {
-    /// Mirrors ~/.hammerspoon/init.lua: every default binding is Option–Command.
-    @Test func defaultsMatchUserPaperWMConfiguration() {
+    @Test func defaultsUseArrowsForFocusAndShiftForSwap() {
         let defaults = HotKeyBindings.defaults
         let table = Dictionary(uniqueKeysWithValues: defaults.map { ($0.spec, $0.command) })
-        #expect(defaults.count == 16)
-        #expect(defaults.allSatisfy { $0.modifiers == UInt32(cmdKey | optionKey) })
-        #expect(Set(defaults.map(\.keyCode)).count == 16)
-        #expect(table["alt-cmd-j"] == ["focus", "left"] && table["alt-cmd-k"] == ["focus", "right"])
-        #expect(table["alt-cmd-f"] == ["float"] && table["alt-cmd-c"] == ["center"] && table["alt-cmd-s"] == ["split"])
-        #expect(table["alt-cmd-left"] == ["swap", "left"] && table["alt-cmd-right"] == ["swap", "right"])
-        #expect(table["alt-cmd-up"] == ["swap", "up"] && table["alt-cmd-down"] == ["swap", "down"])
-        #expect(table["alt-cmd-l"] == ["width", "+"] && table["alt-cmd-h"] == ["width", "-"])
-        #expect(table["alt-cmd-u"] == ["height", "+"] && table["alt-cmd-n"] == ["height", "-"])
-        #expect(table["alt-cmd-i"] == ["slurp"] && table["alt-cmd-o"] == ["barf"])
-        #expect(table["alt-cmd-t"] == ["tray"])
-        for n in 1...9 { #expect(table["alt-cmd-\(n)"] == nil) }
-        #expect(defaults.first { $0.spec == "alt-cmd-left" }?.display == "⌥⌘←")
+        #expect(defaults.count == 13)
+        for direction in ["left", "right", "up", "down"] {
+            #expect(table["alt-cmd-\(direction)"] == ["focus", direction])
+            #expect(table["alt-shift-cmd-\(direction)"] == ["swap", direction])
+        }
+        for (key, _) in HotKeyBindings.advancedTable { #expect(table[key] == nil) }
+        #expect(table["alt-cmd-j"] == nil && table["alt-cmd-k"] == nil)
+        #expect(Set(defaults.map { "\($0.modifiers):\($0.keyCode)" }).count == defaults.count)
+        #expect(LiveCommand.validate(["align", "left"]) == nil)
+        #expect(LiveCommand.validate(["align", "right"]) == nil)
+        #expect(LiveCommand.validate(["align", "center"]) == nil)
+        #expect(LiveCommand.validate(["align", "up"]) != nil)
+        #expect(LiveCommand.validate(["align"]) != nil)
     }
 
     @Test func specsNormaliseModifierOrderAndAliases() {
@@ -45,7 +44,7 @@ struct HotKeyBindingsTests {
         #expect(table["alt-cmd-j"] == ["focus", "up"])
         #expect(table["alt-cmd-o"] == nil)
         #expect(table["ctrl-alt-l"] == ["width", "+", "0.2"])
-        #expect(resolved.bindings.count == 16)
+        #expect(resolved.bindings.count == 15)
         #expect(resolved.errors.count == 2)
     }
 

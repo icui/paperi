@@ -147,6 +147,9 @@ paperi msg reload
 paperi msg status
 ```
 
+Column positioning supports `align left|right|center`; `center` remains available.
+Optional layout shortcuts can be enabled in Settings → Shortcuts → Advanced Layout.
+
 Other commands include `focus up|down`, `swap left|right|up|down`,
 `height +|-`, `center`, `split`, `slurp`, `barf`, `tray`, `retile`, `pause`, `resume`,
 and `stop`. `move` is an alias for `swap`; `refresh` is an alias for `retile`.

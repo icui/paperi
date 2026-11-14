@@ -3,29 +3,6 @@ import AppKit
 import PaperiCore
 import PaperiPlatform
 
-@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var item: NSStatusItem?
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
-        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        BrandIcon.install(on: item?.button)
-        let menu = NSMenu()
-        menu.addItem(withTitle: "Feasibility build — management inactive", action: nil, keyEquivalent: "")
-        let access = menu.addItem(withTitle: "Request Accessibility Access…", action: #selector(requestAccess), keyEquivalent: "")
-        access.target = self
-        let snapshot = menu.addItem(withTitle: "Print Diagnostic Snapshot", action: #selector(capture), keyEquivalent: "")
-        snapshot.target = self
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit Paperi", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        item?.menu = menu
-    }
-    @objc func capture() { Diagnostics.printJSON(Diagnostics.snapshot()) }
-    @objc func requestAccess() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-    }
-}
-
 var args = Array(CommandLine.arguments.dropFirst())
 // Launching Paperi.app (Finder, login item) starts live mode.
 if args.isEmpty && Bundle.main.bundleURL.pathExtension == "app" { args = ["run"] }
@@ -171,9 +148,6 @@ case "record":
     restartTimer?.invalidate()
     let teardown = recorder.stop()
     Diagnostics.printJSON(["event": "recordingEnded", "teardown": teardown], pretty: false)
-case "--menu":
-    let app = NSApplication.shared
-    let delegate = AppDelegate(); app.delegate = delegate; app.run()
 case "benchmark-core":
     let canvas = Rect(x: 0, y: 0, width: 1440, height: 900)
     var samples: [Double] = []
@@ -187,39 +161,91 @@ case "benchmark-core":
     samples.sort()
     Diagnostics.printJSON(["windows": 50, "iterations": samples.count, "p50MS": samples[500], "p95MS": samples[950],
         "checksum": checksum, "scope": "cached pure core only; excludes AX, rendering and input latency"])
+case "help", "--help", "-h":
+    let topic = args.count > 1 ? args[1] : nil
+    guard args.count <= 2, topic == nil || topic == "diagnostics" || topic == "developer" else {
+        print("Usage: paperi help [diagnostics|developer]")
+        exit(2)
+    }
+    printHelp(topic)
 default:
-    print("""
-    Paperi (opt-in live management; Option–Command shortcuts from the PaperWM config)
-      paperi run [--app ID ...] [--singleton-app ID ...] [-v] [--no-restore] [--no-hotkeys]
-                                        Manage all regular apps (or only --app ones) on each display's active Space
-      paperi msg COMMAND                 focus|swap|move left|right|up|down, width|height +|- [fraction],
-                                        swipe left|right|up|down [travel], center, split, slurp, barf,
-                                        float, tray, retile (alias: refresh), status,
-                                        pause, resume, reload, stop
-      paperi check-apps [ID ...]         Read-only: what live mode would decide for each on-screen window
-      paperi login on|off|status         Start live mode at login (LaunchAgent; prefers ~/Applications/Paperi.app)
-      paperi restore                     Restore frames journaled by a run that did not stop cleanly
-      paperi snapshot [--include-titles]  Read-only JSON snapshot
-      paperi tab-evidence identifier     Bounded read-only AX tab structure for one app
-      paperi probe-native-tab-session    Native-tab effects on a disposable child only
-      paperi probe-native-tab-lifecycle  Disposable native detach/merge/closure effects
-      paperi probe-native-tab-growth     Disposable native tab creation and admission
-      paperi probe-terminal-placement ID TAG  Guarded tagged Terminal translation/recovery
-      paperi probe-terminal-resize ID TAG     Guarded tagged Terminal cell-grid resize/recovery
-      paperi window-evidence identifier  Bounded read-only window policy/focus metadata for one app
-      paperi record [seconds] [--bundle-id identifier ...] [--tab-evidence] [--window-evidence] [--restart-after seconds] [--reconcile-every 1..30] [--poll-only]
-                                        Read-only AX event JSONL (default 30, max 300)
-      paperi benchmark-core              Measure cached layout calculation only
-      paperi probe-placement             Move/resize only a newly launched disposable fixture, then restore
-      paperi probe-lifecycle             Observe/reduce/tile two new disposable windows through create/close
-      paperi probe-resize                Adopt a fixture-originated resize while tracking expected AX echoes
-      paperi probe-interaction           Exercise focused resize commands, panel suppression and recovery on a new fixture
-      paperi probe-stop                  Stop with two live fixture windows, restore original frames and reject stale work
-      paperi mission-control-move WID SPACE [--escape | --exit-click WID]
-                                        Drag a real window onto a Space in Mission Control (any display);
-                                        leave by clicking that Space, Esc, or another window
-      paperi preview-fixture             Interactive disposable preview; local controls, Stop & Restore, 60-second limit
-      paperi probe-preview-input         Test AppKit key-equivalent/button input on the disposable preview
-      paperi --menu                      Run diagnostic menu bar shell
-    """)
+    if let command = args.first {
+        FileHandle.standardError.write(Data("Unknown command: \(command)\nUse paperi help to see available commands.\n".utf8))
+        exit(2)
+    }
+    printHelp()
+}
+
+func printHelp(_ topic: String? = nil) {
+    switch topic {
+    case "diagnostics":
+        print("""
+        Paperi diagnostics
+          paperi check-apps [ID ...]          Explain management decisions for on-screen windows
+          paperi snapshot [--include-titles] Read-only JSON snapshot
+          paperi tab-evidence identifier     Bounded AX tab structure for one app
+          paperi window-evidence identifier  Window policy and focus metadata for one app
+          paperi record [seconds] [--bundle-id identifier ...] [--tab-evidence] [--window-evidence]
+                        [--restart-after seconds] [--reconcile-every 1..30] [--poll-only]
+                                             Read-only AX event JSONL (default 30 seconds, max 300)
+          paperi msg status                  Running manager state
+
+        paperi help                            Everyday commands
+        paperi help developer                  Integration probes and development tools
+        """)
+    case "developer":
+        print("""
+        Paperi developer tools
+          paperi benchmark-core              Cached layout timing; excludes AX, rendering and input
+          paperi msg swipe left|right|up|down [travel]
+                                             Simulate a window animation, not configured gesture commands
+          paperi preview-fixture             Interactive disposable preview (60-second limit)
+          paperi probe-preview-input         Validate the preview's AppKit input
+          paperi probe-placement             Place and restore a disposable window
+          paperi probe-lifecycle             Create, tile and close disposable windows
+          paperi probe-resize                Adopt a fixture-originated resize
+          paperi probe-interaction           Check resize commands and panel suppression
+          paperi probe-stop                  Check restoration and rejection of stale work
+          paperi probe-native-tab-session    Check native-tab selection and placement
+          paperi probe-native-tab-lifecycle  Check native-tab detach, merge and closure
+          paperi probe-native-tab-growth     Check native-tab creation and admission
+          paperi probe-terminal-session TAG  Check a tagged Terminal tab session
+          paperi probe-terminal-placement ID TAG
+                                             Translate and restore a tagged Terminal window
+          paperi probe-terminal-resize ID TAG
+                                             Resize and restore a tagged Terminal window
+          paperi mission-control-move WID SPACE [--escape | --exit-click WID]
+                                             Move a real window between Spaces for integration testing
+
+        paperi help                            Everyday commands
+        paperi help diagnostics                Read-only troubleshooting tools
+        """)
+    default:
+        print("""
+        Paperi — window management
+          paperi run [--app ID ...] [--singleton-app ID ...] [-v] [--no-restore] [--no-hotkeys]
+                                             Manage windows on each display's active Space
+          paperi msg COMMAND                 Send a command to the running manager:
+            focus left|right|up|down         Focus a neighboring window
+            swap left|right|up|down          Swap the focused window with a neighbor
+            width|height +|- [fraction]      Resize the focused column or stacked window
+            center                          Center the focused column
+            align left|right|center         Align the focused column within the usable screen
+            split                           Size the focused and left columns to equal halves
+            slurp                           Stack the focused window in the left column
+            barf                            Move a window out of the stack
+            float                           Toggle the focused window's floating state
+            tray                            Show the window tray
+            retile                          Reapply the layout
+            status                          Show manager state
+            pause|resume                    Pause or resume management
+            reload                          Reload configuration
+            stop                            Stop management
+          paperi login on|off|status          Configure start at login
+          paperi restore                     Restore frames after an unclean stop
+
+          paperi help diagnostics            Read-only troubleshooting tools
+          paperi help developer              Integration probes and development tools
+        """)
+    }
 }

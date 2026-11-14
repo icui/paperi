@@ -5,6 +5,27 @@ struct CommandDispatchTests {
     let canvas = Rect(x: 0, y: 0, width: 1000, height: 600)
     let eligible = Classification(eligibility: .tiled, reason: "document")
 
+    @Test func columnAlignmentPreservesStructureAndSurvivesReveal() throws {
+        let slots = (1...3).map { Slot(id: String($0), members: [UInt32($0)], activeMember: UInt32($0)) }
+        var layout = Layout(columns: slots.map { Column(slots: [$0], width: 300) }, focused: "2")
+        let columns = layout.columns
+        try layout.align(.left, in: canvas)
+        #expect(layout.offset == -300)
+        #expect(try !layout.reveal(in: canvas))
+        try layout.align(.right, in: canvas)
+        #expect(layout.offset == 384)
+        #expect(try !layout.reveal(in: canvas))
+        try layout.align(.center, in: canvas)
+        var centered = layout
+        try centered.center(in: canvas)
+        #expect(layout.offset == centered.offset)
+        #expect(layout.columns == columns)
+        #expect(layout.focused == "2")
+        let original = layout
+        #expect(throws: LayoutError.self) { try layout.align(.left, in: canvas, gap: .nan) }
+        #expect(layout == original)
+    }
+
     @Test func transientCommandsAreDiscardedAndRecoveryDoesNotReplay() throws {
         let slot = Slot(id: "container", members: [1, 2], activeMember: 2)
         var state = LifecycleState(layout: Layout(columns: [Column(slots: [slot], width: 400)], focused: slot.id))

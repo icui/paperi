@@ -116,6 +116,29 @@ public struct Layout: Codable, Equatable, Sendable {
         columns[i.column].weights.remove(at: i.row)
         columns.insert(Column(slots: [slot], width: columns[i.column].width), at: i.column + 1)
     }
+    public enum ColumnAlignment: String, Sendable { case left, center, right }
+
+    /// Scroll the strip to align its focused column, retaining widths and order.
+    public mutating func align(_ alignment: ColumnAlignment, in canvas: Rect, gap: Double = 8,
+                               edgeMargin: Double? = nil) throws {
+        try validate()
+        let margin = edgeMargin ?? gap
+        guard canvas.isValid, gap.isFinite, gap >= 0, margin.isFinite, margin >= 0 else {
+            throw LayoutError.invalidGeometry
+        }
+        guard let focused, let i = index(of: focused) else { return }
+        let maximum = Self.maxColumnWidth(in: canvas, edgeMargin: margin)
+        let preceding = columns.prefix(i.column).reduce(0) { $0 + min($1.width, maximum) + gap }
+        let room = canvas.width - min(columns[i.column].width, maximum)
+        let left = min(i.column > 0 ? margin : 0, room)
+        let right = max(left, room - (i.column < columns.count - 1 ? margin : 0))
+        switch alignment {
+        case .left: offset = left - preceding
+        case .center: offset = room / 2 - preceding
+        case .right: offset = right - preceding
+        }
+    }
+
     public mutating func center(in canvas: Rect, gap: Double = 8, edgeMargin: Double? = nil) throws {
         try validate()
         guard canvas.isValid, gap.isFinite, gap >= 0 else { throw LayoutError.invalidGeometry }

@@ -187,6 +187,13 @@ extension LiveManager {
             let delta = sign == "+" ? fraction : -fraction
             if verb == "width" { return layoutCommand { layout, canvas in try layout.resizeWidth(by: delta, in: canvas, edgeMargin: self.options.gap) } }
             return layoutCommand { layout, canvas in try layout.resizeHeight(by: delta, in: canvas, gap: self.options.gap) }
+        case "align":
+            guard let raw = rest.first, let alignment = Layout.ColumnAlignment(rawValue: raw) else {
+                return fail("usage: align left|right|center")
+            }
+            return layoutCommand(reveal: false) { layout, canvas in
+                try layout.align(alignment, in: canvas, gap: self.options.gap)
+            }
         case "center":
             return layoutCommand(reveal: false) { layout, canvas in try layout.center(in: canvas, gap: self.options.gap) }
         case "split":
