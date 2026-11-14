@@ -101,63 +101,61 @@ import PaperiPlatform
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
-/// Own the native split controller so divider interaction can be disabled without
-/// replacing SwiftUI's private split-view delegate or imitating the system material.
-private struct SettingsSplitView<Sidebar: View, Detail: View>: NSViewControllerRepresentable {
-    var sidebar: Sidebar
-    var detail: Detail
+/// Keep SwiftUI in charge of the floating sidebar and toolbar. A transparent
+/// native view consumes divider interaction without replacing its delegate.
+private struct NonresizableSettingsSidebar: NSViewRepresentable {
+    func makeNSView(context: Context) -> SidebarDividerAnchor { SidebarDividerAnchor() }
+    func updateNSView(_ view: SidebarDividerAnchor, context: Context) { view.scheduleInstallation() }
+    static func dismantleNSView(_ view: SidebarDividerAnchor, coordinator: ()) { view.removeBlocker() }
+}
 
-    init(@ViewBuilder sidebar: () -> Sidebar, @ViewBuilder detail: () -> Detail) {
-        self.sidebar = sidebar()
-        self.detail = detail()
+private final class SidebarDividerAnchor: NSView {
+    private var blocker: SidebarDividerBlocker?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { removeBlocker() } else { scheduleInstallation() }
     }
 
-    func makeNSViewController(context: Context) -> SettingsSplitController {
-        let controller = SettingsSplitController()
-        let sidebar = NSSplitViewItem(sidebarWithViewController: NSHostingController(rootView: SettingsColumn(content: self.sidebar)))
-        sidebar.minimumThickness = SettingsSplitController.sidebarWidth
-        sidebar.maximumThickness = SettingsSplitController.sidebarWidth
-        sidebar.canCollapse = false
-        sidebar.canCollapseFromWindowResize = false
-        controller.addSplitViewItem(sidebar)
-        controller.addSplitViewItem(NSSplitViewItem(viewController: NSHostingController(rootView: SettingsColumn(content: detail))))
-        return controller
+    func scheduleInstallation() {
+        DispatchQueue.main.async { [weak self] in self?.installBlocker() }
     }
 
-    func updateNSViewController(_ controller: SettingsSplitController, context: Context) {
-        (controller.splitViewItems[0].viewController as? NSHostingController<SettingsColumn<Sidebar>>)?.rootView = SettingsColumn(content: sidebar)
-        (controller.splitViewItems[1].viewController as? NSHostingController<SettingsColumn<Detail>>)?.rootView = SettingsColumn(content: detail)
+    func removeBlocker() {
+        blocker?.removeFromSuperview()
+        blocker = nil
+    }
+
+    private func installBlocker() {
+        guard window != nil, blocker == nil else { return }
+        var ancestor = superview
+        while let view = ancestor {
+            if let split = view as? NSSplitView, split.isVertical,
+               let sidebar = split.arrangedSubviews.first, let container = split.superview {
+                let blocker = SidebarDividerBlocker()
+                blocker.translatesAutoresizingMaskIntoConstraints = false
+                container.addSubview(blocker, positioned: .above, relativeTo: split)
+                NSLayoutConstraint.activate([
+                    blocker.centerXAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: split.dividerThickness / 2),
+                    blocker.widthAnchor.constraint(equalToConstant: 12),
+                    blocker.topAnchor.constraint(equalTo: split.topAnchor),
+                    blocker.bottomAnchor.constraint(equalTo: split.bottomAnchor)
+                ])
+                self.blocker = blocker
+                return
+            }
+            ancestor = view.superview
+        }
     }
 }
 
-private struct SettingsColumn<Content: View>: View {
-    let content: Content
-
-    var body: some View {
-        NavigationStack { content }
+private final class SidebarDividerBlocker: NSView {
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .arrow)
     }
-}
-
-private final class SettingsSplitController: NSSplitViewController {
-    static let sidebarWidth: CGFloat = 180
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        splitView.isVertical = true
-        splitView.dividerStyle = .thin
-    }
-
-    override func splitView(_ splitView: NSSplitView, effectiveRect proposedEffectiveRect: NSRect,
-                            forDrawnRect drawnRect: NSRect, ofDividerAt dividerIndex: Int) -> NSRect {
-        _ = super.splitView(splitView, effectiveRect: proposedEffectiveRect,
-                            forDrawnRect: drawnRect, ofDividerAt: dividerIndex)
-        return .zero
-    }
-
-    override func splitView(_ splitView: NSSplitView, additionalEffectiveRectOfDividerAt dividerIndex: Int) -> NSRect {
-        _ = super.splitView(splitView, additionalEffectiveRectOfDividerAt: dividerIndex)
-        return .zero
-    }
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseDragged(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {}
 }
 
 private struct Setting: Identifiable {
@@ -227,7 +225,7 @@ private struct SettingsView: View {
             "general start at login".localizedCaseInsensitiveContains(model.search)
     }
     var body: some View {
-        SettingsSplitView {
+        NavigationSplitView {
             List(selection: selection) {
                 ForEach(categories, id: \.self) { category in
                     Label(category, systemImage: categoryIcons[category] ?? "gearshape")
@@ -237,6 +235,10 @@ private struct SettingsView: View {
             .listStyle(.sidebar)
             .navigationTitle("Settings")
             .searchable(text: $model.search, prompt: "Search settings")
+            // Keep the sidebar fixed rather than letting the split view choose a width.
+            .frame(width: 180)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 180, max: 180)
+            .background(NonresizableSettingsSidebar())
         } detail: {
             Form {
                 ForEach(settings, id: \.0) { category, fields in
