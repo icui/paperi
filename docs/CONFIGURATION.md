@@ -55,7 +55,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 | `autoCenter` | Default `true`. Center a sole column; center wide focused interior columns. First and last columns in a multi-column strip keep normal positioning. Stacked windows share their column’s position. |
 | `autoCenterThreshold` | Width fraction of the usable layout on the current display, default `0.75`; greater than 0 and at most 1. Applied after focus, size, or membership changes and when gestures settle. |
 | `focusScrollDuration` | Focus animation in seconds, default `0.22`; `0` disables it. |
-| `bottom` | `dot` (default) or `none`. Dots along the bottom of each display show the strip's windows and which one is focused; they hide with one window. The former `thumbnail` value reads as `dot`: window thumbnails are now the on-demand tray (see [Gestures](#gestures)). Choose from **Settings → Appearance** or edit this key. |
+| `bottomDotsVisibility` | `visible`, `hidden`, or `auto` (default). Auto shows dots during horizontal swipes, through the landing animation, and for 650 ms afterward. Legacy `bottom: dot`, `dots`, or `thumbnail` loads as `visible`; `bottom: none` loads as `hidden`. Choose from **Settings → Appearance** or edit this key. |
 | `swapHighlight` | Drag preview color as `#RRGGBB` or `#RRGGBBAA`. |
 
 ## Gestures
@@ -102,7 +102,8 @@ To open a window of a specific app, set `swipeDown` to `openApp` and
 window). If already running, it activates the app and invokes New Window,
 falling back to ⌘N. Window creation depends on the app's support for these actions.
 The target must be installed; an unavailable target leaves the current app alone.
-Omit `swipeDownApp` to keep the existing `newWindow` action targeting the focused app.
+Use `newWindow` to target the focused app without specifying `swipeDownApp`.
+Selecting `openApp` for any downward gesture requires `swipeDownApp`; omitting it rejects the configuration.
 
 `tabCloseApps` defaults to an empty array. Add apps such as Chrome here to make
 swipe up show the tab-close pill and send ⌘W instead of closing the entire window.
@@ -148,8 +149,8 @@ paperi msg status
 
 Other commands include `focus up|down`, `swap left|right|up|down`,
 `height +|-`, `center`, `split`, `slurp`, `barf`, `tray`, `retile`, `pause`, `resume`,
-and `stop`. `paperi check-apps` explains which visible windows are eligible.
+and `stop`. `move` is an alias for `swap`; `refresh` is an alias for `retile`.
+`swipe left|right|up|down [travel]` simulates a swipe.
+`paperi check-apps` explains which visible windows are eligible.
 
 Set `"hotkeysEnabled": false` or turn off **Settings → Shortcuts → Enable shortcuts** to disable all global shortcuts while keeping your bindings. The default is `true`; `--no-hotkeys` takes precedence. Apply Changes saves and applies the toggle.
-
-`bottomDotsVisibility` accepts `visible`, `hidden`, or `auto` (default). Auto shows dots only during horizontal swipes, through the landing animation, and for 650 ms afterward. Legacy `bottom: dot` / `none` settings load as visible / hidden.

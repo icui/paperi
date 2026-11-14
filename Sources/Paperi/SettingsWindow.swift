@@ -23,7 +23,7 @@ import PaperiPlatform
         var d = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(LiveConfig()))) as? [String: Any] ?? [:]
         d["gap"] = 8; d["outerGap"] = 8; d["focusScrollDuration"] = 0.22
         d["autoCenter"] = true; d["autoCenterThreshold"] = 0.75
-        d["swapHighlight"] = LiveConfig.defaultSwapHighlight; d["edgeHint"] = LiveConfig.defaultEdgeHint
+        d["swapHighlight"] = LiveConfig.defaultSwapHighlight
         defaults = d
         load()
     }
@@ -178,8 +178,7 @@ private struct SettingsView: View {
                     Setting(id: "autoCenterThreshold", title: "Auto center threshold", detail: "Fraction of usable display width (0–1, excluding 0). Default: 0.75."),
                     Setting(id: "focusScrollDuration", title: "Focus animation", detail: "Duration in seconds (0–1). Use 0 to disable.")]),
         ("Appearance", [Setting(id: "bottomDotsVisibility", title: "Bottom dots visibility", detail: "Auto shows dots during horizontal swipes and briefly after the animation finishes.", choices: ["visible", "hidden", "auto"]),
-                        Setting(id: "swapHighlight", title: "Swap highlight", detail: "Drag preview color: #RRGGBB or #RRGGBBAA."),
-                        Setting(id: "edgeHint", title: "Edge hint", detail: "Edge hint color: #RRGGBB or #RRGGBBAA.")]),
+                        Setting(id: "swapHighlight", title: "Swap highlight", detail: "Drag preview color: #RRGGBB or #RRGGBBAA.")]),
         ("Applications", [Setting(id: "include", title: "Managed applications", detail: "App bundle IDs, one per line. Empty means all regular apps."),
                           Setting(id: "exclude", title: "Excluded applications", detail: "App bundle IDs to skip, one per line."),
                           Setting(id: "singleton", title: "Singleton applications", detail: "App bundle IDs whose in-content tabs are treated as plain windows."),

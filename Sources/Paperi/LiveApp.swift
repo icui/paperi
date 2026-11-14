@@ -352,41 +352,13 @@ import PaperiPlatform
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let state: String
-        if !AXIsProcessTrusted() { state = "Waiting for Accessibility access" }
-        else if let reason = arrangementPause { state = "Paused (\(Self.pauseLabel(reason)))" }
-        else if manager.paused { state = "Paused" }
-        else { state = "Managing \(manager.managedWindowCount) window\(manager.managedWindowCount == 1 ? "" : "s")" }
-        menu.addItem(withTitle: "Paperi — \(state)", action: nil, keyEquivalent: "")
-        if hotkeysEnabled && manager.options.config.hotkeysEnabled {
-            let detail = hotkeyReport.failures.isEmpty && hotkeyReport.errors.isEmpty
-                ? "\(hotkeyReport.registered) shortcuts active"
-                : "\(hotkeyReport.registered) shortcuts active, \(hotkeyReport.failures.count + hotkeyReport.errors.count) problem(s)"
-            menu.addItem(withTitle: detail, action: nil, keyEquivalent: "")
-        }
+        menu.autoenablesItems = false
         add(menu, "Settings…", #selector(openSettings), key: ",")
-        if let reason = arrangementPause, SkyLightHealth.isProblem(reason) {
-            let why = menu.addItem(withTitle: "Space information unavailable (hover for details)", action: nil, keyEquivalent: "")
-            why.toolTip = reason
-        } else if let reason = arrangementPause {
-            let why = menu.addItem(withTitle: "Update display settings to resume", action: nil, keyEquivalent: "")
-            why.toolTip = reason
-            add(menu, "Open Display Settings…", #selector(openDisplaySettings))
-        }
-        let gestureConflicts = GestureConflict.checkLive(fingers: manager.options.config.gesture.fingers)
-        if manager.options.config.gesture.enabled && !gestureConflicts.isEmpty {
-            let item = menu.addItem(withTitle: "Three-finger swipe disabled: system conflict", action: #selector(openTrackpadSettings), keyEquivalent: "")
-            item.toolTip = gestureConflicts.joined(separator: "\n")
-            add(menu, "Open Trackpad Settings…", #selector(openTrackpadSettings))
-        }
-        menu.addItem(.separator())
-        if arrangementPause == nil { add(menu, manager.paused ? "Resume" : "Pause", #selector(togglePause)) }
-        add(menu, "Reload Config", #selector(reloadConfig))
-        add(menu, "Open Config…", #selector(openConfig))
-        menu.addItem(.separator())
-        if !AXIsProcessTrusted() { add(menu, "Open Accessibility Settings…", #selector(openAccessibility)) }
-        menu.addItem(.separator())
-        add(menu, "Stop & Restore Windows", #selector(stopAndQuit), key: "q")
+        let pause = add(menu, manager.paused ? "Resume" : "Pause", #selector(togglePause))
+        pause.isEnabled = AXIsProcessTrusted() && arrangementPause == nil
+        pause.toolTip = arrangementPause
+        add(menu, "Reload", #selector(reloadConfig))
+        add(menu, "Quit", #selector(stopAndQuit), key: "q")
     }
 
     @discardableResult private func add(_ menu: NSMenu, _ title: String, _ action: Selector, key: String = "") -> NSMenuItem {

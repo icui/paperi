@@ -131,14 +131,11 @@ the same stale-velocity and flick tests).
   `followVisualProgress`; both go away with S2.
 - `Paging` (`Layout.swift:328–359`) is used only by its own test; superseded by
   `SlotSwipe`. Remove, or revive it for B2.
-- `LiveConfig.edgeHint` / `edgeHintColor`: "no longer displayed", but still
-  validated and tested. Accept and ignore the key instead.
 - `handle` matches `"stop"` twice (`:2655` and `:2679`).
 - `main.swift --menu` still shows "Feasibility build — management inactive".
 - `docs/SNAPSHOT-EXPERIMENT.md` documents `travel: 0.25` and one-slot rules
   that have since changed; `docs/STATUS.md` still lists finished swipe work as
   "next". Fold what is still true into `DEVELOPMENT.md`.
-- The `paperi` usage text in `main.swift` omits `swipe`, `tray`, `focus up|down`.
 
 ### M5. Move probes and test aids out of the shipped binary
 

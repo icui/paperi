@@ -192,8 +192,9 @@ default:
     Paperi (opt-in live management; Option–Command shortcuts from the PaperWM config)
       paperi run [--app ID ...] [--singleton-app ID ...] [-v] [--no-restore] [--no-hotkeys]
                                         Manage all regular apps (or only --app ones) on each display's active Space
-      paperi msg COMMAND                 focus|swap left|right|up|down, width|height +|- [fraction],
-                                        center, split, slurp, barf, float, retile, status,
+      paperi msg COMMAND                 focus|swap|move left|right|up|down, width|height +|- [fraction],
+                                        swipe left|right|up|down [travel], center, split, slurp, barf,
+                                        float, tray, retile (alias: refresh), status,
                                         pause, resume, reload, stop
       paperi check-apps [ID ...]         Read-only: what live mode would decide for each on-screen window
       paperi login on|off|status         Start live mode at login (LaunchAgent; prefers ~/Applications/Paperi.app)

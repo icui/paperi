@@ -619,9 +619,10 @@ extension LiveManager {
                 guard let self, self.running, !self.paused,
                       self.coordinator.display(forSpace: space)?.activeSpaceID == space,
                       let currentSession = self.coordinator.sessions[space],
-                      !currentSession.state.interactionSuppressed,
                       Self.focusedWindow(currentSession.state.layout) == target,
                       NSEvent.pressedMouseButtons == 0 else { return }
+                // Unmanaged popup focus suppresses layout interaction. That flag
+                // must not block restoring focus to the managed window.
                 guard !Self.windowOnScreen(popupID) else { continue }
                 // Wait through the gesture handoff instead of dropping restoration.
                 guard !self.motionActive else { continue }

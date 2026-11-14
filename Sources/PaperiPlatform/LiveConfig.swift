@@ -172,10 +172,6 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public var hotkeysEnabled: Bool = true
     /// Mask over the column a dragged window would swap with, `#RRGGBB[AA]`.
     public var swapHighlight: String?
-    /// Legacy color setting, retained for config compatibility; no longer displayed.
-    public var edgeHint: String?
-    public static let defaultEdgeHint = "#0A84FF"
-    public var edgeHintColor: HexColor { edgeHint.flatMap(HexColor.init) ?? HexColor(Self.defaultEdgeHint)! }
     public static let defaultSwapHighlight = "#0A84FF4D"
     public var swapHighlightColor: HexColor { swapHighlight.flatMap(HexColor.init) ?? HexColor(Self.defaultSwapHighlight)! }
     /// Trackpad swipe gesture configuration.
@@ -192,7 +188,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case autoCenter, autoCenterThreshold, bottomDotsVisibility, include, exclude, singleton, float, tile, gap, outerGap, hotkeys, hotkeysEnabled, swapHighlight, edgeHint, focusScrollDuration, focusAfterClose, gesture
+        case autoCenter, autoCenterThreshold, bottomDotsVisibility, include, exclude, singleton, float, tile, gap, outerGap, hotkeys, hotkeysEnabled, swapHighlight, focusScrollDuration, focusAfterClose, gesture
     }
 
     public init(from decoder: Decoder) throws {
@@ -239,11 +235,6 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         outerGap = try c.decodeIfPresent(Double.self, forKey: .outerGap)
         hotkeysEnabled = try c.decodeIfPresent(Bool.self, forKey: .hotkeysEnabled) ?? true
         hotkeys = try c.decodeIfPresent([String: String?].self, forKey: .hotkeys) ?? [:]
-        edgeHint = try c.decodeIfPresent(String.self, forKey: .edgeHint)
-        if let edgeHint, HexColor(edgeHint) == nil {
-            throw DecodingError.dataCorruptedError(forKey: .edgeHint, in: c,
-                debugDescription: "expected #RRGGBB or #RRGGBBAA, got \(edgeHint)")
-        }
         swapHighlight = try c.decodeIfPresent(String.self, forKey: .swapHighlight)
         if let swapHighlight, HexColor(swapHighlight) == nil {
             throw DecodingError.dataCorruptedError(forKey: .swapHighlight, in: c,
