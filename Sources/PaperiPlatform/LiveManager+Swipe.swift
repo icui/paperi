@@ -36,7 +36,7 @@ extension LiveManager {
         var tabCloseMode: TabClose? { pulling ? tabClose ?? .app : tabClose }
         /// The new-window indicator replaces moving the window.
         var showsNewWindow: Bool { closing && pulling && (pullAction == .newWindow || pullAction == .openApp) }
-        var showsIndicator: Bool { showsTabClose || showsNewWindow || (closing && pulling && pullAction == .minimize) }
+        var showsIndicator: Bool { showsTabClose || showsNewWindow }
         var indicatorStyle: GestureIndicatorStyle {
             var style: GestureIndicatorStyle = pullAction == .minimize && pulling ? .minimize : showsNewWindow ? .newWindow : .closeTab
             if pulling { style.direction = turned ? CGVector(dx: turnDirection == .left ? -1 : 1, dy: 0) : CGVector(dx: 0, dy: -1) }
@@ -220,7 +220,7 @@ extension LiveManager {
     func updateStandaloneHint(_ progress: Double, direction: Direction? = nil) {
         guard standalonePull || standaloneClose else { return }
         let config = options.config.gesture
-        let action = direction.map { $0 == .left ? config.swipeDownLeft : config.swipeDownRight } ?? standaloneAction
+        let action = direction.map { standaloneClose ? ($0 == .left ? config.swipeUpLeft : config.swipeUpRight) : ($0 == .left ? config.swipeDownLeft : config.swipeDownRight) } ?? standaloneAction
         if standaloneOverlay == nil {
             let overlay = SnapshotTransition()
             overlay.prepareStandaloneIndicator()
@@ -271,10 +271,11 @@ extension LiveManager {
                 commitThreshold: options.config.gesture.commitThreshold,
                 flickVelocity: options.config.gesture.flickVelocity,
                 invert: options.config.gesture.invert,
-                closeTravel: options.config.gesture.swipeUpToClose ? options.config.gesture.travel : nil,
+                closeTravel: options.config.gesture.travel,
                 pullTravel: options.config.gesture.travel,
-                turnTravel: options.config.gesture.travel,
-                horizontalAcceleration: false
+                turnTravel: options.config.gesture.swipeDownMode == .commands ? options.config.gesture.travel : nil,
+                horizontalAcceleration: false,
+                closeTurnTravel: options.config.gesture.swipeUpMode == .commands ? options.config.gesture.travel : nil
             )
             var swipeReducer = SlotSwipe(config: cfg)
             swipeReducer.begin(at: time)
@@ -404,7 +405,7 @@ extension LiveManager {
         /// A pull without a strip to act on still acts on the frontmost app.
         func enterPull() {
             guard !standalonePull, swipe?.pulling != true else { return }
-            if !focusedWindowIsManaged() {
+            if options.config.gesture.swipeDownMode == .commands || !focusedWindowIsManaged() {
                 cancelSwipe()
                 standalonePull = true
             } else if !begun() {
@@ -414,7 +415,7 @@ extension LiveManager {
                 standalonePull = true
             }
             if standalonePull {
-                standaloneAction = options.config.gesture.swipeDown
+                standaloneAction = options.config.gesture.swipeDownMode == .animation ? .minimize : options.config.gesture.swipeDown
                 standaloneHintDirection = CGVector(dx: 0, dy: -1)
             }
         }
@@ -427,11 +428,11 @@ extension LiveManager {
             applySwipeTravel(to: &reducer)
             if case .active(_, let progress, _, _) = reducer.state { updateSwipe(progress, at: time) }
         case .closing(let progress):
-            if standaloneClose || !focusedWindowIsManaged() {
+            if standaloneClose || options.config.gesture.swipeUpMode == .commands || !focusedWindowIsManaged() {
                 if !standaloneClose {
                     cancelSwipe()
                     standaloneClose = true
-                    standaloneAction = .closeTab
+                    standaloneAction = options.config.gesture.swipeUpMode == .commands ? options.config.gesture.swipeUp : .closeTab
                     standaloneHintDirection = CGVector(dx: 0, dy: 1)
                 }
                 updateStandaloneHint(progress)
@@ -444,6 +445,16 @@ extension LiveManager {
             updateStandaloneHint(progress)
             updateSwipe(progress, at: time)
         case .turning(let progress):
+            if reducer.startedUp {
+                if !standaloneClose {
+                    cancelSwipe()
+                    standaloneClose = true
+                    standaloneAction = options.config.gesture.swipeUp
+                    standaloneHintDirection = CGVector(dx: 0, dy: 1)
+                }
+                updateStandaloneHint(progress, direction: reducer.turnDirection)
+                return true
+            }
             enterPull()
             guard standalonePull || startTurn(direction: reducer.turnDirection) else { cancelSwipe(); return false }
             updateStandaloneHint(progress, direction: reducer.turnDirection)
@@ -457,16 +468,14 @@ extension LiveManager {
         if standaloneClose {
             standaloneOverlay?.fadeOut(); standaloneOverlay = nil
             standaloneClose = false
-            if decision == .close { performStandalonePull(.closeTab, restoreManagedFocus: true) }
+            if decision == .close || decision == .turn { performStandalonePull(standaloneAction, restoreManagedFocus: true) }
             return
         }
         if standalonePull {
             standaloneOverlay?.fadeOut(); standaloneOverlay = nil
             standalonePull = false
             if decision == .pull || decision == .turn {
-                let cfg = options.config.gesture
-                let action = decision == .pull ? cfg.swipeDown : (turnDirection == .left ? cfg.swipeDownLeft : cfg.swipeDownRight)
-                performStandalonePull(action)
+                performStandalonePull(standaloneAction)
             }
             return
         }
@@ -940,7 +949,7 @@ extension LiveManager {
 
         state.closing = true
         state.pulling = pull
-        state.pullAction = options.config.gesture.swipeDown
+        state.pullAction = options.config.gesture.swipeDownMode == .animation ? .minimize : options.config.gesture.swipeDown
         swipe = state
         // Nothing moves: show only the indicator over the live windows.
         if state.showsIndicator {

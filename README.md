@@ -151,3 +151,15 @@ There are no third-party Swift package dependencies. See [development and diagno
 Thanks to [PaperWM](https://github.com/paperwm/PaperWM), [PaperWM.spoon](https://github.com/mogenson/PaperWM.spoon), [Hammerspoon](https://github.com/Hammerspoon/hammerspoon), and [yabai](https://github.com/asmvik/yabai) for the scrolling-window workflow and implementation references. The [reference audit](docs/REFERENCE-AUDIT.md) records which mechanisms were studied. The Mission Control test helper adapts code from PaperWM.spoon; its copyright and MIT license are preserved in [third-party notices](THIRD_PARTY_NOTICES.md).
 
 Palm webOS and Fenrir's Sleipnir are design inspirations. Paperi's icon and demonstration artwork are original; no Palm or Fenrir artwork or code is bundled. Paperi is an independent project, with no affiliation implied.
+
+Vertical gestures have independent `gesture.swipeUpMode` and
+`gesture.swipeDownMode` settings. Choose `animation` (Window Animation) for
+the existing upward close or downward minimize animation, or `commands`
+(Directional Commands) to assign the straight swipe and its left/right turns.
+The six command keys are `swipeUp`, `swipeUpRight`, `swipeUpLeft`,
+`swipeDown`, `swipeDownRight`, and `swipeDownLeft`, within `gesture`.
+Each accepts `closeTab`, `minimize`, `newWindow`, `openApp`, or `none`.
+Turns begin with a vertical swipe, followed by a deliberate sideways motion.
+Command assignments are retained when switching to Window Animation.
+Defaults retain upward animation and downward commands; `openApp` commands
+share the application bundle ID in `gesture.swipeDownApp`.

@@ -21,7 +21,14 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         case native, simple
     }
 
+    public enum VerticalSwipeMode: String, Codable, Equatable, Sendable { case animation, commands }
+
     public struct GestureConfig: Codable, Equatable, Sendable {
+        public var swipeUpMode: VerticalSwipeMode
+        public var swipeDownMode: VerticalSwipeMode
+        public var swipeUp: SwipeDownAction
+        public var swipeUpRight: SwipeDownAction
+        public var swipeUpLeft: SwipeDownAction
         public var snapshotStyle: SnapshotStyle
         public var enabled: Bool
         public var fingers: Int
@@ -51,7 +58,15 @@ public struct LiveConfig: Codable, Equatable, Sendable {
                     commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false,
                     swipeUpToClose: Bool = true, tabCloseApps: [String] = [], swipeDown: SwipeDownAction = .newWindow,
                     swipeDownRight: SwipeDownAction = .closeTab, swipeDownLeft: SwipeDownAction = .minimize, swipeDownApp: String? = nil,
-                    tap: TapAction = .tray, snapshotStyle: SnapshotStyle = .native) {
+                    tap: TapAction = .tray, snapshotStyle: SnapshotStyle = .native,
+                    swipeUpMode: VerticalSwipeMode = .animation, swipeDownMode: VerticalSwipeMode = .commands,
+                    swipeUp: SwipeDownAction = .closeTab, swipeUpRight: SwipeDownAction = .none,
+                    swipeUpLeft: SwipeDownAction = .none) {
+            self.swipeUpMode = swipeUpMode
+            self.swipeDownMode = swipeDownMode
+            self.swipeUp = swipeUp
+            self.swipeUpRight = swipeUpRight
+            self.swipeUpLeft = swipeUpLeft
             self.snapshotStyle = snapshotStyle
             self.enabled = enabled
             self.fingers = fingers
@@ -70,6 +85,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         }
 
         enum CodingKeys: String, CodingKey {
+            case swipeUpMode, swipeDownMode, swipeUp, swipeUpRight, swipeUpLeft
             case swipeDownApp, snapshotStyle
             case enabled, fingers, travel, columnTravel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDown, swipeDownRight, swipeDownLeft, tap
             /// Legacy boolean: `false` reads as `swipeDown: "none"`.
@@ -80,6 +96,11 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             let d = GestureConfig()
+            swipeUpMode = try c.decodeIfPresent(VerticalSwipeMode.self, forKey: .swipeUpMode) ?? d.swipeUpMode
+            swipeDownMode = try c.decodeIfPresent(VerticalSwipeMode.self, forKey: .swipeDownMode) ?? d.swipeDownMode
+            swipeUp = try c.decodeIfPresent(SwipeDownAction.self, forKey: .swipeUp) ?? d.swipeUp
+            swipeUpRight = try c.decodeIfPresent(SwipeDownAction.self, forKey: .swipeUpRight) ?? d.swipeUpRight
+            swipeUpLeft = try c.decodeIfPresent(SwipeDownAction.self, forKey: .swipeUpLeft) ?? d.swipeUpLeft
             snapshotStyle = try c.decodeIfPresent(SnapshotStyle.self, forKey: .snapshotStyle) ?? d.snapshotStyle
             swipeDownApp = try c.decodeIfPresent(String.self, forKey: .swipeDownApp)
             if let app = swipeDownApp, app.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -93,6 +114,10 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             flickVelocity = try c.decodeIfPresent(Double.self, forKey: .flickVelocity) ?? d.flickVelocity
             invert = try c.decodeIfPresent(Bool.self, forKey: .invert) ?? d.invert
             swipeUpToClose = try c.decodeIfPresent(Bool.self, forKey: .swipeUpToClose) ?? d.swipeUpToClose
+            if !c.contains(.swipeUpMode), !swipeUpToClose {
+                swipeUpMode = .commands
+                if !c.contains(.swipeUp) { swipeUp = .none }
+            }
             tabCloseApps = try c.decodeIfPresent([String].self, forKey: .tabCloseApps) ?? d.tabCloseApps
             swipeDownRight = try c.decodeIfPresent(SwipeDownAction.self, forKey: .swipeDownRight) ?? d.swipeDownRight
             swipeDownLeft = try c.decodeIfPresent(SwipeDownAction.self, forKey: .swipeDownLeft) ?? d.swipeDownLeft
@@ -108,7 +133,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             } else {
                 swipeDown = d.swipeDown
             }
-            if [swipeDown, swipeDownRight, swipeDownLeft].contains(.openApp), swipeDownApp == nil {
+            if [swipeUp, swipeUpRight, swipeUpLeft, swipeDown, swipeDownRight, swipeDownLeft].contains(.openApp), swipeDownApp == nil {
                 throw DecodingError.dataCorruptedError(forKey: .swipeDownApp, in: c, debugDescription: "openApp requires swipeDownApp (an app bundle ID)")
             }
         }
@@ -116,6 +141,11 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode(snapshotStyle, forKey: .snapshotStyle)
+            try c.encode(swipeUpMode, forKey: .swipeUpMode)
+            try c.encode(swipeDownMode, forKey: .swipeDownMode)
+            try c.encode(swipeUp, forKey: .swipeUp)
+            try c.encode(swipeUpRight, forKey: .swipeUpRight)
+            try c.encode(swipeUpLeft, forKey: .swipeUpLeft)
             try c.encode(enabled, forKey: .enabled); try c.encode(fingers, forKey: .fingers)
             try c.encode(travel, forKey: .travel); try c.encode(columnTravel, forKey: .columnTravel)
             try c.encode(commitThreshold, forKey: .commitThreshold)
@@ -295,6 +325,11 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         "commitThreshold": 0.5,
         "flickVelocity": 1.5,
         "invert": false,
+        "swipeUpMode": "animation",
+        "swipeDownMode": "commands",
+        "swipeUp": "closeTab",
+        "swipeUpRight": "none",
+        "swipeUpLeft": "none",
         "swipeUpToClose": true,
         "tabCloseApps": [],
         "swipeDown": "newWindow",

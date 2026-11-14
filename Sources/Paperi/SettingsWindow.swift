@@ -11,6 +11,7 @@ import PaperiPlatform
     @Published var textDrafts: [String: String] = [:]
     @Published var dirty = false
     @Published var category = "Layout"
+    @Published var gestureTab = "General"
     @Published var search = ""
     @Published var newKey = ""
     @Published var newCommand = ""
@@ -169,6 +170,7 @@ private struct Setting: Identifiable {
 private struct SettingsView: View {
     @ObservedObject var model: SettingsModel
     let openJSON: () -> Void
+    private let gestureTabs = ["General", "Swipe Up", "Swipe Down", "Sensitivity"]
     private let categories = ["Layout", "Appearance", "Applications", "Gestures", "Shortcuts", "General"]
     private var settings: [(String, [Setting])] { [
         ("Layout", [Setting(id: "gap", title: "Window gap", detail: "Space between columns and stacked windows, in points."),
@@ -192,8 +194,12 @@ private struct SettingsView: View {
                       Setting(id: "gesture.commitThreshold", title: "Commit threshold", detail: "Progress required to commit a gesture (0–1)."),
                       Setting(id: "gesture.flickVelocity", title: "Flick velocity", detail: "Speed threshold for committing a quick flick."),
                       Setting(id: "gesture.invert", title: "Invert navigation", detail: "Reverse horizontal navigation."),
-                      Setting(id: "gesture.swipeUpToClose", title: "Swipe up to close", detail: "Close the focused window or tab."),
-                      Setting(id: "gesture.tabCloseApps", title: "Close tabs in applications", detail: "App bundle IDs using in-content tabs, one per line."),
+                      Setting(id: "gesture.swipeUpMode", title: "Swipe up mode", detail: "Window Animation closes the focused window. Directional Commands uses the assignments below.", choices: ["animation", "commands"]),
+                      Setting(id: "gesture.tabCloseApps", title: "Close tabs in applications", detail: "In Window Animation mode, swipe up closes the current tab in these apps. App bundle IDs, one per line."),
+                      Setting(id: "gesture.swipeUp", title: "Swipe up", detail: "Command for an upward swipe.", choices: actions),
+                      Setting(id: "gesture.swipeUpRight", title: "Swipe up, then right", detail: "Command after turning right.", choices: actions),
+                      Setting(id: "gesture.swipeUpLeft", title: "Swipe up, then left", detail: "Command after turning left.", choices: actions),
+                      Setting(id: "gesture.swipeDownMode", title: "Swipe down mode", detail: "Window Animation minimizes the focused window. Directional Commands uses the assignments below.", choices: ["animation", "commands"]),
                       Setting(id: "gesture.swipeDown", title: "Swipe down", detail: "Action for a downward swipe.", choices: actions),
                       Setting(id: "gesture.swipeDownRight", title: "Swipe down, then right", detail: "Action after turning right.", choices: actions),
                       Setting(id: "gesture.swipeDownLeft", title: "Swipe down, then left", detail: "Action after turning left.", choices: actions),
@@ -247,8 +253,12 @@ private struct SettingsView: View {
                 ForEach(settings, id: \.0) { category, fields in
                     let visible = visibleFields(in: category, fields: fields)
                     if !visible.isEmpty {
-                        Section(category) {
-                            ForEach(visible) { field in row(field) }
+                        if category == "Gestures" && model.search.isEmpty {
+                            gestureSettings(visible)
+                        } else {
+                            Section(category) {
+                                ForEach(visible) { field in row(field) }
+                            }
                         }
                     }
                 }
@@ -299,6 +309,50 @@ private struct SettingsView: View {
             }
         }
     }
+    @ViewBuilder private func gestureSettings(_ fields: [Setting]) -> some View {
+        Section {
+            Picker("Gesture settings", selection: $model.gestureTab) {
+                ForEach(gestureTabs, id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+        if model.gestureTab == "General" {
+            gestureSection("Trackpad", ids: ["enabled", "fingers", "tap"], fields: fields)
+            gestureSection("Navigation and Appearance", ids: ["invert", "snapshotStyle"], fields: fields)
+            gestureSection("Shared Command Options", ids: ["swipeDownApp"], fields: fields)
+        } else if model.gestureTab == "Sensitivity" {
+            gestureSection("Travel", ids: ["travel", "columnTravel"], fields: fields)
+            gestureSection("Commit and Flick", ids: ["commitThreshold", "flickVelocity"], fields: fields)
+        } else {
+            let up = model.gestureTab == "Swipe Up"
+            let prefix = up ? "swipeUp" : "swipeDown"
+            let animation = model.get("gesture.\(prefix)Mode") as? String == "animation"
+            gestureSection("Mode", ids: [prefix + "Mode"], fields: fields)
+            if animation {
+                Section("Window Animation") {
+                    Label(up ? "Swipe up to close the focused window" : "Swipe down to minimize the focused window",
+                          systemImage: up ? "arrow.up" : "arrow.down")
+                    if up {
+                        ForEach(fields.filter { $0.id == "gesture.tabCloseApps" }) { row($0) }
+                    }
+                }
+            } else {
+                gestureSection("Directional Commands", ids: [prefix, prefix + "Right", prefix + "Left"], fields: fields)
+                Section {
+                    Text("Swipe vertically, then turn left or right to use a directional command. Open Application commands share the app selected in General.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func gestureSection(_ title: String, ids: [String], fields: [Setting]) -> some View {
+        Section(title) {
+            ForEach(fields.filter { ids.contains(String($0.id.dropFirst("gesture.".count))) }) { row($0) }
+        }
+    }
+
     @ViewBuilder private func row(_ field: Setting) -> some View {
         let isMultiline = field.id == "float" || field.id == "tile" || model.get(field.id) is [String] || field.id == "include"
         if isMultiline {
@@ -314,11 +368,21 @@ private struct SettingsView: View {
             LabeledContent {
                 control(field)
                     .frame(maxWidth: 220, alignment: .trailing)
+                    .disabled(commandDisabled(field.id))
                 restoreButton(field)
             } label: {
                 fieldLabel(field)
             }
         }
+    }
+    private func commandDisabled(_ id: String) -> Bool {
+        if ["gesture.swipeUp", "gesture.swipeUpRight", "gesture.swipeUpLeft"].contains(id) {
+            return model.get("gesture.swipeUpMode") as? String != "commands"
+        }
+        if ["gesture.swipeDown", "gesture.swipeDownRight", "gesture.swipeDownLeft"].contains(id) {
+            return model.get("gesture.swipeDownMode") as? String == "animation"
+        }
+        return false
     }
     private func fieldLabel(_ field: Setting) -> some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -340,7 +404,7 @@ private struct SettingsView: View {
         let value = model.get(field.id)
         if !field.choices.isEmpty {
             Picker(field.title, selection: Binding(get: { value.map { String(describing: $0) } ?? "" }, set: { model.set(field.id, field.id == "gesture.fingers" ? Int($0) as Any? : $0) })) {
-                ForEach(field.choices, id: \.self) { Text($0).tag($0) }
+                ForEach(field.choices, id: \.self) { Text($0 == "animation" ? "Window Animation" : $0 == "commands" ? "Directional Commands" : $0).tag($0) }
             }.labelsHidden().accessibilityLabel(field.title)
         } else if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
             Toggle(field.title, isOn: Binding(get: { number.boolValue }, set: { model.set(field.id, $0) })).labelsHidden().toggleStyle(.switch).accessibilityLabel(field.title)

@@ -2,6 +2,27 @@ import Testing
 @testable import PaperiCore
 
 struct SlotSwipeTests {
+    @Test func upwardCommandsTurnBothWays() {
+        for dx in [-0.07, 0.07] {
+            var swipe = SlotSwipe(config: .init(closeTravel: 0.4, closeTurnTravel: 0.4))
+            swipe.begin(at: 0)
+            #expect(swipe.move(dx: 0, dy: 0.04, at: 0.01) == .closeStarted)
+            #expect(swipe.move(dx: dx, dy: 0, at: 0.02) == .turnStarted)
+            #expect(swipe.startedUp)
+            #expect(swipe.turnDirection == (dx < 0 ? .left : .right))
+            _ = swipe.move(dx: dx * 4, dy: 0, at: 0.2)
+            #expect(swipe.end(at: 0.21) == .turn)
+        }
+    }
+
+    @Test func animationCannotTurn() {
+        var swipe = SlotSwipe(config: .init(closeTravel: 0.4, pullTravel: 0.4))
+        swipe.begin(at: 0)
+        _ = swipe.move(dx: 0, dy: 0.04, at: 0.01)
+        #expect(swipe.move(dx: 0.2, dy: 0, at: 0.2) == .closeUpdated(progress: 0))
+        #expect(swipe.end(at: 0.4) == .snapBack)
+    }
+
     @Test func pullTurnsLeftAndCommits() {
         var swipe = SlotSwipe(config: .init(pullTravel: 0.4, turnTravel: 0.4))
         swipe.begin(at: 0)

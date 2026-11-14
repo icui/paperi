@@ -72,6 +72,7 @@ public struct SlotSwipe: Equatable, Sendable {
         public var pullTravel: Double?
         /// Horizontal finger travel for a full turn out of a pull.
         /// `nil`: a pull cannot turn.
+        public var closeTurnTravel: Double?
         public var turnTravel: Double?
         /// Where the strip was, in slots from this swipe's column, when the
         /// swipe began (a landing it caught); 0 for a strip at rest.
@@ -88,7 +89,8 @@ public struct SlotSwipe: Equatable, Sendable {
                     startOffset: Double = 0,
                     travelLeft: Double? = nil,
                     travelRight: Double? = nil,
-                    horizontalAcceleration: Bool = false) {
+                    horizontalAcceleration: Bool = false,
+                    closeTurnTravel: Double? = nil) {
             self.travel = travel
             self.horizontalAcceleration = horizontalAcceleration
             self.travelLeft = travelLeft
@@ -100,10 +102,12 @@ public struct SlotSwipe: Equatable, Sendable {
             self.closeTravel = closeTravel
             self.pullTravel = pullTravel
             self.turnTravel = turnTravel
+            self.closeTurnTravel = closeTurnTravel
             self.startOffset = startOffset
         }
     }
 
+    public private(set) var startedUp = false
     public private(set) var turnDirection: Direction = .right
 
     public var config: Configuration
@@ -257,6 +261,7 @@ public struct SlotSwipe: Equatable, Sendable {
         turnX = 0; turnY = 0
         fingerSpeed = nil
         turnDirection = .right
+        startedUp = false
     }
 
     public mutating func move(dx: Double, dy: Double, at time: Double) -> Action? {
@@ -296,6 +301,7 @@ public struct SlotSwipe: Equatable, Sendable {
                     let rawProg = abs(newY) / max(0.01, travel)
                     let dt = max(1.0 / 120.0, time - start)
                     origin = min(0.5, rawProg)
+                    startedUp = newY > 0
                     if newY > 0 {
                         state = .closing(rawProgress: rawProg, clampedProgress: shownClose(rawProg),
                                          velocity: rawProg / dt, lastTime: time)
@@ -330,6 +336,13 @@ public struct SlotSwipe: Equatable, Sendable {
             return .updated(progress: clamped)
 
         case .closing(let rawProg, _, let lastVel, let lastTime):
+            if let travel = config.closeTurnTravel, let turn = turnLock(dx: dx, dy: dy) {
+                turnDirection = turn < 0 ? .left : .right
+                let raw = abs(turn) / max(0.01, travel)
+                origin = min(0.5, raw)
+                state = .turning(rawProgress: raw, clampedProgress: shownClose(raw), velocity: 0, lastTime: time)
+                return .turnStarted
+            }
             guard let next = vertical(rawProg, lastVel, lastTime, delta: dy / max(0.01, config.closeTravel ?? 1), at: time)
             else { return nil }
             state = .closing(rawProgress: next.raw, clampedProgress: next.shown, velocity: next.velocity, lastTime: time)
@@ -350,7 +363,7 @@ public struct SlotSwipe: Equatable, Sendable {
             return .pullUpdated(progress: next.shown)
 
         case .turning(let rawProg, _, let lastVel, let lastTime):
-            guard let next = vertical(rawProg, lastVel, lastTime, delta: dx * (turnDirection == .left ? -1 : 1) / max(0.01, config.turnTravel ?? 1), at: time)
+            guard let next = vertical(rawProg, lastVel, lastTime, delta: dx * (turnDirection == .left ? -1 : 1) / max(0.01, (startedUp ? config.closeTurnTravel : config.turnTravel) ?? 1), at: time)
             else { return nil }
             state = .turning(rawProgress: next.raw, clampedProgress: next.shown, velocity: next.velocity, lastTime: time)
             return .turnUpdated(progress: next.shown)

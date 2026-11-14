@@ -112,7 +112,9 @@ struct LiveConfigTests {
         #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).gesture.swipeUpToClose)
         // Omitted gesture keys keep their defaults.
         let off = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"swipeUpToClose":false}}"#.utf8))
-        #expect(off.gesture == LiveConfig.GestureConfig(swipeUpToClose: false))
+        #expect(off.gesture.swipeUpMode == .commands)
+        #expect(off.gesture.swipeUp == .none)
+        #expect(!off.gesture.swipeUpToClose)
         #expect(off.gesture.tabCloseApps.isEmpty)
         let chrome = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"tabCloseApps":["com.google.Chrome"]}}"#.utf8))
         #expect(chrome.gesture.tabCloseApps == ["com.google.Chrome"])
