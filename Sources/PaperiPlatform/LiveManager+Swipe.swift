@@ -457,7 +457,7 @@ extension LiveManager {
         if standaloneClose {
             standaloneOverlay?.fadeOut(); standaloneOverlay = nil
             standaloneClose = false
-            if decision == .close { performStandalonePull(.closeTab) }
+            if decision == .close { performStandalonePull(.closeTab, restoreManagedFocus: true) }
             return
         }
         if standalonePull {
@@ -571,11 +571,12 @@ extension LiveManager {
     }
 
     /// App actions remain available when no tiled window can supply a strip.
-    func performStandalonePull(_ action: LiveConfig.SwipeDownAction) {
+    func performStandalonePull(_ action: LiveConfig.SwipeDownAction, restoreManagedFocus: Bool = false) {
         if action == .openApp { _ = openConfiguredApp(); return }
         guard let focus = gestureFocus() else { return }
         let pid = focus.pid
         let window = focus.window
+        if restoreManagedFocus { restoreManagedFocusAfterPopupClose(window) }
         // Our settings window belongs to an accessory app. Handle it directly:
         // a process-targeted shortcut need not reach its key window.
         if pid == ProcessInfo.processInfo.processIdentifier, let keyWindow = NSApp.keyWindow {
@@ -599,9 +600,41 @@ extension LiveManager {
                 break
             }
             Self.postAppCommand(Self.keyW, pid: pid)
-            focusManagedWindowAfterCommandW()
+            if !restoreManagedFocus { focusManagedWindowAfterCommandW() }
         }
         scheduleRefresh()
+    }
+
+    /// Track the actual popup: a fixed delay can run before its close animation
+    /// finishes, or while the standalone gesture is still handing off.
+    func restoreManagedFocusAfterPopupClose(_ popup: AXUIElement?) {
+        guard let popup, let space = pointerDisplay()?.activeSpaceID,
+              let session = coordinator.sessions[space],
+              let target = Self.focusedWindow(session.state.layout) else { return }
+        let popupID = paperi_window_id(popup)
+        guard popupID != 0 else { return }
+        Task { @MainActor [weak self] in
+            for _ in 0..<80 {
+                try? await Task.sleep(for: .milliseconds(25))
+                guard let self, self.running, !self.paused,
+                      self.coordinator.display(forSpace: space)?.activeSpaceID == space,
+                      let currentSession = self.coordinator.sessions[space],
+                      !currentSession.state.interactionSuppressed,
+                      Self.focusedWindow(currentSession.state.layout) == target,
+                      NSEvent.pressedMouseButtons == 0 else { return }
+                guard !Self.windowOnScreen(popupID) else { continue }
+                // Wait through the gesture handoff instead of dropping restoration.
+                guard !self.motionActive else { continue }
+                guard self.coordinator.spaceForWindow[target] == space,
+                      Self.windowOnScreen(target) else { return }
+                _ = self.raise(target)
+                if let element = self.references[target] {
+                    AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+                }
+                self.scheduleRefresh()
+                return
+            }
+        }
     }
 
     /// Give the app time to close or show a save prompt before restoring focus.
