@@ -100,19 +100,22 @@ Default shortcuts use **⌥⌘ (Option–Command)**, with Shift added for swappi
 | ← / → / ↑ / ↓ | Focus a neighboring column or stacked window. |
 | ⇧← / ⇧→ / ⇧↑ / ⇧↓ | Swap columns or stacked windows. |
 | H / L | Make the column narrower / wider. |
-| C | Center the focused column. |
 | F | Toggle floating for the focused window. |
 | T | Show the window tray at the pointer. |
 
-Settings → Shortcuts → **Advanced Layout** offers optional bindings for height
-(U/N), stacking and unstacking (I/O), equal widths with the left column (S),
-and left/right column alignment ([/]). These are off by default.
+Settings → Shortcuts → **Advanced Layout** offers optional bindings for centering
+(C), equal widths with the left/right column ([ / ]), height (U/N),
+stacking and unstacking (I/O), and left/right column alignment
+(Shift-[ / Shift-]). All use ⌥⌘ and are disabled by default; enable them individually.
 Use `paperi msg align left|right|center` to position the focused column without
 changing its width or order. Alignment retains the edge gap beside neighboring columns.
 
 Existing explicit shortcut overrides are preserved. Defaults have changed:
-arrows now focus, Shift-arrows swap, J/K are no longer assigned, and U/N/I/O/S
-are optional.
+arrows now focus, Shift-arrows swap, J/K/S are no longer assigned, and U/N/I/O
+are optional. Centering and equal-width shortcuts are also optional.
+The commands are `paperi msg split left` and `paperi msg split right`;
+`paperi msg split` continues to mean left. Both are also available in
+directional swipe menus under Column Layout.
 
 Dialogs, sheets, menus, and popovers stay outside the strip. Utility windows without a fullscreen button float by default. Native macOS tab groups share one position in the layout.
 
@@ -165,7 +168,13 @@ the existing upward close or downward minimize animation, or `commands`
 (Directional Commands) to assign the straight swipe and its left/right turns.
 The six command keys are `swipeUp`, `swipeUpRight`, `swipeUpLeft`,
 `swipeDown`, `swipeDownRight`, and `swipeDownLeft`, within `gesture`.
-Each accepts `closeTab`, `minimize`, `newWindow`, `openApp`, or `none`.
+The action menus group window actions, navigation, swapping, column layout,
+and sizing into submenus. In JSON, actions include `closeTab`, `minimize`,
+`newWindow`, `openApp`, `none`, `focusLeft/Right/Up/Down`,
+`swapLeft/Right/Up/Down`, `alignLeft`, `center`, `alignRight`, `split`, `splitRight`,
+`slurp`, `barf`, `float`, `tray`, `widthIncrease/Decrease`, and
+`heightIncrease/Decrease` (slash-separated suffixes denote separate values).
+Sizing commands change the dimension by 10% of the usable screen.
 Turns begin with a vertical swipe, followed by a deliberate sideways motion.
 Command assignments are retained when switching to Window Animation.
 Defaults retain upward animation and downward commands; `openApp` commands

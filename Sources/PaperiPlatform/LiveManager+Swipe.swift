@@ -232,6 +232,10 @@ extension LiveManager {
         standaloneAction = action
         guard action != .none else { return }
         var style: GestureIndicatorStyle = (action == .newWindow || action == .openApp) ? .newWindow : action == .minimize ? .minimize : .closeTab
+        if action.command != nil || action == .openApp {
+            style = GestureIndicatorStyle(label: action.title, armedLabel: "Release to " + action.title,
+                plus: true, armedColor: NSColor.systemBlue.cgColor, direction: standaloneHintDirection)
+        }
         style.direction = direction.map { CGVector(dx: $0 == .left ? -1 : 1, dy: 0) } ?? standaloneHintDirection
         standaloneHintDirection = style.direction
         standaloneOverlay?.trackIndicator(style, window: 0, progress: progress, threshold: config.commitThreshold)
@@ -581,6 +585,7 @@ extension LiveManager {
 
     /// App actions remain available when no tiled window can supply a strip.
     func performStandalonePull(_ action: LiveConfig.SwipeDownAction, restoreManagedFocus: Bool = false) {
+        if let command = action.command { _ = handle(command); return }
         if action == .openApp { _ = openConfiguredApp(); return }
         guard let focus = gestureFocus() else { return }
         let pid = focus.pid
@@ -610,6 +615,7 @@ extension LiveManager {
             }
             Self.postAppCommand(Self.keyW, pid: pid)
             if !restoreManagedFocus { focusManagedWindowAfterCommandW() }
+        default: break // Managed layout commands were dispatched above.
         }
         scheduleRefresh()
     }

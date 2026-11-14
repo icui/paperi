@@ -7,7 +7,10 @@ struct HotKeyBindingsTests {
     @Test func defaultsUseArrowsForFocusAndShiftForSwap() {
         let defaults = HotKeyBindings.defaults
         let table = Dictionary(uniqueKeysWithValues: defaults.map { ($0.spec, $0.command) })
-        #expect(defaults.count == 13)
+        #expect(defaults.count == 12)
+        #expect(LiveCommand.validate(["split"]) == nil)
+        #expect(LiveCommand.validate(["split", "right"]) == nil)
+        #expect(LiveCommand.validate(["split", "up"]) != nil)
         for direction in ["left", "right", "up", "down"] {
             #expect(table["alt-cmd-\(direction)"] == ["focus", direction])
             #expect(table["alt-shift-cmd-\(direction)"] == ["swap", direction])
@@ -20,6 +23,17 @@ struct HotKeyBindingsTests {
         #expect(LiveCommand.validate(["align", "center"]) == nil)
         #expect(LiveCommand.validate(["align", "up"]) != nil)
         #expect(LiveCommand.validate(["align"]) != nil)
+    }
+
+    @Test func advancedShortcutsRequireExplicitOptIn() {
+        let overrides = Dictionary(uniqueKeysWithValues: HotKeyBindings.advancedTable.map { ($0.0, Optional($0.1)) })
+        let resolved = HotKeyBindings.resolve(overrides: overrides)
+        #expect(resolved.errors.isEmpty)
+        let table = Dictionary(uniqueKeysWithValues: resolved.bindings.map { ($0.spec, $0.command.joined(separator: " ")) })
+        for (key, command) in HotKeyBindings.advancedTable {
+            #expect(table[key] == command)
+            #expect(!HotKeyBindings.defaults.contains { $0.spec == key })
+        }
     }
 
     @Test func specsNormaliseModifierOrderAndAliases() {
@@ -44,7 +58,7 @@ struct HotKeyBindingsTests {
         #expect(table["alt-cmd-j"] == ["focus", "up"])
         #expect(table["alt-cmd-o"] == nil)
         #expect(table["ctrl-alt-l"] == ["width", "+", "0.2"])
-        #expect(resolved.bindings.count == 15)
+        #expect(resolved.bindings.count == 14)
         #expect(resolved.errors.count == 2)
     }
 

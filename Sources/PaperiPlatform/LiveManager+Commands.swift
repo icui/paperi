@@ -197,7 +197,7 @@ extension LiveManager {
         case "center":
             return layoutCommand(reveal: false) { layout, canvas in try layout.center(in: canvas, gap: self.options.gap) }
         case "split":
-            return layoutCommand(reveal: false) { layout, canvas in try layout.split(in: canvas, gap: self.options.gap) }
+            return layoutCommand(reveal: false) { layout, canvas in try layout.split(in: canvas, gap: self.options.gap, direction: rest.first == "right" ? .right : .left) }
         case "slurp":
             return layoutCommand { layout, _ in layout.slurp() }
         case "barf":

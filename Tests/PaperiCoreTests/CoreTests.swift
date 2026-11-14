@@ -51,6 +51,22 @@ struct CoreTests {
         checkTrue(try layout.placements(in: canvas).allSatisfy { $0.frame.isValid })
         checkEqual(layout.columns[0].width, 1)
     }
+    @Test func splitRightUsesRightNeighborAndKeepsFocus() throws {
+        let canvas = Rect(x: -1000, y: 20, width: 1000, height: 800)
+        var layout = Layout(columns: (1...3).map { Column(slots: [slot(UInt32($0))], width: 300) }, focused: "1")
+        try layout.split(in: canvas, direction: .right)
+        let frames = try layout.placements(in: canvas)
+        #expect(frames[0].frame == Rect(x: -1000, y: 20, width: 492, height: 800))
+        #expect(frames[1].frame == Rect(x: -500, y: 20, width: 492, height: 800))
+        #expect(layout.columns[2].width == 300)
+        #expect(layout.focused == "1")
+        #expect(try !layout.reveal(in: canvas))
+        layout.focused = "3"
+        let before = layout
+        try layout.split(in: canvas, direction: .right)
+        #expect(layout == before)
+    }
+
     @Test func testSplitHasEqualHalvesAndOneGap() throws {
         let canvas = Rect(x: -1000, y: 20, width: 1000, height: 800)
         var layout = Layout(columns: (1...3).map { Column(slots: [slot(UInt32($0))], width: 300) }, focused: "3")

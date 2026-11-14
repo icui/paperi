@@ -125,7 +125,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             if let raw = try c.decodeIfPresent(String.self, forKey: .swipeDown) {
                 guard let action = SwipeDownAction(rawValue: raw) else {
                     throw DecodingError.dataCorruptedError(forKey: .swipeDown, in: c,
-                        debugDescription: "expected closeTab, minimize, newWindow, openApp or none, got \(raw)")
+                        debugDescription: "expected a supported directional swipe action, got \(raw)")
                 }
                 swipeDown = action
             } else if try c.decodeIfPresent(Bool.self, forKey: .swipeDownToMinimize) == false {
@@ -159,9 +159,55 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         }
     }
 
-    /// Actions shared by the three downward gestures. New window uses the
-    /// app's New Window menu item, falling back to ⌘N.
-    public enum SwipeDownAction: String, Codable, Equatable, Sendable, CaseIterable { case closeTab, minimize, newWindow, openApp, none }
+    /// Actions shared by all six directional swipe assignments.
+    public enum SwipeDownAction: String, Codable, Equatable, Sendable, CaseIterable {
+        case closeTab, minimize, newWindow, openApp, none
+        case focusLeft, focusRight, focusUp, focusDown, tray
+        case swapLeft, swapRight, swapUp, swapDown
+        case alignLeft, center, alignRight, split, splitRight, slurp, barf, float
+        case widthIncrease, widthDecrease, heightIncrease, heightDecrease
+
+        public var command: [String]? {
+            switch self {
+            case .focusLeft: return ["focus", "left"]
+            case .focusRight: return ["focus", "right"]
+            case .focusUp: return ["focus", "up"]
+            case .focusDown: return ["focus", "down"]
+            case .swapLeft: return ["swap", "left"]
+            case .swapRight: return ["swap", "right"]
+            case .swapUp: return ["swap", "up"]
+            case .swapDown: return ["swap", "down"]
+            case .alignLeft: return ["align", "left"]
+            case .alignRight: return ["align", "right"]
+            case .splitRight: return ["split", "right"]
+            case .widthIncrease: return ["width", "+"]
+            case .widthDecrease: return ["width", "-"]
+            case .heightIncrease: return ["height", "+"]
+            case .heightDecrease: return ["height", "-"]
+            case .tray, .center, .split, .slurp, .barf, .float: return [rawValue]
+            case .closeTab, .minimize, .newWindow, .openApp, .none: return nil
+            }
+        }
+
+        public var title: String {
+            switch self {
+            case .closeTab: return "Close Tab"
+            case .minimize: return "Minimize Window"
+            case .newWindow: return "New Window"
+            case .openApp: return "Open Application"
+            case .none: return "None"
+            default: return HotKeyBindings.actionLabel(command!.joined(separator: " "))
+            }
+        }
+
+        public static var groups: [(String, [Self])] { [
+            ("Window Actions", [.newWindow, .closeTab, .minimize, .openApp, .float]),
+            ("Navigation", [.focusLeft, .focusRight, .focusUp, .focusDown, .tray]),
+            ("Move Windows", [.swapLeft, .swapRight, .swapUp, .swapDown]),
+            ("Column Layout", [.alignLeft, .center, .alignRight, .split, .splitRight, .slurp, .barf]),
+            ("Size", [.widthDecrease, .widthIncrease, .heightDecrease, .heightIncrease])
+        ] }
+    }
 
     /// A gesture-finger tap shows the thumbnail tray centred on the pointer
     /// (`tray`), or does nothing (`none`).

@@ -402,7 +402,36 @@ private struct SettingsView: View {
     }
     @ViewBuilder private func control(_ field: Setting) -> some View {
         let value = model.get(field.id)
-        if !field.choices.isEmpty {
+        if ["gesture.swipeUp", "gesture.swipeUpRight", "gesture.swipeUpLeft",
+            "gesture.swipeDown", "gesture.swipeDownRight", "gesture.swipeDownLeft"].contains(field.id) {
+            let selected = LiveConfig.SwipeDownAction(rawValue: value as? String ?? "none") ?? .none
+            Menu {
+                Button {
+                    model.set(field.id, "none")
+                } label: {
+                    Label("None", systemImage: selected == .none ? "checkmark" : "minus")
+                }
+                Divider()
+                ForEach(LiveConfig.SwipeDownAction.groups, id: \.0) { title, actions in
+                    Menu(title) {
+                        ForEach(actions, id: \.rawValue) { action in
+                            Button {
+                                model.set(field.id, action.rawValue)
+                            } label: {
+                                if selected == action {
+                                    Label(action.title, systemImage: "checkmark")
+                                } else {
+                                    Text(action.title)
+                                }
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Text(selected.title)
+            }
+            .accessibilityLabel(field.title)
+        } else if !field.choices.isEmpty {
             Picker(field.title, selection: Binding(get: { value.map { String(describing: $0) } ?? "" }, set: { model.set(field.id, field.id == "gesture.fingers" ? Int($0) as Any? : $0) })) {
                 ForEach(field.choices, id: \.self) { Text($0 == "animation" ? "Window Animation" : $0 == "commands" ? "Directional Commands" : $0).tag($0) }
             }.labelsHidden().accessibilityLabel(field.title)

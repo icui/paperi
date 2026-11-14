@@ -18,21 +18,24 @@ public enum HotKeyBindings {
         ("alt-shift-cmd-left", "swap left"), ("alt-shift-cmd-right", "swap right"),
         ("alt-shift-cmd-up", "swap up"), ("alt-shift-cmd-down", "swap down"),
         ("alt-cmd-h", "width -"), ("alt-cmd-l", "width +"),
-        ("alt-cmd-c", "center"), ("alt-cmd-f", "float"), ("alt-cmd-t", "tray"),
+        ("alt-cmd-f", "float"), ("alt-cmd-t", "tray"),
     ]
 
     /// Suggestions shown in Settings; inactive until explicitly enabled.
     public static let advancedTable: [(String, String)] = [
+        ("alt-cmd-c", "center"),
+        ("alt-cmd-leftbracket", "split left"), ("alt-cmd-rightbracket", "split right"),
         ("alt-cmd-u", "height +"), ("alt-cmd-n", "height -"),
-        ("alt-cmd-i", "slurp"), ("alt-cmd-o", "barf"), ("alt-cmd-s", "split"),
-        ("alt-cmd-leftbracket", "align left"), ("alt-cmd-rightbracket", "align right"),
+        ("alt-cmd-i", "slurp"), ("alt-cmd-o", "barf"),
+        ("alt-shift-cmd-leftbracket", "align left"), ("alt-shift-cmd-rightbracket", "align right"),
     ]
 
     public static func actionLabel(_ command: String) -> String {
         switch command {
         case "slurp": return "Stack into left column"
         case "barf": return "Unstack into a new column"
-        case "split": return "Equal widths with left column"
+        case "split", "split left": return "Equal widths with left column"
+        case "split right": return "Equal widths with right column"
         case "center": return "Center column"
         case "align left": return "Align column left"
         case "align right": return "Align column right"
@@ -138,8 +141,10 @@ public enum LiveCommand {
         guard let verb = args.first else { return "empty command" }
         let rest = Array(args.dropFirst())
         switch verb {
-        case "status", "retile", "refresh", "stop", "center", "split", "slurp", "barf", "float", "tray", "pause", "resume", "reload":
+        case "status", "retile", "refresh", "stop", "center", "slurp", "barf", "float", "tray", "pause", "resume", "reload":
             return rest.isEmpty ? nil : "\(verb) takes no arguments"
+        case "split":
+            return rest.isEmpty || (rest.count == 1 && ["left", "right"].contains(rest[0])) ? nil : "usage: split [left|right]"
         case "align":
             return rest.count == 1 && ["left", "right", "center"].contains(rest[0]) ? nil : "usage: align left|right|center"
         case "focus", "swap", "move":

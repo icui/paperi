@@ -231,7 +231,7 @@ func printHelp(_ topic: String? = nil) {
             width|height +|- [fraction]      Resize the focused column or stacked window
             center                          Center the focused column
             align left|right|center         Align the focused column within the usable screen
-            split                           Size the focused and left columns to equal halves
+            split [left|right]              Equal widths with a neighbor (default: left)
             slurp                           Stack the focused window in the left column
             barf                            Move a window out of the stack
             float                           Toggle the focused window's floating state

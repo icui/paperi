@@ -3,6 +3,25 @@ import Testing
 @testable import PaperiPlatform
 
 struct LiveConfigTests {
+    @Test func directionalActionsRoundTripAndDispatchValidCommands() throws {
+        for action in LiveConfig.SwipeDownAction.allCases {
+            let config = LiveConfig.GestureConfig(
+                swipeDown: action, swipeDownRight: action, swipeDownLeft: action,
+                swipeDownApp: "com.apple.Terminal",
+                swipeUpMode: .commands, swipeDownMode: .commands,
+                swipeUp: action, swipeUpRight: action, swipeUpLeft: action)
+            let data = try JSONEncoder().encode(config)
+            #expect(try JSONDecoder().decode(LiveConfig.GestureConfig.self, from: data) == config)
+            if let command = action.command {
+                #expect(LiveCommand.validate(command) == nil)
+                #expect(!["stop", "pause", "swipe"].contains(command[0]))
+            }
+        }
+        let menu = LiveConfig.SwipeDownAction.groups.flatMap { $0.1 }
+        #expect(Set(menu) == Set(LiveConfig.SwipeDownAction.allCases.filter { $0 != .none }))
+        #expect(Set(menu).count == menu.count)
+    }
+
     @Test func autoCenterConfiguration() throws {
         let defaults = try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8))
         #expect(defaults.autoCenter)

@@ -34,22 +34,26 @@ extension Layout {
         }
     }
 
-    /// Place the left and focused columns across two equal halves, separated by one gap.
+    /// Place the focused column and its chosen neighbor across two equal halves.
     /// Edges with further columns beyond them keep `edgeMargin` (default: `gap`),
     /// matching `reveal`, so the next refresh does not shift the pair.
-    public mutating func split(in canvas: Rect, gap: Double = 8, edgeMargin: Double? = nil) throws {
+    public mutating func split(in canvas: Rect, gap: Double = 8, edgeMargin: Double? = nil, direction: Direction = .left) throws {
         try validate()
         let margin = edgeMargin ?? gap
         let maximum = Self.maxColumnWidth(in: canvas, edgeMargin: margin)
         guard canvas.isValid, gap.isFinite, gap >= 0, margin.isFinite, margin >= 0 else { throw LayoutError.invalidGeometry }
-        guard let focused, let i = index(of: focused), i.column > 0 else { return }
-        let leading = i.column > 1 ? margin : 0
-        let trailing = i.column < columns.count - 1 ? margin : 0
+        guard direction == .left || direction == .right else { throw LayoutError.invalidGeometry }
+        guard let focused, let i = index(of: focused) else { return }
+        let left = direction == .left ? i.column - 1 : i.column
+        let right = left + 1
+        guard left >= 0, right < columns.count else { return }
+        let leading = left > 0 ? margin : 0
+        let trailing = right < columns.count - 1 ? margin : 0
         let width = (canvas.width - gap - leading - trailing) / 2
         guard width > 0 else { throw LayoutError.invalidGeometry }
-        columns[i.column - 1].width = width
-        columns[i.column].width = width
-        offset = leading - columns.prefix(i.column - 1).reduce(0) { $0 + min($1.width, maximum) + gap }
+        columns[left].width = width
+        columns[right].width = width
+        offset = leading - columns.prefix(left).reduce(0) { $0 + min($1.width, maximum) + gap }
     }
 }
 
