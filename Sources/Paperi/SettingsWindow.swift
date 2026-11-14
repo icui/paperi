@@ -101,6 +101,65 @@ import PaperiPlatform
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
+/// Own the native split controller so divider interaction can be disabled without
+/// replacing SwiftUI's private split-view delegate or imitating the system material.
+private struct SettingsSplitView<Sidebar: View, Detail: View>: NSViewControllerRepresentable {
+    var sidebar: Sidebar
+    var detail: Detail
+
+    init(@ViewBuilder sidebar: () -> Sidebar, @ViewBuilder detail: () -> Detail) {
+        self.sidebar = sidebar()
+        self.detail = detail()
+    }
+
+    func makeNSViewController(context: Context) -> SettingsSplitController {
+        let controller = SettingsSplitController()
+        let sidebar = NSSplitViewItem(sidebarWithViewController: NSHostingController(rootView: SettingsColumn(content: self.sidebar)))
+        sidebar.minimumThickness = SettingsSplitController.sidebarWidth
+        sidebar.maximumThickness = SettingsSplitController.sidebarWidth
+        sidebar.canCollapse = false
+        sidebar.canCollapseFromWindowResize = false
+        controller.addSplitViewItem(sidebar)
+        controller.addSplitViewItem(NSSplitViewItem(viewController: NSHostingController(rootView: SettingsColumn(content: detail))))
+        return controller
+    }
+
+    func updateNSViewController(_ controller: SettingsSplitController, context: Context) {
+        (controller.splitViewItems[0].viewController as? NSHostingController<SettingsColumn<Sidebar>>)?.rootView = SettingsColumn(content: sidebar)
+        (controller.splitViewItems[1].viewController as? NSHostingController<SettingsColumn<Detail>>)?.rootView = SettingsColumn(content: detail)
+    }
+}
+
+private struct SettingsColumn<Content: View>: View {
+    let content: Content
+
+    var body: some View {
+        NavigationStack { content }
+    }
+}
+
+private final class SettingsSplitController: NSSplitViewController {
+    static let sidebarWidth: CGFloat = 180
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        splitView.isVertical = true
+        splitView.dividerStyle = .thin
+    }
+
+    override func splitView(_ splitView: NSSplitView, effectiveRect proposedEffectiveRect: NSRect,
+                            forDrawnRect drawnRect: NSRect, ofDividerAt dividerIndex: Int) -> NSRect {
+        _ = super.splitView(splitView, effectiveRect: proposedEffectiveRect,
+                            forDrawnRect: drawnRect, ofDividerAt: dividerIndex)
+        return .zero
+    }
+
+    override func splitView(_ splitView: NSSplitView, additionalEffectiveRectOfDividerAt dividerIndex: Int) -> NSRect {
+        _ = super.splitView(splitView, additionalEffectiveRectOfDividerAt: dividerIndex)
+        return .zero
+    }
+}
+
 private struct Setting: Identifiable {
     let id: String
     let title: String
@@ -168,7 +227,7 @@ private struct SettingsView: View {
             "general start at login".localizedCaseInsensitiveContains(model.search)
     }
     var body: some View {
-        NavigationSplitView {
+        SettingsSplitView {
             List(selection: selection) {
                 ForEach(categories, id: \.self) { category in
                     Label(category, systemImage: categoryIcons[category] ?? "gearshape")
@@ -178,9 +237,6 @@ private struct SettingsView: View {
             .listStyle(.sidebar)
             .navigationTitle("Settings")
             .searchable(text: $model.search, prompt: "Search settings")
-            // Keep the sidebar fixed rather than letting the split view choose a width.
-            .frame(width: 210)
-            .navigationSplitViewColumnWidth(min: 210, ideal: 210, max: 210)
         } detail: {
             Form {
                 ForEach(settings, id: \.0) { category, fields in
