@@ -57,7 +57,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.4, columnTravel: Double = 0.3,
                     commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false,
                     swipeUpToClose: Bool = true, tabCloseApps: [String] = [], swipeDown: SwipeDownAction = .newWindow,
-                    swipeDownRight: SwipeDownAction = .closeTab, swipeDownLeft: SwipeDownAction = .minimize, swipeDownApp: String? = nil,
+                    swipeDownRight: SwipeDownAction = .splitRight, swipeDownLeft: SwipeDownAction = .minimize, swipeDownApp: String? = nil,
                     tap: TapAction = .tray, snapshotStyle: SnapshotStyle = .native,
                     swipeUpMode: VerticalSwipeMode = .animation, swipeDownMode: VerticalSwipeMode = .commands,
                     swipeUp: SwipeDownAction = .closeTab, swipeUpRight: SwipeDownAction = .none,
@@ -379,7 +379,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         "swipeUpToClose": true,
         "tabCloseApps": [],
         "swipeDown": "newWindow",
-        "swipeDownRight": "closeTab",
+        "swipeDownRight": "splitRight",
         "swipeDownLeft": "minimize",
         "tap": "tray"
       },

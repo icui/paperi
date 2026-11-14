@@ -29,7 +29,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
     "invert": false,
     "swipeUpToClose": true,
     "swipeDown": "newWindow",
-    "swipeDownRight": "closeTab",
+    "swipeDownRight": "splitRight",
     "swipeDownLeft": "minimize",
     "tap": "tray",
     "tabCloseApps": ["com.google.Chrome"]

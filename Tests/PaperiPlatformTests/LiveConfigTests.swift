@@ -139,7 +139,7 @@ struct LiveConfigTests {
         #expect(chrome.gesture.tabCloseApps == ["com.google.Chrome"])
         #expect(chrome.gesture.swipeUpToClose)
         #expect(chrome.gesture.swipeDown == .newWindow)
-        #expect(chrome.gesture.swipeDownRight == .closeTab)
+        #expect(chrome.gesture.swipeDownRight == .splitRight)
         #expect(chrome.gesture.swipeDownLeft == .minimize)
         let legacyOff = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"swipeDownToMinimize":false}}"#.utf8))
         #expect(legacyOff.gesture.swipeDown == LiveConfig.SwipeDownAction.none)

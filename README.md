@@ -49,7 +49,7 @@ Use **three fingers** by default (four is configurable). Horizontal swipes move 
 | Left / right | Move through the strip by one column. |
 | Up | Close the focused window; in a native macOS tab group, close its front tab. |
 | Down | Open a new window of the focused app. |
-| Down, then right without lifting | Close the current tab with ⌘W; this can close a window with no remaining tabs. |
+| Down, then right without lifting | Equal widths with the right column. |
 
 ### Flick a window away
 
@@ -61,7 +61,7 @@ The window follows your fingers. Move far enough, or flick, to close it on relea
 
 ![Animated illustration of a downward gesture changing from New Window to Close Tab after turning right](assets/demos/close-tab.gif)
 
-Swipe down to **New Window**, down then right for **Close Tab**, or down then left to **Minimize**. Turn without lifting, then continue in that direction and release to commit; a short turn cancels. Configure each with `gesture.swipeDown`, `gesture.swipeDownRight`, and `gesture.swipeDownLeft`: `closeTab`, `newWindow`, `openApp`, `minimize`, or `none`. Downward gestures also work when a popup or the desktop has focus; actions target the frontmost app unless `openApp` selects a specific app, and minimizing requires a window.
+Swipe down to **New Window**, down then right for **Equal widths with right column**, or down then left to **Minimize**. Turn without lifting, then continue in that direction and release to commit; a short turn cancels. Configure each with `gesture.swipeDown`, `gesture.swipeDownRight`, and `gesture.swipeDownLeft`: `closeTab`, `newWindow`, `openApp`, `minimize`, or `none`. Downward gestures also work when a popup or the desktop has focus; actions target the frontmost app unless `openApp` selects a specific app, and minimizing requires a window. Equal-width layouts require a managed focused column with a neighbor.
 
 New-window creation uses the app's **New Window** menu item, falling back to ⌘N when no matching item is available. To open a window of a specific app, set `gesture.swipeDown` to `openApp` and `gesture.swipeDownApp` to its bundle ID (for example, `com.apple.Terminal`). Paperi launches the app if needed or requests a new window if it is running. You can also change swipe down to minimize, or disable it.
 
@@ -130,7 +130,7 @@ Choose **Open Config…** from the menu bar. Settings live in `~/Library/Applica
   "gesture": {
     "fingers": 3,
     "swipeDown": "newWindow",
-    "swipeDownRight": "closeTab",
+    "swipeDownRight": "splitRight",
     "swipeDownLeft": "minimize",
     "tabCloseApps": ["com.google.Chrome"]
   }
