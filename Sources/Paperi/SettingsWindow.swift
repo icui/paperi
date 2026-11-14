@@ -22,6 +22,7 @@ import PaperiPlatform
         self.apply = apply
         var d = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(LiveConfig()))) as? [String: Any] ?? [:]
         d["gap"] = 8; d["outerGap"] = 8; d["focusScrollDuration"] = 0.22
+        d["autoCenter"] = true; d["autoCenterThreshold"] = 0.75
         d["swapHighlight"] = LiveConfig.defaultSwapHighlight; d["edgeHint"] = LiveConfig.defaultEdgeHint
         defaults = d
         load()
@@ -173,6 +174,8 @@ private struct SettingsView: View {
         ("Layout", [Setting(id: "gap", title: "Window gap", detail: "Space between columns and stacked windows, in points."),
                     Setting(id: "outerGap", title: "Outer gap", detail: "Space around the layout, in points."),
                     Setting(id: "focusAfterClose", title: "Focus after close", detail: "Where focus moves when a tiled window closes.", choices: ["left", "right", "system"]),
+                    Setting(id: "autoCenter", title: "Auto center", detail: "Center a sole column or a wide focused column, except at either end of the strip."),
+                    Setting(id: "autoCenterThreshold", title: "Auto center threshold", detail: "Fraction of usable display width (0–1, excluding 0). Default: 0.75."),
                     Setting(id: "focusScrollDuration", title: "Focus animation", detail: "Duration in seconds (0–1). Use 0 to disable.")]),
         ("Appearance", [Setting(id: "bottomDotsVisibility", title: "Bottom dots visibility", detail: "Auto shows dots during horizontal swipes and briefly after the animation finishes.", choices: ["visible", "hidden", "auto"]),
                         Setting(id: "swapHighlight", title: "Swap highlight", detail: "Drag preview color: #RRGGBB or #RRGGBBAA."),

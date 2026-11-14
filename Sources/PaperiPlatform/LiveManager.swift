@@ -868,7 +868,8 @@ import PaperiCore
 
     func reveal(_ session: ScopedLayoutSession) {
         var layout = session.state.layout
-        if (try? layout.reveal(in: session.canvas, gap: options.gap)) == true {
+        if (try? layout.reveal(in: session.canvas, gap: options.gap,
+                               autoCenter: options.config.autoCenter, autoCenterThreshold: options.config.autoCenterThreshold)) == true {
             session.setOffset(layout.offset, ticket: session.ticket)
         }
     }

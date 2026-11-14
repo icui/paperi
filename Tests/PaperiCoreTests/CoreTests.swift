@@ -2,6 +2,39 @@ import Testing
 @testable import PaperiCore
 
 struct CoreTests {
+    @Test func autoCenterPolicy() throws {
+        let canvas = Rect(x: 100, y: 0, width: 1000, height: 800)
+        var sole = Layout(columns: [Column(slots: [slot(1), slot(2)], width: 400)], focused: "2")
+        #expect(try sole.reveal(in: canvas, autoCenter: true))
+        #expect(sole.offset == 300)
+        #expect(try !sole.reveal(in: canvas, autoCenter: true))
+
+        for width in [749.0, 750.0, 900.0] {
+            var layout = Layout(columns: [
+                Column(slots: [slot(1)], width: 200),
+                Column(slots: [slot(2)], width: width),
+                Column(slots: [slot(3)], width: 200)
+            ], focused: "2", offset: -200)
+            _ = try layout.reveal(in: canvas, autoCenter: true)
+            #expect(layout.offset == (width >= 750 ? (1000 - width) / 2 - 208 : -200))
+            if width == 750 {
+                layout.offset = -200
+                _ = try layout.reveal(in: canvas, autoCenter: true, autoCenterThreshold: 0.8)
+                #expect(layout.offset == -200)
+            }
+            for focus in ["1", "3"] {
+                layout.focused = focus
+                var normal = layout
+                _ = try normal.reveal(in: canvas)
+                _ = try layout.reveal(in: canvas, autoCenter: true)
+                #expect(layout.offset == normal.offset)
+            }
+        }
+        var disabled = Layout(columns: [Column(slots: [slot(1)], width: 400)], focused: "1")
+        #expect(try !disabled.reveal(in: canvas, autoCenter: false))
+        #expect(disabled.offset == 0)
+    }
+
     @Test func testResizeClampsWidthAndRedistributesHeight() throws {
         let canvas = Rect(x: -1000, y: 20, width: 1000, height: 800)
         var layout = Layout(columns: [Column(slots: [slot(1), slot(2), slot(3)], width: 400)], focused: "2")

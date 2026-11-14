@@ -154,6 +154,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     /// fullscreen button), e.g. System Settings.
     public var tile: [FloatRule]
     /// Focus-scroll duration in seconds; zero disables animation.
+    public var autoCenter: Bool = true
+    public var autoCenterThreshold: Double = 0.75
     public var focusScrollDuration: Double?
     public var focusAfterClose: FocusAfterClose
     public var gap: Double?
@@ -190,7 +192,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case bottomDotsVisibility, include, exclude, singleton, float, tile, gap, outerGap, hotkeys, hotkeysEnabled, swapHighlight, edgeHint, focusScrollDuration, focusAfterClose, gesture
+        case autoCenter, autoCenterThreshold, bottomDotsVisibility, include, exclude, singleton, float, tile, gap, outerGap, hotkeys, hotkeysEnabled, swapHighlight, edgeHint, focusScrollDuration, focusAfterClose, gesture
     }
 
     public init(from decoder: Decoder) throws {
@@ -200,6 +202,12 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         singleton = try c.decodeIfPresent([String].self, forKey: .singleton) ?? []
         float = try c.decodeIfPresent([FloatRule].self, forKey: .float) ?? []
         tile = try c.decodeIfPresent([FloatRule].self, forKey: .tile) ?? []
+        autoCenter = try c.decodeIfPresent(Bool.self, forKey: .autoCenter) ?? true
+        autoCenterThreshold = try c.decodeIfPresent(Double.self, forKey: .autoCenterThreshold) ?? 0.75
+        guard autoCenterThreshold.isFinite, autoCenterThreshold > 0, autoCenterThreshold <= 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .autoCenterThreshold, in: c,
+                debugDescription: "expected a width fraction greater than 0 and at most 1")
+        }
         focusScrollDuration = try c.decodeIfPresent(Double.self, forKey: .focusScrollDuration)
         if let duration = focusScrollDuration, !duration.isFinite || duration < 0 || duration > 1 {
             throw DecodingError.dataCorruptedError(forKey: .focusScrollDuration, in: c, debugDescription: "expected seconds from 0 to 1")
@@ -280,6 +288,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "tile": [],
       "singleton": [],
       "focusScrollDuration": 0.22,
+      "autoCenter": true,
+      "autoCenterThreshold": 0.75,
       "focusAfterClose": "left",
       "gap": 8,
       "outerGap": 8,

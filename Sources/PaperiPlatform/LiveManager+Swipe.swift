@@ -798,10 +798,12 @@ extension LiveManager {
             while let id = candidate.neighbor(direction) {
                 candidate.focused = id
                 if firstStep == nil { firstStep = candidate }
-                if (try? candidate.reveal(in: session.canvas, gap: options.gap)) == true { scrolled = true; break }
+                if (try? candidate.reveal(in: session.canvas, gap: options.gap,
+                               autoCenter: options.config.autoCenter, autoCenterThreshold: options.config.autoCenterThreshold)) == true { scrolled = true; break }
             }
             guard var layout = scrolled ? candidate : firstStep else { continue }
-            _ = try? layout.reveal(in: session.canvas, gap: options.gap)
+            _ = try? layout.reveal(in: session.canvas, gap: options.gap,
+                               autoCenter: options.config.autoCenter, autoCenterThreshold: options.config.autoCenterThreshold)
             guard let id = layout.focused, let loc = layout.index(of: id) else { continue }
             guard let placements = try? layout.placements(in: session.canvas, gap: options.gap) else { continue }
             let targets = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)

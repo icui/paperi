@@ -124,21 +124,32 @@ public struct Layout: Codable, Equatable, Sendable {
         let preceding = columns.prefix(i.column).reduce(0) { $0 + min($1.width, maximum) + gap }
         offset = (canvas.width - min(columns[i.column].width, maximum)) / 2 - preceding
     }
-    /// Scrolls the minimum distance needed to show the whole focused column
+    /// With autoCenter enabled, centers sole columns and wide interior columns.
+    /// Otherwise scrolls the minimum distance needed to show the whole focused column
     /// (PaperWM-style "ensure visible"); returns whether the offset changed.
     /// While further columns exist on a side, the focused column keeps
     /// `edgeMargin` (default: `gap`) from that canvas edge so it never sits flush
     /// against the neighbour's off-canvas sliver; a column too wide for both
     /// margins favours the left one.
     @discardableResult
-    public mutating func reveal(in canvas: Rect, gap: Double = 8, edgeMargin: Double? = nil) throws -> Bool {
+    public mutating func reveal(in canvas: Rect, gap: Double = 8, edgeMargin: Double? = nil,
+                                autoCenter: Bool = false, autoCenterThreshold: Double = 0.75) throws -> Bool {
         try validate()
         let margin = edgeMargin ?? gap
         guard canvas.isValid, gap.isFinite, gap >= 0, margin.isFinite, margin >= 0 else { throw LayoutError.invalidGeometry }
+        guard autoCenterThreshold.isFinite, autoCenterThreshold > 0, autoCenterThreshold <= 1 else {
+            throw LayoutError.invalidGeometry
+        }
         guard let focused, let i = index(of: focused) else { return false }
         let maximum = Self.maxColumnWidth(in: canvas, edgeMargin: margin)
         let preceding = columns.prefix(i.column).reduce(0) { $0 + min($1.width, maximum) + gap }
         let width = min(columns[i.column].width, maximum)
+        if autoCenter && (columns.count == 1 ||
+            (i.column > 0 && i.column < columns.count - 1 && width >= canvas.width * autoCenterThreshold)) {
+            let previous = offset
+            offset = (canvas.width - width) / 2 - preceding
+            return offset != previous
+        }
         let room = canvas.width - width
         let lowest = min(i.column > 0 ? margin : 0, room)
         let highest = max(lowest, room - (i.column < columns.count - 1 ? margin : 0))

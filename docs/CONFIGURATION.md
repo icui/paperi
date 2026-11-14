@@ -16,6 +16,8 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
   "tile": [{"app": "com.apple.systempreferences"}],
   "focusAfterClose": "left",
   "focusScrollDuration": 0.22,
+  "autoCenter": true,
+  "autoCenterThreshold": 0.75,
   "gesture": {
     "snapshotStyle": "native",
     "enabled": true,
@@ -50,6 +52,8 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 | `singleton` | Array of app bundle IDs whose in-content tab bars should be treated as a plain window. |
 | `gap`, `outerGap` | Space between windows and around the layout, in points. |
 | `focusAfterClose` | `left` (default), `right`, or `system`. A surviving tab or stacked window keeps the column focused. |
+| `autoCenter` | Default `true`. Center a sole column; center wide focused interior columns. First and last columns in a multi-column strip keep normal positioning. Stacked windows share their column’s position. |
+| `autoCenterThreshold` | Width fraction of the usable layout on the current display, default `0.75`; greater than 0 and at most 1. Applied after focus, size, or membership changes and when gestures settle. |
 | `focusScrollDuration` | Focus animation in seconds, default `0.22`; `0` disables it. |
 | `bottom` | `dot` (default) or `none`. Dots along the bottom of each display show the strip's windows and which one is focused; they hide with one window. The former `thumbnail` value reads as `dot`: window thumbnails are now the on-demand tray (see [Gestures](#gestures)). Choose from **Settings → Appearance** or edit this key. |
 | `swapHighlight` | Drag preview color as `#RRGGBB` or `#RRGGBBAA`. |

@@ -3,6 +3,22 @@ import Testing
 @testable import PaperiPlatform
 
 struct LiveConfigTests {
+    @Test func autoCenterConfiguration() throws {
+        let defaults = try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8))
+        #expect(defaults.autoCenter)
+        #expect(defaults.autoCenterThreshold == 0.75)
+        let custom = try JSONDecoder().decode(LiveConfig.self,
+            from: Data(#"{"autoCenter":false,"autoCenterThreshold":0.6}"#.utf8))
+        #expect(!custom.autoCenter)
+        #expect(custom.autoCenterThreshold == 0.6)
+        for value in ["0", "-0.1", "1.1"] {
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(LiveConfig.self,
+                    from: Data("{\"autoCenterThreshold\":\(value)}".utf8))
+            }
+        }
+    }
+
     @Test func snapshotStyleConfiguration() throws {
         #expect(LiveConfig.GestureConfig().snapshotStyle == .native)
         for json in ["{}", #"{"gesture":{}}"#] {
