@@ -69,8 +69,9 @@ import PaperiCore
     // Gap resize (LiveManager+Dividers.swift).
     struct DividerDrag {
         let space: UInt64; let divider: Divider
-        /// Pointer minus the gap centre along the drag axis at mouse down.
-        let grab: Double
+        /// Pointer minus the gap centre along the drag axis at mouse down
+        /// (for a column edge, plus the strip's scroll against the wall since).
+        var grab: Double
         /// Smallest / largest size along the drag axis each slot's app
         /// accepted, learned when it refuses a write (slot ID → points).
         var minimums: [String: Double] = [:]
@@ -84,6 +85,8 @@ import PaperiCore
     var dividerHover: (space: UInt64, region: DividerRegion, shown: DividerRegion)?
     var dividerDrag: DividerDrag?
     var dividerMonitors: [Any] = []
+    /// A Shift + trackpad edge resize (LiveManager+EdgeResize.swift).
+    var edgeResize: EdgeResize?
     var mouseUpWatch = false
     /// Last off-slot frame acted on per window, so an app that clamps its
     /// position is rewritten once rather than on every refresh.
@@ -526,8 +529,9 @@ import PaperiCore
             windowIndicators.update(coordinator, mode: options.config.bottomDotsVisibility)
             updateDividerHover()
         }
-        // A gap drag writes its own frames; reconcile once it ends.
-        if dividerDrag != nil { return }
+        // A gap drag writes its own frames; reconcile once it ends. A
+        // trackpad edge resize holds the strip from the moment it is armed.
+        if dividerDrag != nil || edgeResize != nil { return }
         if motionActive { return }
         motionFrames.removeAll()
         if animateCachedFocus() { return }

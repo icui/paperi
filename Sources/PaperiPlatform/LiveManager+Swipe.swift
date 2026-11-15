@@ -244,6 +244,7 @@ extension LiveManager {
 
     func handleTouchEvent(_ event: TouchEvent) {
         guard running, !paused, DisplayArrangement.currentProblem() == nil else {
+            endEdgeResize()
             dropDeferredGesture()
             cancelSwipe()
             slotSwipe?.cancel()
@@ -255,6 +256,31 @@ extension LiveManager {
         // locks horizontally: resting fingers, taps and vertical swipes
         // must not stop a strip on its way to a column.
         let landingInFlight = swipe?.released != nil
+        // Shift turns the sequence into an edge resize (LiveManager+EdgeResize).
+        if edgeResize != nil {
+            switch event {
+            case .move(let dx, let dy, _): moveEdgeResize(dx: dx, dy: dy); return
+            case .end, .cancel: endEdgeResize(); return
+            case .begin: endEdgeResize()
+            case .tap: return
+            }
+        }
+        if case .begin = event, Self.shiftHeld {
+            dropDeferredGesture()
+            catchPending = false
+            slotSwipe = nil
+            beginEdgeResize()
+            return
+        }
+        // Shift pressed after the fingers landed, before they chose an axis.
+        if case .move(let dx, let dy, _) = event, Self.shiftHeld, !gestureDeferred, !catchPending,
+           case .detecting? = slotSwipe?.state, swipe?.released == nil {
+            cancelSwipe()
+            slotSwipe = nil
+            beginEdgeResize()
+            moveEdgeResize(dx: dx, dy: dy)
+            return
+        }
         if catchPending {
             switch event {
             case .begin, .tap: catchPending = false

@@ -36,7 +36,7 @@ extension LiveManager {
               coordinator.spaceForWindow[wid] == space,
               coordinator.display(forSpace: space)?.activeSpaceID == space,
               let session = coordinator.sessions[space], !session.state.interactionSuppressed,
-              isActiveRepresentative(wid), let pid = pidForWindow[wid] else { return }
+              isActiveRepresentative(wid), let pid = pidForWindow[wid], edgeResize == nil else { return }
         cancelMotion(); motionFrames.removeAll()
         commandStarted = ProcessInfo.processInfo.systemUptime
         firstWriteMS = nil; finalWriteMS = nil; confirmedMS = nil
@@ -147,6 +147,8 @@ extension LiveManager {
             switch s { case "left": .left; case "right": .right; case "up": .up; case "down": .down; default: nil }
         }
         func fail(_ message: String) -> [String: Any] { ["ok": false, "error": message] }
+        // A trackpad edge resize owns the strip until the fingers lift.
+        if edgeResize != nil && verb != "status" { return fail("edge resize in progress") }
         if verb != "focus" && verb != "status" { cancelMotion(); motionFrames.removeAll() }
         switch verb {
         case "status":

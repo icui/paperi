@@ -51,6 +51,13 @@ public final class EventTapTouchSource: TouchSource {
     private static var activeInstance: EventTapTouchSource?
     /// Report `.tap` for quick taps of all `fingers`.
     public var recognizesTaps = false
+    /// For the sequence under way: a finger lifting briefly does not end it
+    /// (the dropout grace is `heldFingerUpGrace` until every finger is seen
+    /// to lift) and extra fingers do not cancel it. Resets when it ends.
+    public var holdsSequence = false
+    static let heldFingerUpGrace = 0.25
+    /// The grace of the release under way.
+    private var releaseGrace = fingerUpGrace
     private var taps: TapRecognizer<AnyHashable>
 
     public init(fingers: Int = 3, verbose: Bool = false) {
@@ -156,7 +163,7 @@ public final class EventTapTouchSource: TouchSource {
     // delayed delivery time. No further touch frames are required to finish.
     func finishPendingRelease(at timestamp: Double) {
         guard let liftedAt = pendingReleaseTime,
-              timestamp >= liftedAt + Self.fingerUpGrace else { return }
+              timestamp >= liftedAt + releaseGrace else { return }
         finish(.end(time: liftedAt))
     }
 
@@ -168,6 +175,7 @@ public final class EventTapTouchSource: TouchSource {
     }
 
     private func finish(_ event: TouchEvent) {
+        holdsSequence = false
         resetSwipeOwnership()
         clearPendingRelease()
         tracking = false
@@ -219,22 +227,27 @@ public final class EventTapTouchSource: TouchSource {
         let participants = contacts.filter { !ignoredContacts.contains($0.id) }
         let down = participants.filter { $0.phase != .ended && $0.phase != .cancelled }
         if tracking {
-            if participants.contains(where: { $0.phase == .cancelled }) || down.count > fingers {
+            if participants.contains(where: { $0.phase == .cancelled }) || (!holdsSequence && down.count > fingers) {
                 finish(.cancel)
                 return
             }
             if let liftedAt = pendingReleaseTime,
-               timestamp >= liftedAt + Self.fingerUpGrace {
+               timestamp >= liftedAt + releaseGrace {
                 finishPendingRelease(at: timestamp)
                 return
             }
             if down.count < fingers {
+                // A held sequence waits longer for fingers to return, but not
+                // once every one is seen to lift.
+                let grace = holdsSequence && !down.isEmpty ? Self.heldFingerUpGrace : Self.fingerUpGrace
+                if pendingReleaseTime != nil, grace < releaseGrace { clearPendingRelease() }
                 if pendingReleaseTime == nil {
                     pendingReleaseTime = timestamp
+                    releaseGrace = grace
                     releaseTask = Task { @MainActor [weak self] in
-                        do { try await Task.sleep(for: .milliseconds(60)) }
+                        do { try await Task.sleep(for: .seconds(grace)) }
                         catch { return }
-                        self?.finishPendingRelease(at: timestamp + Self.fingerUpGrace)
+                        self?.finishPendingRelease(at: timestamp + grace)
                     }
                 }
                 return

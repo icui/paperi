@@ -50,6 +50,8 @@ Use **three fingers** by default (four is configurable). Horizontal swipes move 
 | Up | Close the focused window; in a native macOS tab group, close its front tab. |
 | Down | Open a new window of the focused app. |
 | Down, then right without lifting | Split with right. |
+| Shift + left / right | Resize the focused window by moving its right edge. |
+| Shift + up / down | Resize a stacked window by moving the gap below it. |
 
 ### Flick a window away
 
@@ -64,6 +66,10 @@ The window follows your fingers. Move far enough, or flick, to close it on relea
 Swipe down to **New Window**, down then right for **Split with right**, or down then left to **Minimize**. Turn without lifting, then continue in that direction and release to commit; a short turn cancels. Configure each with `gesture.swipeDown`, `gesture.swipeDownRight`, and `gesture.swipeDownLeft`: `closeTab`, `newWindow`, `openApp`, `minimize`, or `none`. Downward gestures also work when a popup or the desktop has focus; actions target the frontmost app unless `openApp` selects a specific app, and minimizing requires a window. Splits require a managed focused column with a neighbor.
 
 New-window creation uses the app's **New Window** menu item, falling back to ⌘N when no matching item is available. To open a window of a specific app, set `gesture.swipeDown` to `openApp` and `gesture.swipeDownApp` to its bundle ID (for example, `com.apple.Terminal`). Paperi launches the app if needed or requests a new window if it is running. You can also change swipe down to minimize, or disable it.
+
+### Resize with Shift
+
+Hold Shift while swiping to resize the focused window instead of moving through the strip. Swiping right widens the window and swiping left narrows it: its right edge follows your fingers, its left edge stays put, and the columns to its right move along. When the right edge reaches the side of the display, the strip scrolls instead and the window keeps growing leftward. The last column stays against the side of the display as it shrinks, so the columns to its left move into view. Swiping up or down resizes a stacked window by moving the gap below it (above it, for the bottom window); the neighbouring window resizes to match. The first movement picks the direction. Once Shift and your fingers are down, nothing else moves the strip until every finger lifts, even if one lifts briefly. The limits from [Resize from the gap](#resize-from-the-gap) apply: the display's maximum column width, 120 points, and the app's own size limits.
 
 ### Window tray
 

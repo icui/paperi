@@ -137,6 +137,9 @@ extension LiveManager {
             return DividerRegion(divider: region.divider,
                                  gap: Rect(x: e.lo, y: region.gap.y, width: e.hi - e.lo, height: region.gap.height),
                                  position: (e.lo + e.hi) / 2)
+        case .columnEdge:
+            // Only gestures move a lone edge; they draw the layout's band.
+            return region
         case .rows(let c, let r):
             guard columns.indices.contains(c), r + 1 < columns[c].slots.count,
                   let above = bounds[columns[c].slots[r].activeMember], let below = bounds[columns[c].slots[r + 1].activeMember],
@@ -168,24 +171,30 @@ extension LiveManager {
     /// Shows the requested divider position, without waiting for app redraws.
     func updateDividerDragIndicator() {
         guard let current = dividerDrag, let session = coordinator.sessions[current.space],
-              let region = try? session.state.layout.dividers(in: session.canvas, gap: options.gap)
-                .first(where: { $0.divider == current.divider }) else { return }
+              let region = try? session.state.layout.region(of: current.divider, in: session.canvas, gap: options.gap)
+        else { return }
         dividerHandle.show(region, inGrab: true)
     }
 
     func beginDividerDrag(x: Double, y: Double) {
         guard let hover = dividerHover, coordinator.sessions[hover.space] != nil else { return }
-        cancelMotion(); motionFrames.removeAll()
         let along = hover.region.divider.isVertical ? x : y
         // Against the layout's gap, so the layout follows the pointer exactly.
-        dividerDrag = DividerDrag(space: hover.space, divider: hover.region.divider, grab: along - hover.region.position,
-                                  along: along)
+        startDividerDrag(DividerDrag(space: hover.space, divider: hover.region.divider,
+                                     grab: along - hover.region.position, along: along))
+    }
+
+    /// Starts moving `drag`'s divider; shared by gap drags and trackpad
+    /// edge resizes. Until `finishDividerDrag`, refreshes leave the strip alone.
+    func startDividerDrag(_ drag: DividerDrag) {
+        cancelMotion(); motionFrames.removeAll()
+        dividerDrag = drag
         frameWriter.reset()
         frameWriter.onResult = { [weak self] result in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.dividerWritten(result) } }
         }
         updateDividerDragIndicator()
-        log("gap drag began on \(hover.region.divider) in Space \(hover.space)")
+        log("gap drag began on \(drag.divider) in Space \(drag.space)")
     }
 
     func continueDividerDrag(x: Double, y: Double) {
@@ -203,10 +212,18 @@ extension LiveManager {
     /// Moves the dragged gap to the pointer under the limits learned so far
     /// and queues the windows that moved; the writes run off the main thread.
     func layOutDividerDrag() {
-        guard let current = dividerDrag, let session = coordinator.sessions[current.space] else { return }
+        guard var current = dividerDrag, let session = coordinator.sessions[current.space] else { return }
+        let offset = session.state.layout.offset
         guard session.moveDivider(current.divider, to: current.along - current.grab, gap: options.gap,
                                   minimums: current.minimums, maximums: current.maximums,
                                   ticket: session.ticket) else { return }
+        if case .columnEdge = current.divider {
+            // A column edge against the display's edge scrolls the strip.
+            // The target is meant along the strip, so it scrolls along;
+            // otherwise the next layout would add the scroll as width.
+            current.grab -= session.state.layout.offset - offset
+            dividerDrag = current
+        }
         writeDividerFrames(current)
         updateDividerDragIndicator()
     }
@@ -237,6 +254,7 @@ extension LiveManager {
         guard let current = dividerDrag else { return }
         dividerDrag = nil
         frameWriter.onResult = nil
+        dividerHandle.endTracking()
         log("gap drag ended on \(current.divider)")
         rememberWidths()
         applied.removeValue(forKey: current.space)

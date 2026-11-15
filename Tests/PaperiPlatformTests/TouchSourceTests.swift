@@ -76,6 +76,52 @@ struct TouchSourceTests {
         }
     }
 
+    @Test func heldSequenceSurvivesABriefLiftAndExtraFingers() {
+        let source = EventTapTouchSource()
+        var events: [TouchEvent] = []
+        source.onEvent = { events.append($0) }
+        source.processContacts(contacts([1, 2, 3]), at: 1)
+        source.holdsSequence = true
+        source.processContacts(contacts([1, 2, 3], x: 0.1), at: 1.01)
+        // Two fingers lift for 150 ms, past the usual 60 ms grace, and return
+        // as new touches; then a fourth lands. Nothing ends or cancels.
+        source.processContacts(contacts([1], x: 0.1), at: 1.02)
+        source.finishPendingRelease(at: 1.17)
+        source.processContacts(contacts([1], x: 0.1) + contacts([4, 5], x: 0.1, phase: .began), at: 1.17)
+        source.processContacts(contacts([1, 4, 5], x: 0.2) + contacts([6], x: 0.9, phase: .began), at: 1.18)
+        source.processContacts(contacts([1, 4, 5], x: 0.3) + contacts([6], x: 0.9), at: 1.19)
+        #expect(events.first == .begin(time: 1))
+        #expect(!events.contains(.cancel))
+        #expect(!events.contains { if case .end = $0 { return true } else { return false } })
+        let moves = events.compactMap { event -> Double? in if case .move(let dx, _, _) = event { return dx } else { return nil } }
+        #expect(moves.count == 3)
+        for dx in moves { #expect(abs(dx - 0.1) < 0.000001) }
+        // Every finger lifts: the usual grace ends it, and hold mode resets.
+        source.processContacts(contacts([1, 4, 5, 6], phase: .ended), at: 1.2)
+        source.finishPendingRelease(at: 1.26)
+        #expect(events.last == .end(time: 1.2))
+        #expect(!source.holdsSequence)
+        source.stop()
+    }
+
+    /// Lift frames can go missing: fingers just vanish from the frames, and
+    /// none may follow. A held sequence must still end, after its grace.
+    @Test func heldSequenceEndsWithoutALiftFrame() {
+        let source = EventTapTouchSource()
+        var events: [TouchEvent] = []
+        source.onEvent = { events.append($0) }
+        source.processContacts(contacts([1, 2, 3]), at: 1)
+        source.holdsSequence = true
+        source.processContacts(contacts([1, 2, 3], x: 0.1), at: 1.01)
+        source.processContacts(contacts([1], x: 0.1), at: 1.02)
+        source.finishPendingRelease(at: 1.2)
+        #expect(events.count == 2)
+        source.finishPendingRelease(at: 1.27)
+        #expect(events.last == .end(time: 1.02))
+        #expect(!source.holdsSequence)
+        source.stop()
+    }
+
     @Test func emptyFramesDoNotReleaseAndStopCancelsTimer() {
         let source = EventTapTouchSource()
         var events: [TouchEvent] = []

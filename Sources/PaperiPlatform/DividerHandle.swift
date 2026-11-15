@@ -35,6 +35,9 @@ import PaperiCore
     private var fadeTarget = false
     private var ownsCursor = false
     private(set) var dragging = false
+    /// A trackpad resize is showing the arrows: the pointer is elsewhere, so
+    /// the handle neither takes the cursor nor clicks.
+    private var tracking = false
     var isShown: Bool { panel?.isVisible == true }
 
     /// Shows (or moves) the handle at the middle of `region`; `inGrab` is
@@ -81,7 +84,7 @@ import PaperiCore
         CATransaction.commit()
 
         if updateVisibility {
-            if inGrab || dragging {
+            if !tracking && (inGrab || dragging) {
                 (vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).set()
                 ownsCursor = true
             } else { releaseCursor() }
@@ -96,7 +99,7 @@ import PaperiCore
             fadeTask?.cancel(); fadeTask = nil
             fadeTarget = true
             panel.alphaValue = 1
-            panel.ignoresMouseEvents = false
+            panel.ignoresMouseEvents = tracking
             if !panel.isVisible { panel.orderFrontRegardless() }
         } else {
             fade(visible: true)
@@ -125,6 +128,21 @@ import PaperiCore
                 }
             } catch { return }
         }
+    }
+
+    /// Shows the resize arrows (at the next `show`) for a resize driven by
+    /// the trackpad rather than by dragging the handle.
+    func beginTracking() {
+        guard !dragging else { return }
+        dragging = true; tracking = true
+        animateMorph(to: 1)
+    }
+
+    func endTracking() {
+        guard tracking else { return }
+        tracking = false; dragging = false
+        animateMorph(to: 0)
+        hide()
     }
 
     func hide() {

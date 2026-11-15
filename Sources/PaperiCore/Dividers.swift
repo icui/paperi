@@ -1,13 +1,19 @@
 import Foundation
 
-/// A gap between two neighbouring windows that can be dragged to resize both.
+/// A boundary that can be dragged to resize windows: usually the gap
+/// between two neighbouring windows, resizing both.
 public enum Divider: Equatable, Hashable, Sendable {
     /// Between column `n` and column `n + 1`; dragging moves it horizontally.
     case columns(Int)
     /// Between row `row` and row `row + 1` of `column`; dragging moves it vertically.
     case rows(column: Int, row: Int)
+    /// The right edge of `column` alone: only that column resizes, its left
+    /// edge stays put and later columns travel with the right one. Its
+    /// position is the centre of the gap-wide band just right of the edge,
+    /// like a gap's.
+    case columnEdge(Int)
 
-    public var isVertical: Bool { if case .columns = self { return true } else { return false } }
+    public var isVertical: Bool { if case .rows = self { return false } else { return true } }
 }
 
 public struct DividerRegion: Equatable, Sendable {
@@ -38,6 +44,34 @@ public struct DividerRegion: Equatable, Sendable {
 }
 
 extension Layout {
+    /// The edge of slot `id`'s window that a resize along one axis moves:
+    /// horizontally its column's right edge; vertically, for a stacked
+    /// window only, the gap below it, or above it for the bottom window.
+    public func resizeEdge(of id: String, vertical: Bool) -> Divider? {
+        guard let at = index(of: id) else { return nil }
+        guard vertical else { return .columnEdge(at.column) }
+        let rows = columns[at.column].slots.count
+        guard rows > 1 else { return nil }
+        return .rows(column: at.column, row: at.row + 1 < rows ? at.row : at.row - 1)
+    }
+
+    /// `divider` as laid out now, or nil if it is not on screen: a gap from
+    /// `dividers`, or for a column edge the gap-wide band outside it.
+    public func region(of divider: Divider, in canvas: Rect, gap: Double = 8,
+                       edgeMargin: Double? = nil) throws -> DividerRegion? {
+        guard case .columnEdge(let c) = divider else {
+            return try dividers(in: canvas, gap: gap, edgeMargin: edgeMargin).first { $0.divider == divider }
+        }
+        guard columns.indices.contains(c),
+              let first = try placements(in: canvas, gap: gap, edgeMargin: edgeMargin)
+                .first(where: { $0.slotID == columns[c].slots[0].id }) else { return nil }
+        let lo = first.virtualX + first.frame.width
+        // An edge on the canvas's right edge may land a rounding error past it.
+        guard lo + gap >= canvas.x, lo <= canvas.x + canvas.width + 1 else { return nil }
+        return DividerRegion(divider: divider, gap: Rect(x: lo, y: canvas.y, width: gap, height: canvas.height),
+                             position: lo + gap / 2)
+    }
+
     /// The draggable gaps fully on canvas: between adjacent columns whose
     /// shared gap is on screen, and between stacked rows of a column with
     /// at least `minimumSpan` of its width on screen. Gaps beside a parked
@@ -89,6 +123,11 @@ extension Layout {
     ///   right one by pulling later columns along. A column's height is
     ///   fixed, so a capped row instead passes the growth on to the rows
     ///   beyond it, nearest first, and so moves with the gap.
+    /// A column edge moves alone: see `Divider.columnEdge`. Past the
+    /// canvas's right edge it scrolls the strip instead, and the last column,
+    /// when against that edge, stays there as it shrinks. Either scroll moves
+    /// the edge's screen position; a drag that keeps re-targeting it
+    /// compensates by the change in `offset`.
     /// A window's floor is `minimum`, or its entry in `minimums` (slot ID →
     /// smallest size along the drag axis, e.g. an app's minimum window size)
     /// if larger; its cap is its entry in `maximums` (an app's maximum size),
@@ -130,6 +169,28 @@ extension Layout {
             if widthB > capB { widthB = capB }
             columns[c].width = widthA
             columns[c + 1].width = widthB
+        case .columnEdge(let c):
+            guard columns.indices.contains(c), let a = frames[columns[c].slots[0].id] else { return false }
+            let margin = edgeMargin ?? gap
+            let maximum = Self.maxColumnWidth(in: canvas, edgeMargin: margin)
+            let lower = floor(columns[c].slots, a.frame.width)
+            let upper = cap(columns[c].slots, a.frame.width, limit: maximum)
+            let left = a.virtualX, right = left + a.frame.width
+            let width = min(upper, max(lower, position - gap / 2 - left))
+            columns[c].width = width
+            // The canvas edge (less the margin `reveal` keeps while columns
+            // follow) is a wall: growth past it scrolls the strip, so the
+            // window grows leftward. An edge already past it stays put.
+            let last = c + 1 == columns.count
+            let edge = canvas.x + canvas.width - (last ? 0 : margin)
+            let wall = max(right, edge)
+            if left + width > wall { offset -= left + width - wall }
+            // The last column keeps to the wall as it shrinks: nothing
+            // follows its edge, so the strip scrolls the columns before it
+            // in, until the strip's start reaches the canvas's left edge.
+            else if last, width < a.frame.width, right >= edge - 0.5 {
+                offset = min(offset + right - (left + width), max(offset, 0))
+            }
         case .rows(let c, let r):
             guard columns.indices.contains(c), r >= 0, r + 1 < columns[c].slots.count else { return false }
             let slots = columns[c].slots
