@@ -170,9 +170,10 @@ extension LiveManager {
 
     /// Shows the requested divider position, without waiting for app redraws.
     func updateDividerDragIndicator() {
+        if edgeResize?.slotID != nil { updateEdgeResizeIndicator(); return }
         guard let current = dividerDrag, let session = coordinator.sessions[current.space],
-              let region = try? session.state.layout.region(of: current.divider, in: session.canvas, gap: options.gap)
-        else { return }
+              let region = try? session.state.layout.dividers(in: session.canvas, gap: options.gap)
+                .first(where: { $0.divider == current.divider }) else { return }
         dividerHandle.show(region, inGrab: true)
     }
 
@@ -254,7 +255,6 @@ extension LiveManager {
         guard let current = dividerDrag else { return }
         dividerDrag = nil
         frameWriter.onResult = nil
-        dividerHandle.endTracking()
         log("gap drag ended on \(current.divider)")
         rememberWidths()
         applied.removeValue(forKey: current.space)

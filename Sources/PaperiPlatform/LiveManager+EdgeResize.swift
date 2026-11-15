@@ -15,6 +15,8 @@ extension LiveManager {
         var dx = 0.0, dy = 0.0
         /// The resize axis, once the fingers have moved far enough to pick one.
         var vertical: Bool?
+        /// The window being resized, once the resize has started.
+        var slotID: String?
         /// The edge resize is under way (a `dividerDrag` is moving it), or
         /// there was nothing to resize and the fingers are ignored.
         var started = false
@@ -55,14 +57,14 @@ extension LiveManager {
             // Waits for a running animation; a resize then starts where the
             // fingers are, rather than jumping by the travel so far.
             guard !state.refused, !gestureBlockedByAnimation else { return }
-            guard let drag = edgeResizeDrag(vertical: vertical) else {
+            guard let (drag, slotID) = edgeResizeDrag(vertical: vertical) else {
                 state.refused = true; edgeResize = state; return
             }
             state.started = true
+            state.slotID = slotID
             state.origin = drag.along
             state.travel = locking ? 0 : travel
             edgeResize = state
-            dividerHandle.beginTracking()
             startDividerDrag(drag)
         }
         guard var current = dividerDrag, let session = coordinator.sessions[current.space] else { return }
@@ -77,13 +79,14 @@ extension LiveManager {
         guard let state = edgeResize else { return }
         edgeResize = nil
         (touchSource as? EventTapTouchSource)?.holdsSequence = false
+        edgeResizeIndicator.hide()
         // Reconcile what was held off: through the drag's end if it began.
         if state.started, dividerDrag != nil { finishDividerDrag() } else { scheduleRefresh() }
     }
 
     /// The edge of the focused window of the strip under the pointer (or of
     /// the focused window's strip) to move along the axis, as a drag.
-    func edgeResizeDrag(vertical: Bool) -> DividerDrag? {
+    func edgeResizeDrag(vertical: Bool) -> (DividerDrag, slotID: String)? {
         guard running, !paused, AXIsProcessTrusted(), NSEvent.pressedMouseButtons == 0,
               drag == nil, dividerDrag == nil, DisplayArrangement.currentProblem() == nil,
               !pointerOverUnmanagedSpace(), let ctx = pointerContext() ?? focusedContext() else { return nil }
@@ -95,6 +98,22 @@ extension LiveManager {
             log("edge resize: nothing to resize \(vertical ? "vertically" : "horizontally")")
             return nil
         }
-        return DividerDrag(space: space, divider: edge, grab: 0, along: region.position)
+        return (DividerDrag(space: space, divider: edge, grab: 0, along: region.position), focused)
+    }
+
+    /// Marks the moving edge on the resized window, where the layout now
+    /// puts it (ahead of the app's redraw).
+    func updateEdgeResizeIndicator() {
+        guard let slotID = edgeResize?.slotID, let current = dividerDrag,
+              let session = coordinator.sessions[current.space],
+              let frame = try? session.state.layout.placements(in: session.canvas, gap: options.gap)
+                .first(where: { $0.slotID == slotID })?.frame,
+              let at = session.state.layout.index(of: slotID) else { return }
+        let edge: EdgeResizeIndicator.Edge
+        switch current.divider {
+        case .rows(_, let row): edge = row == at.row ? .bottom : .top
+        default: edge = .right
+        }
+        edgeResizeIndicator.show(edge, of: frame)
     }
 }

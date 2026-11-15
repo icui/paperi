@@ -87,6 +87,7 @@ import PaperiCore
     var dividerMonitors: [Any] = []
     /// A Shift + trackpad edge resize (LiveManager+EdgeResize.swift).
     var edgeResize: EdgeResize?
+    let edgeResizeIndicator = EdgeResizeIndicator()
     var mouseUpWatch = false
     /// Last off-slot frame acted on per window, so an app that clamps its
     /// position is rewritten once rather than on every refresh.
