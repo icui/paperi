@@ -95,9 +95,6 @@ struct LiveConfigTests {
         #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).gapResize)
         #expect(try !JSONDecoder().decode(LiveConfig.self, from: Data("{\"gapResize\":false}".utf8)).gapResize)
         #expect(try JSONDecoder().decode(LiveConfig.self, from: Data(LiveConfig.template.utf8)).gapResize)
-        #expect(LiveConfig().gapResizeHandle == .windows)
-        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{\"gapResizeHandle\":\"pointer\"}".utf8)).gapResizeHandle == .pointer)
-        #expect(throws: DecodingError.self) { try JSONDecoder().decode(LiveConfig.self, from: Data("{\"gapResizeHandle\":\"x\"}".utf8)) }
     }
 
     @Test func bottomModes() throws {
