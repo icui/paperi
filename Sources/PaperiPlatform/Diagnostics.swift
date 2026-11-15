@@ -247,12 +247,13 @@ public enum Diagnostics {
     }
 
     /// PID-scoped evidence for a child already owned by an integration probe.
-    func tabEvidence(processID: pid_t) -> [String: Any] {
+    /// `strict: false` reads the report under the structural tab rules.
+    func tabEvidence(processID: pid_t, strict: Bool = true) -> [String: Any] {
         // Fresh enumerated representatives supply tab bars. Cached inactive
         // references are validated separately, not traversed as content trees.
         Diagnostics.tabEvidence(bundleID: "disposable-child", observedWindows: [:],
             identities: observers.mapValues(\.evidenceIdentities), associations: observers.mapValues(\.selectionAssociations),
-            processID: processID, windowTabBarOnly: true)
+            processID: processID, windowTabBarOnly: true, strict: strict)
     }
 
     private func attach(_ pid: pid_t) {

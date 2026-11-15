@@ -24,7 +24,8 @@ struct NativeTabMembership: Equatable {
               let report = application["selectionAssociations"] as? [String: Any],
               report["scopeQuarantined"] as? Bool == false,
               let candidates = report["groups"] as? [[String: Any]] else { return [] }
-        let capture = TabSelectionEvidence.inspect(nodes: nodes, roots: roots + observed, complete: true)
+        let capture = TabSelectionEvidence.inspect(nodes: nodes, roots: roots + observed, complete: true,
+                                                   strict: TabSelectionEvidence.isStrict(application))
         guard let groups = capture.groups else { return [] }
         return groups.compactMap { group in
             let resolvedSelected = requireComplete ? group.selected : TabSelectionEvidence.lazySelectedControl(for: group, in: nodes)
@@ -64,9 +65,10 @@ struct NativeTabMembership: Equatable {
     }
 
     /// Returns freshly enumerated `AXWindow` IDs whose full direct child list was
-    /// read without error and contains no `AXTabGroup`. Any capture truncation,
-    /// unreadable root/role, or existing tab group for that window withholds the
-    /// singleton claim.
+    /// read without error and contains no possible native tab bar (any
+    /// `AXTabGroup` in strict mode; see `TabSelectionEvidence.mayBeNativeTabBar`).
+    /// Any capture truncation, unreadable root/role, or existing tab group for
+    /// that window withholds the singleton claim.
     static func inspectSingletons(_ application: [String: Any]) -> [UInt32] {
         guard application["windowsError"] as? Int32 == 0,
               application["truncated"] as? Bool == false,
@@ -74,7 +76,9 @@ struct NativeTabMembership: Equatable {
               let nodes = application["nodes"] as? [[String: Any]],
               let roots = application["roots"] as? [Int],
               let observed = application["observedRoots"] as? [Int],
-              let groups = TabSelectionEvidence.inspect(nodes: nodes, roots: roots + observed, complete: true).groups else { return [] }
+              case let strict = TabSelectionEvidence.isStrict(application),
+              let groups = TabSelectionEvidence.inspect(nodes: nodes, roots: roots + observed, complete: true,
+                                                        strict: strict).groups else { return [] }
         let grouped = Set(groups.map(\.window)).union(inspect(application).flatMap(\.members))
         var singletons: Set<UInt32> = []
         for root in roots {
@@ -86,7 +90,8 @@ struct NativeTabMembership: Equatable {
                   children["error"] as? Int32 == 0 || children["error"] as? Int == 0,
                   let indices = children["nodes"] as? [Int], let count = children["count"] as? Int,
                   indices.count == count,
-                  indices.allSatisfy({ nodes.indices.contains($0) && nodes[$0]["AXRole"] as? String != "AXTabGroup" }) else { continue }
+                  indices.allSatisfy({ nodes.indices.contains($0) &&
+                      !TabSelectionEvidence.mayBeNativeTabBar($0, in: nodes, strict: strict) }) else { continue }
             singletons.insert(id)
         }
         return singletons.sorted()

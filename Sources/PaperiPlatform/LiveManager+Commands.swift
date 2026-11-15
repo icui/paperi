@@ -278,7 +278,9 @@ extension LiveManager {
         }
         var apps: [[String: Any]] = []
         for app in probe.appsToSurvey(considered) {
-            let evidence = (recorder.tabEvidence(processID: app.processIdentifier)["applications"] as? [[String: Any]])?.first ?? [:]
+            let strictTabs = config.usesStrictTabDetection(bundleID: app.bundleIdentifier)
+            let evidence = (recorder.tabEvidence(processID: app.processIdentifier, strict: strictTabs)["applications"]
+                as? [[String: Any]])?.first ?? [:]
             let singletons = Set(NativeTabMembership.inspectSingletons(evidence))
             let groups = NativeTabMembership.inspect(evidence, requireComplete: false)
             var tabGroupChildren: [UInt32: Bool] = [:]
@@ -295,14 +297,16 @@ extension LiveManager {
                 if row.classification.reason == "user floating" { decision = "floating (config rule)" }
                 else if row.classification.eligibility == .floating { decision = "floating: \(row.classification.reason)" }
                 else if row.classification.eligibility != .tiled { decision = "skipped: \(row.classification.reason)" }
+                else if config.singleton.contains(app.bundleIdentifier ?? "") { decision = "managed as window (singleton app)" }
                 else if let group { decision = "tab container \(group.members)" }
                 else if singletons.contains(row.windowID) { decision = "managed as window" }
-                else { decision = "withheld: tab membership unknown (use --singleton-app if it has no native tabs)" }
+                else { decision = "withheld: tab membership unknown (add it to singleton if it has no native tabs)" }
                 return ["windowID": row.windowID, "title": Diagnostics.attribute(row.element, kAXTitleAttribute) as? String ?? "",
                         "decision": decision, "directAXTabGroup": tabGroupChildren[row.windowID] as Any? ?? NSNull()]
             }
             apps.append(["bundleID": app.bundleIdentifier ?? "", "windowsError": evidence["windowsError"] ?? NSNull(),
-                         "truncated": evidence["truncated"] ?? NSNull(), "windows": windows])
+                         "truncated": evidence["truncated"] ?? NSNull(),
+                         "tabRules": strictTabs ? "strict (strictTabDetection)" : "structural", "windows": windows])
         }
         return ["apps": apps, "note": "Current Space only; read-only"]
     }

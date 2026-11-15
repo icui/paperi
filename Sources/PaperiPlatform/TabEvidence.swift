@@ -26,7 +26,7 @@ extension Diagnostics {
                                       identities: [pid_t: EvidenceIdentities] = [:],
                                       associations: [pid_t: SelectionAssociations] = [:],
                                       finderTabBarOnly: Bool = false, processID: pid_t? = nil,
-                                      windowTabBarOnly: Bool = false) -> [String: Any] {
+                                      windowTabBarOnly: Bool = false, strict: Bool = true) -> [String: Any] {
         precondition(!finderTabBarOnly || bundleID == "com.apple.finder")
         var applications: [[String: Any]] = []
         let targets = processID.map { NSRunningApplication(processIdentifier: $0).map { [$0] } ?? [] }
@@ -185,13 +185,14 @@ extension Diagnostics {
                                  "rootValidations": rootValidations,
                                  "roleReadRetries": roleReadRetries,
                                  "nodes": rows, "truncated": truncated,
-                                 "truncationReasons": truncationReasons.sorted(), "windowCoverage": coverage.json]
+                                 "truncationReasons": truncationReasons.sorted(), "windowCoverage": coverage.json,
+                                 "strictTabEvidence": strict]
             if let identity {
                 report["identityScope"] = identity.scope
                 report["identityTruncated"] = identity.exhausted
                 if let tracker = associations[app.processIdentifier] {
                     let capture = TabSelectionEvidence.inspect(nodes: rows, roots: roots + observedRoots,
-                        complete: coverage.status == .referencesAvailable && !identity.exhausted)
+                        complete: coverage.status == .referencesAvailable && !identity.exhausted, strict: strict)
                     var association = tracker.observe(scope: identity.scope, groups: capture.groups).json
                     association["evidenceIssues"] = capture.issues.map(\.json)
                     report["selectionAssociations"] = association

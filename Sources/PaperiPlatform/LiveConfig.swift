@@ -224,6 +224,11 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public var exclude: [String]
     /// Apps without native macOS tabs whose tab bars are drawn in-content.
     public var singleton: [String]
+    /// Apps whose windows are admitted under the original, strict tab rules:
+    /// any direct `AXTabGroup` or empty AX role withholds the window. The
+    /// fallback if the structural rules mistake an app's native tab bar for
+    /// in-content tabs. `"*"` applies strict rules to every app.
+    public var strictTabDetection: [String] = []
     /// Windows that stay floating (not tiled) while still managed for focus.
     public var float: [FloatRule]
     /// Windows tiled even though they look like utility windows (no
@@ -267,7 +272,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case autoCenter, autoCenterThreshold, bottomDotsVisibility, include, exclude, singleton, float, tile, gap, outerGap, gapResize, hotkeys, hotkeysEnabled, swapHighlight, focusScrollDuration, focusAfterClose, gesture
+        case autoCenter, autoCenterThreshold, bottomDotsVisibility, include, exclude, singleton, strictTabDetection, float, tile, gap, outerGap, gapResize, hotkeys, hotkeysEnabled, swapHighlight, focusScrollDuration, focusAfterClose, gesture
     }
 
     public init(from decoder: Decoder) throws {
@@ -275,6 +280,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         include = try c.decodeIfPresent([String].self, forKey: .include)
         exclude = try c.decodeIfPresent([String].self, forKey: .exclude) ?? []
         singleton = try c.decodeIfPresent([String].self, forKey: .singleton) ?? []
+        strictTabDetection = try c.decodeIfPresent([String].self, forKey: .strictTabDetection) ?? []
         float = try c.decodeIfPresent([FloatRule].self, forKey: .float) ?? []
         tile = try c.decodeIfPresent([FloatRule].self, forKey: .tile) ?? []
         autoCenter = try c.decodeIfPresent(Bool.self, forKey: .autoCenter) ?? true
@@ -358,6 +364,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "float": [],
       "tile": [],
       "singleton": [],
+      "strictTabDetection": [],
       "focusScrollDuration": 0.22,
       "autoCenter": true,
       "autoCenterThreshold": 0.75,
@@ -410,6 +417,10 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         if Self.defaultExclude.contains(bundleID) || exclude.contains(bundleID) { return false }
         if let include { return include.contains(bundleID) }
         return regular
+    }
+
+    public func usesStrictTabDetection(bundleID: String?) -> Bool {
+        strictTabDetection.contains("*") || bundleID.map(strictTabDetection.contains) == true
     }
 
     public func floats(bundleID: String, title: String?) -> Bool { Self.matches(float, bundleID, title) }

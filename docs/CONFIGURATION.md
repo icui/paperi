@@ -50,6 +50,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 | `float` | Keep matching windows outside the strip. Each rule has `app` and an optional, case-insensitive `titleContains`. |
 | `tile` | Allow matching windows without a fullscreen button to tile. Dialogs and panels still stay outside the strip. |
 | `singleton` | Array of app bundle IDs whose in-content tab bars should be treated as a plain window. |
+| `strictTabDetection` | Array of app bundle IDs, or `["*"]` for every app, that use strict native-tab detection. See [Native tab detection](#native-tab-detection). |
 | `gap`, `outerGap` | Space between windows and around the layout, in points. |
 | `focusAfterClose` | `left` (default), `right`, or `system`. A surviving tab or stacked window keeps the column focused. |
 | `autoCenter` | Default `true`. Center a sole column; center wide focused interior columns. First and last columns in a multi-column strip keep normal positioning. Stacked windows share their column’s position. |
@@ -159,5 +160,22 @@ Other commands include `focus up|down`, `swap left|right|up|down`,
 and `stop`. `move` is an alias for `swap`; `refresh` is an alias for `retile`.
 `swipe left|right|up|down [travel]` simulates a swipe.
 `paperi check-apps` explains which visible windows are eligible.
+
+## Native tab detection
+
+Before tiling a window, Paperi checks whether it belongs to a native macOS tab
+group, so that a group's tabs share one column. A window is held back until that
+is known. Tab bars drawn by the app itself don't count: a tab group whose tabs
+all lack the native tab-button subrole, such as Microsoft Word's ribbon, is
+treated as part of the window's content. An element whose role reads back
+empty, as some of Zoom's controls do, can't be a tab bar either. Anything
+unreadable or ambiguous still holds the window back.
+
+If an app's native tabs end up in separate columns, or its windows jump around
+when you switch tabs, add its bundle ID to `strictTabDetection`. Its windows
+then wait for complete tab evidence, as in earlier versions; an app with
+ribbon-style tab bars stays unmanaged unless you also add it to `singleton`. Use
+`["*"]` to apply the strict rules to every app. `paperi check-apps` shows which
+rules each app uses (`tabRules`) and the decision for each window.
 
 Set `"hotkeysEnabled": false` or turn off **Settings → Shortcuts → Enable shortcuts** to disable all global shortcuts while keeping your bindings. The default is `true`; `--no-hotkeys` takes precedence. Apply Changes saves and applies the toggle.

@@ -1,3 +1,4 @@
+import ApplicationServices
 import Foundation
 
 struct TabSelection: Equatable {
@@ -192,9 +193,50 @@ enum TabSelectionEvidence {
         return trueControls.count == 1 ? trueControls[0] : nil
     }
 
+    /// The rule set an evidence report was read under. Reports carry it so the
+    /// selection tracker, membership, singleton and topology checks agree.
+    static func isStrict(_ application: [String: Any]) -> Bool {
+        application["strictTabEvidence"] as? Bool ?? true
+    }
+
+    /// A successful role read that returned no usable string (Zoom exposes such
+    /// direct window children). Unlike a failed read, it cannot hide an AppKit
+    /// tab bar, which always reports `AXTabGroup`.
+    static func roleReadEmpty(_ node: [String: Any]) -> Bool {
+        (node["AXRole"] as? String ?? "").isEmpty && errorCode(node["AXRoleError"]) == 0
+    }
+
+    /// An `AXTabGroup` that cannot be an AppKit window tab bar: its tab list is
+    /// fully readable, and every tab definitively lacks the `AXTabButton`
+    /// subrole that AppKit window tabs carry (Office's ribbon has none). Any
+    /// unreadable or partial evidence answers false.
+    static func isContentTabGroup(_ index: Int, in nodes: [[String: Any]]) -> Bool {
+        guard nodes.indices.contains(index), nodes[index]["AXRole"] as? String == "AXTabGroup",
+              let relation = nodes[index]["AXTabs"] as? [String: Any], errorCode(relation["error"]) == 0,
+              let tabs = relation["nodes"] as? [Int], !tabs.isEmpty, relation["count"] as? Int == tabs.count,
+              tabs.allSatisfy(nodes.indices.contains) else { return false }
+        let absent = [0, Int(AXError.attributeUnsupported.rawValue), Int(AXError.noValue.rawValue)]
+        return tabs.allSatisfy { tab in
+            let control = nodes[tab]
+            guard !(control["AXRole"] as? String ?? "").isEmpty || roleReadEmpty(control) else { return false }
+            if let subrole = control["AXSubrole"] as? String, !subrole.isEmpty { return subrole != "AXTabButton" }
+            return errorCode(control["AXSubroleError"]).map(absent.contains) == true
+        }
+    }
+
+    /// Whether a node must be treated as a possible native window tab bar.
+    /// Strict mode treats every `AXTabGroup` as one.
+    static func mayBeNativeTabBar(_ index: Int, in nodes: [[String: Any]], strict: Bool) -> Bool {
+        guard nodes.indices.contains(index), nodes[index]["AXRole"] as? String == "AXTabGroup" else { return false }
+        return strict || !isContentTabGroup(index, in: nodes)
+    }
+
     /// Explains the first structural rejection and every unavailable selection.
     /// Node indices refer only to this capture, never to durable AX identities.
-    static func inspect(nodes: [[String: Any]], roots: [Int], complete: Bool) -> Capture {
+    /// `strict: false` applies the structural rules: empty-but-readable roles
+    /// and content tab groups (see `isContentTabGroup`) no longer withhold the
+    /// whole capture. `strictTabDetection` in the config restores strict mode.
+    static func inspect(nodes: [[String: Any]], roots: [Int], complete: Bool, strict: Bool = true) -> Capture {
         guard complete else { return Capture(groups: nil, issues: [.init(reason: .incompleteCapture)]) }
         guard !roots.isEmpty else { return Capture(groups: nil, issues: [.init(reason: .noRoots)]) }
         guard roots.allSatisfy({ nodes.indices.contains($0) }) else {
@@ -229,10 +271,11 @@ enum TabSelectionEvidence {
         // with such a node cannot affirm even an empty candidate topology.
         for (index, node) in nodes.enumerated() {
             guard let role = node["AXRole"] as? String, !role.isEmpty else {
+                if !strict && roleReadEmpty(node) { continue }
                 return reject(.nodeRoleUnavailable, node: index, attribute: "AXRole")
             }
         }
-        for (index, group) in nodes.enumerated() where group["AXRole"] as? String == "AXTabGroup" {
+        for (index, group) in nodes.enumerated() where mayBeNativeTabBar(index, in: nodes, strict: strict) {
             guard let id = group["axIdentity"] as? Int else {
                 return reject(.groupIdentityUnavailable, node: index, attribute: "axIdentity")
             }

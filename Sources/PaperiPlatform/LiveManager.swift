@@ -646,7 +646,9 @@ import PaperiCore
             let relevant = rows.contains { row in row.spaceID.map(activeSpaces.contains) == true &&
                 (row.classification.eligibility == .tiled || coordinator.spaceForWindow[row.windowID] != nil) }
             guard relevant else { continue }
-            let evidence = singletonApp ? nil : (recorder.tabEvidence(processID: pid)["applications"] as? [[String: Any]])?.first
+            let strictTabs = options.config.usesStrictTabDetection(bundleID: app.bundleIdentifier)
+            let evidence = singletonApp ? nil
+                : (recorder.tabEvidence(processID: pid, strict: strictTabs)["applications"] as? [[String: Any]])?.first
             for space in activeSpaces {
                 guard let session = coordinator.sessions[space] else { continue }
                 let candidates = Set(rows.filter {

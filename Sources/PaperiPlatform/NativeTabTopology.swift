@@ -21,7 +21,9 @@ enum NativeTabTopology {
         let remaining = managed.subtracting(destroyed)
         // An empty AX inventory cannot prove closure. Explicit destruction can.
         if remaining.isEmpty { return managed.isSubset(of: destroyed) ? [] : nil }
-        guard let groups = TabSelectionEvidence.inspect(nodes: nodes, roots: roots + observed, complete: true).groups else { return nil }
+        let strict = TabSelectionEvidence.isStrict(app)
+        guard let groups = TabSelectionEvidence.inspect(nodes: nodes, roots: roots + observed, complete: true,
+                                                        strict: strict).groups else { return nil }
         let complete = NativeTabMembership.inspect(app)
         let allowed = remaining.union(additions.subtracting(destroyed))
         // New members may join an existing group, never bootstrap an unrelated
@@ -36,7 +38,8 @@ enum NativeTabTopology {
             guard !groups.contains(where: { $0.window == id }),
                   let children = nodes[root]["AXChildren"] as? [String: Any], children["error"] as? Int32 == 0,
                   let indices = children["nodes"] as? [Int], let count = children["count"] as? Int,
-                  indices.count == count, indices.allSatisfy({ nodes.indices.contains($0) && nodes[$0]["AXRole"] as? String != "AXTabGroup" }) else { continue }
+                  indices.count == count, indices.allSatisfy({ nodes.indices.contains($0) &&
+                      !TabSelectionEvidence.mayBeNativeTabBar($0, in: nodes, strict: strict) }) else { continue }
             partitions.append(.init(members: [id], active: id))
         }
         grouped = Set(partitions.flatMap(\.members))
