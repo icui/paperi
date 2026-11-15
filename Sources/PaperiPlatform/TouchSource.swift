@@ -216,10 +216,10 @@ public final class EventTapTouchSource: TouchSource {
         let downIDs = contacts.filter { $0.phase != .ended && $0.phase != .cancelled }.map(\.id)
         landedAt = Dictionary(uniqueKeysWithValues: downIDs.map { ($0, landedAt[$0] ?? timestamp) })
         if downIDs.isEmpty { staggered = false }
-        // Once motion establishes a swipe, newly appearing contacts are not
+        // Once motion establishes a swipe or a resize holds it, new contacts are not
         // participants. Remember them through lifts so their cancellation or
         // continued presence cannot affect the original fingers' release.
-        if tracking, establishedSwipe {
+        if tracking, establishedSwipe || holdsSequence {
             for contact in contacts where activeTouches[contact.id] == nil && pendingReleaseTime == nil {
                 ignoredContacts.insert(contact.id)
             }

@@ -76,6 +76,29 @@ struct TouchSourceTests {
         }
     }
 
+    @Test func heldSequenceIgnoresExtraFingerBeforeMovement() {
+        let source = EventTapTouchSource()
+        var events: [TouchEvent] = []
+        source.onEvent = { events.append($0) }
+        source.processContacts(contacts([1, 2, 3], phase: .began), at: 1)
+        source.holdsSequence = true
+        source.processContacts(contacts([1, 2, 3], phase: .stationary)
+            + contacts([4], x: 0.9, phase: .began), at: 1.01)
+        #expect(events == [.begin(time: 1)])
+        #expect(source.holdsSequence)
+        source.processContacts(contacts([1, 2, 3], x: 0.25)
+            + contacts([4], x: 0.5), at: 1.02)
+        #expect(events.last == .move(dx: 0.25, dy: 0, time: 1.02))
+        source.processContacts(contacts([1, 2, 3], x: 0.25, phase: .stationary)
+            + contacts([4], phase: .cancelled), at: 1.03)
+        #expect(!events.contains(.cancel))
+        source.processContacts(contacts([1, 2, 3], phase: .ended), at: 1.04)
+        source.finishPendingRelease(at: 1.11)
+        #expect(events.last == .end(time: 1.04))
+        #expect(!source.holdsSequence)
+        source.stop()
+    }
+
     @Test func heldSequenceSurvivesABriefLiftAndExtraFingers() {
         let source = EventTapTouchSource()
         var events: [TouchEvent] = []
