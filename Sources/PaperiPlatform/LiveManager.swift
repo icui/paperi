@@ -337,6 +337,10 @@ import PaperiCore
         if name == kAXMovedNotification || name == kAXResizedNotification {
             // Our own writes echo back; refresh decides whether it was external.
         }
+        if name == "identitiesRenewed" {
+            log("renewed exhausted \(event["table"] ?? "") identity table for pid \(event["pid"] ?? "")")
+            return
+        }
         if ["recorderReady", "recorderReconciled", "windowDiscovery", "subscriptionRetry"].contains(name) { return }
         scheduleRefresh()
     }

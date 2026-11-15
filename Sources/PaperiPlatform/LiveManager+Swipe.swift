@@ -154,6 +154,18 @@ extension LiveManager {
         swipeMetrics["state"] = "cancelled"
     }
 
+    /// A stalled screenshot must not keep refresh and later gestures blocked.
+    /// Cancel the generation so a late capture completion cannot revive it.
+    @discardableResult
+    func expirePendingCapture(at now: Double) -> Bool {
+        guard swipe?.captureState == .pending, now - swipeBegan >= 2 else { return false }
+        dropDeferredGesture()
+        cancelMotion()
+        swipeMetrics = ["state": "cancelled", "reason": "capture timeout"]
+        scheduleRefresh()
+        return true
+    }
+
     static let fullScreenRefusal = "pointer is over a full-screen Space"
 
     /// The display under the pointer, as SkyLight reports it.
@@ -811,6 +823,7 @@ extension LiveManager {
                 guard self.swipe != nil else {
                     self.swipeGuard?.invalidate(); self.swipeGuard = nil; return
                 }
+                if self.expirePendingCapture(at: ProcessInfo.processInfo.systemUptime) { return }
                 if NSEvent.pressedMouseButtons != 0 || !AXIsProcessTrusted()
                     || self.coordinator.display(forSpace: space)?.activeSpaceID != space
                     || DisplayArrangement.currentProblem() != nil {
@@ -1566,7 +1579,7 @@ extension LiveManager {
         if state.caught && !commit { endCaughtSwipe(state, settle: max(0.12, options.config.focusScrollDuration ?? 0.22)); return }
         state.releaseDirection = direction
         let settle = max(0.12, options.config.focusScrollDuration ?? 0.22)
-        if !state.ready { state.released = commit; swipe = state; return }
+        if state.captureState == .pending { state.released = commit; swipe = state; return }
         if state.failed {
             swipe = nil
             swipeTask = nil

@@ -3,8 +3,13 @@ import Foundation
 
 /// Diagnostic AX equality tokens, scoped to one observer lifetime. Retaining
 /// references permits comparison across samples, without titles or AX writes.
+///
+/// Elements are never released within a scope, so an app that keeps creating
+/// and closing windows (e.g. a print popup per print) fills the table. A full
+/// table withholds every capture of the app (`identityTruncated`); `renew()`
+/// starts a fresh scope, and trackers keyed by the scope reset with it.
 final class EvidenceIdentities {
-    let scope = UUID().uuidString
+    private(set) var scope = UUID().uuidString
     private let capacity: Int
     private var elements: [AXUIElement] = []
     private(set) var exhausted = false
@@ -16,5 +21,13 @@ final class EvidenceIdentities {
         guard elements.count < capacity else { exhausted = true; return nil }
         elements.append(element)
         return elements.count
+    }
+
+    /// Releases every retained element and starts a new scope. Tokens from
+    /// the old scope are never reissued under it.
+    func renew() {
+        scope = UUID().uuidString
+        elements.removeAll()
+        exhausted = false
     }
 }

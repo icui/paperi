@@ -213,6 +213,7 @@ public enum Diagnostics {
     }
 
     public func tabEvidence(bundleID: String) -> [String: Any] {
+        renewExhaustedIdentities()
         var report = Diagnostics.tabEvidence(bundleID: bundleID,
             observedWindows: observers.mapValues { $0.windows.map(\.element) },
             identities: observers.mapValues(\.evidenceIdentities),
@@ -251,9 +252,34 @@ public enum Diagnostics {
     func tabEvidence(processID: pid_t, strict: Bool = true) -> [String: Any] {
         // Fresh enumerated representatives supply tab bars. Cached inactive
         // references are validated separately, not traversed as content trees.
-        Diagnostics.tabEvidence(bundleID: "disposable-child", observedWindows: [:],
-            identities: observers.mapValues(\.evidenceIdentities), associations: observers.mapValues(\.selectionAssociations),
-            processID: processID, windowTabBarOnly: true, strict: strict)
+        func capture() -> [String: Any] {
+            Diagnostics.tabEvidence(bundleID: "disposable-child", observedWindows: [:],
+                identities: observers.mapValues(\.evidenceIdentities), associations: observers.mapValues(\.selectionAssociations),
+                processID: processID, windowTabBarOnly: true, strict: strict)
+        }
+        renewExhaustedIdentities(processID: processID)
+        let report = capture()
+        // This capture filled the table, so it is withheld (`identityTruncated`).
+        // Retry once under a fresh scope: one capture visits at most 128 nodes,
+        // well within a fresh table's capacity.
+        guard observers[processID]?.evidenceIdentities.exhausted == true else { return report }
+        renewExhaustedIdentities(processID: processID)
+        return capture()
+    }
+
+    /// Exhausted identity tables would withhold every later capture of their
+    /// app until the observer is recreated. Renewing one starts a new scope,
+    /// which also resets the selection associations learned under the old one.
+    private func renewExhaustedIdentities(processID: pid_t? = nil) {
+        for (pid, subscription) in observers where processID.map({ $0 == pid }) ?? true {
+            let tables = [("evidence", subscription.evidenceIdentities), ("finderTab", subscription.finderTabIdentities),
+                          ("nativeTab", subscription.nativeTabIdentities)]
+            for (name, identities) in tables where identities.exhausted {
+                identities.renew()
+                emit(["event": "identitiesRenewed", "pid": pid, "table": name,
+                      "uptime": ProcessInfo.processInfo.systemUptime])
+            }
+        }
     }
 
     private func attach(_ pid: pid_t) {
