@@ -90,6 +90,13 @@ struct LiveConfigTests {
         }
     }
 
+    @Test func gapResizeDefaultsOn() throws {
+        #expect(LiveConfig().gapResize)
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).gapResize)
+        #expect(try !JSONDecoder().decode(LiveConfig.self, from: Data("{\"gapResize\":false}".utf8)).gapResize)
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data(LiveConfig.template.utf8)).gapResize)
+    }
+
     @Test func bottomModes() throws {
         #expect(LiveConfig().bottomDotsVisibility == .auto)
         #expect(try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8)).bottomDotsVisibility == .auto)

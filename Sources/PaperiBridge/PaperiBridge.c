@@ -64,6 +64,13 @@ uint64_t paperi_active_space(void) {
     return cid && sls_active_space ? sls_active_space(cid) : 0;
 }
 int paperi_skylight_connection(void) { return connection(); }
+bool paperi_set_cursor_in_background(bool enabled) {
+    int cid = connection();
+    static int (*set_property)(int, int, CFStringRef, CFTypeRef);
+    if (!set_property && sky) set_property = dlsym(sky, "SLSSetConnectionProperty");
+    if (!cid || !set_property) return false;
+    return set_property(cid, cid, CFSTR("SetsCursorInBackground"), enabled ? kCFBooleanTrue : kCFBooleanFalse) == 0;
+}
 CFArrayRef paperi_copy_missing_private_functions(void) {
     pthread_once(&once, load);
     static const char *sky_names[] = {

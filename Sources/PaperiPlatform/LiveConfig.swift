@@ -241,6 +241,9 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     }
     public var bottomDotsVisibility: BottomDotsVisibility = .auto
     public var outerGap: Double?
+    /// Dragging the gap between two tiled windows resizes both; a handle
+    /// appears only while the pointer is over the gap.
+    public var gapResize: Bool = true
     /// Key spec → command (as accepted by `paperi msg`), merged over the
     /// built-in PaperWM bindings; `null` removes a default binding.
     public var hotkeys: [String: String?]
@@ -264,7 +267,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case autoCenter, autoCenterThreshold, bottomDotsVisibility, include, exclude, singleton, float, tile, gap, outerGap, hotkeys, hotkeysEnabled, swapHighlight, focusScrollDuration, focusAfterClose, gesture
+        case autoCenter, autoCenterThreshold, bottomDotsVisibility, include, exclude, singleton, float, tile, gap, outerGap, gapResize, hotkeys, hotkeysEnabled, swapHighlight, focusScrollDuration, focusAfterClose, gesture
     }
 
     public init(from decoder: Decoder) throws {
@@ -309,6 +312,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         }
         gap = try c.decodeIfPresent(Double.self, forKey: .gap)
         outerGap = try c.decodeIfPresent(Double.self, forKey: .outerGap)
+        gapResize = try c.decodeIfPresent(Bool.self, forKey: .gapResize) ?? true
         hotkeysEnabled = try c.decodeIfPresent(Bool.self, forKey: .hotkeysEnabled) ?? true
         hotkeys = try c.decodeIfPresent([String: String?].self, forKey: .hotkeys) ?? [:]
         swapHighlight = try c.decodeIfPresent(String.self, forKey: .swapHighlight)
@@ -360,6 +364,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "focusAfterClose": "left",
       "gap": 8,
       "outerGap": 8,
+      "gapResize": true,
       "bottomDotsVisibility": "auto",
       "swapHighlight": "#0A84FF4D",
       "gesture": {

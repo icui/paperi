@@ -271,6 +271,15 @@ import PaperiCore
         return apply { $0.move(id, to: position) }
     }
 
+    /// Drags the gap `divider` to `position` (gap resize handle); focus is unchanged.
+    @discardableResult func moveDivider(_ divider: Divider, to position: Double, gap: Double,
+                                        minimums: [String: Double] = [:], maximums: [String: Double] = [:],
+                                        ticket: UUID) -> Bool {
+        guard accepts(ticket), !state.interactionSuppressed else { return false }
+        let canvas = canvas
+        return apply { (try? $0.moveDivider(divider, to: position, in: canvas, gap: gap, minimums: minimums, maximums: maximums)) == true }
+    }
+
     private func apply(_ edit: (inout Layout) -> Bool) -> Bool {
         var layout = state.layout
         guard edit(&layout) else { return false }

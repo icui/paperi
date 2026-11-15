@@ -175,6 +175,7 @@ private struct SettingsView: View {
     private var settings: [(String, [Setting])] { [
         ("Layout", [Setting(id: "gap", title: "Window gap", detail: "Space between columns and stacked windows, in points."),
                     Setting(id: "outerGap", title: "Outer gap", detail: "Space around the layout, in points."),
+                    Setting(id: "gapResize", title: "Gap resize", detail: "Drag the gap between two windows to resize both. A handle appears while the pointer is over the gap."),
                     Setting(id: "focusAfterClose", title: "Focus after close", detail: "Where focus moves when a tiled window closes.", choices: ["left", "right", "system"]),
                     Setting(id: "autoCenter", title: "Auto center", detail: "Center a sole column or a wide focused column, except at either end of the strip."),
                     Setting(id: "autoCenterThreshold", title: "Auto center threshold", detail: "Fraction of usable display width (0–1, excluding 0). Default: 0.75."),

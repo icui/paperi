@@ -12,6 +12,10 @@ uint64_t paperi_active_space(void);
 CFArrayRef paperi_copy_missing_private_functions(void) CF_RETURNS_RETAINED;
 // SLSMainConnectionID(), or 0 if unavailable.
 int paperi_skylight_connection(void);
+// Lets this process set the cursor while another app is active (gap
+// resize handles), via SLSSetConnectionProperty "SetsCursorInBackground".
+// Returns false if unavailable; the cursor then stays the app's own.
+bool paperi_set_cursor_in_background(bool enabled);
 // Raw trackpad finger counts via the private MultitouchSupport framework.
 // FRAGILE: may break after a macOS update; see PaperiBridge.c.
 // Contact frames arrive on the framework's own thread, ahead of the derived

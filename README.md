@@ -91,6 +91,10 @@ For example, drag an editor onto the bottom zone of a browser window to tile the
 
 Move windows between Spaces and displays with Mission Control; Paperi follows their destination.
 
+## Resize from the gap
+
+Point anywhere along the gap between two side-by-side columns, or between two stacked windows, and a handle fades in at its middle. Drag the handle to resize both windows at once. Their outer edges stay put, so the rest of the strip doesn't move. Nothing is drawn until the pointer is near a gap. The pointer also counts as near a few points inside either window's edge. Only the handle itself (120 points along the gap) responds to clicks. Elsewhere along the gap, the windows' own edge and corner resizing works as usual. The gap stops when the shrinking window reaches its minimum (120 points, or the app's own minimum size if larger). When the growing window can't get any bigger (the display's maximum column width, or the app's own maximum size), it moves with the handle instead and the other window keeps shrinking. A column carries the rest of the strip with it. A stacked window passes the extra height to the windows beyond it. Gaps covered by another window and gaps beside a parked column don't respond. To turn the feature off, set `"gapResize": false`.
+
 ## Keyboard shortcuts
 
 Default shortcuts use **⌥⌘ (Option–Command)**, with Shift added for swapping.
