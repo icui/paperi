@@ -354,11 +354,22 @@ import PaperiPlatform
         menu.removeAllItems()
         menu.autoenablesItems = false
         add(menu, "Settings…", #selector(openSettings), key: ",")
-        let pause = add(menu, manager.paused ? "Resume" : "Pause", #selector(togglePause))
+        let pause = NSButton(title: manager.paused ? "Resume" : "Pause", target: self, action: #selector(togglePause))
         pause.isEnabled = AXIsProcessTrusted() && arrangementPause == nil
         pause.toolTip = arrangementPause
-        add(menu, "Reload", #selector(reloadConfig))
-        add(menu, "Quit", #selector(stopAndQuit), key: "q")
+        let reload = NSButton(title: "Reload", target: self, action: #selector(reloadConfig))
+        for button in [pause, reload] { button.bezelStyle = .rounded }
+        let buttons = NSStackView(views: [pause, reload])
+        buttons.distribution = .fillEqually
+        buttons.spacing = 8
+        buttons.edgeInsets = NSEdgeInsets(top: 4, left: 14, bottom: 4, right: 14)
+        buttons.setFrameSize(NSSize(width: 220, height: 36))
+        let controls = NSMenuItem()
+        controls.view = buttons
+        menu.addItem(controls)
+        menu.addItem(.separator())
+        let quit = add(menu, "Quit", #selector(stopAndQuit), key: "q")
+        quit.image = NSImage(systemSymbolName: "power", accessibilityDescription: "Quit")
     }
 
     @discardableResult private func add(_ menu: NSMenu, _ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
@@ -367,8 +378,12 @@ import PaperiPlatform
         return item
     }
 
-    @objc private func togglePause() { dispatch([manager.paused ? "resume" : "pause"], source: "menu") }
+    @objc private func togglePause() {
+        item?.menu?.cancelTracking()
+        dispatch([manager.paused ? "resume" : "pause"], source: "menu")
+    }
     @objc private func reloadConfig() {
+        item?.menu?.cancelTracking()
         let reply = dispatch(["reload"], source: "menu")
         if reply["ok"] as? Bool != true || !(reply["hotkeyConfigErrors"] as? [String] ?? []).isEmpty {
             let alert = NSAlert()
