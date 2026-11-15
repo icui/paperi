@@ -8,10 +8,9 @@ import PaperiCore
 /// window content and have to follow each scroll and animation frame. With
 /// the pointer anywhere along a gap (within `hoverWidth` across it, so also
 /// just inside a window's edge) a pill fades in at the gap's middle after a
-/// short dwell, so sweeping across a gap does not flash. Only the pill's
-/// segment (`grabWidth` × `grabLength`) takes clicks, with the resize
-/// cursor; the rest of the gap is never covered, so the windows' own edge
-/// and corner resizing keeps working there. While dragging, two white arrows indicate the resize axis.
+/// short dwell, so sweeping across a gap does not flash. Shared row boundaries
+/// take clicks across their full width; column boundaries take clicks only
+/// in the central segment. While dragging, two arrows indicate the resize axis.
 ///
 /// The panel never activates Paperi, so the focused window keeps focus.
 @MainActor final class DividerHandle {

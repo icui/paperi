@@ -20,16 +20,15 @@ public struct DividerRegion: Equatable, Sendable {
     public init(divider: Divider, gap: Rect, position: Double) {
         self.divider = divider; self.gap = gap; self.position = position
     }
-    /// The grab area: a `length` segment at the middle of the gap (clipped
-    /// to it), widened across the gap to at least `hitWidth` so a narrow gap
-    /// is still easy to grab. The rest of the gap is left to the windows'
-    /// own edge resizing.
+    /// Row boundaries grab across their full width so stacked windows always
+    /// resize together. Column boundaries use a centred `length` segment.
+    /// Both are widened across the gap to at least `hitWidth`.
     public func hitRegion(hitWidth: Double, length: Double) -> Rect {
         if divider.isVertical {
             let w = max(gap.width, hitWidth), h = min(gap.height, length)
             return Rect(x: position - w / 2, y: gap.y + (gap.height - h) / 2, width: w, height: h)
         }
-        let h = max(gap.height, hitWidth), w = min(gap.width, length)
+        let h = max(gap.height, hitWidth), w = gap.width
         return Rect(x: gap.x + (gap.width - w) / 2, y: position - h / 2, width: w, height: h)
     }
     public func contains(x: Double, y: Double, hitWidth: Double, length: Double) -> Bool {

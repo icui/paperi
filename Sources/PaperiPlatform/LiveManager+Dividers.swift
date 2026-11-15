@@ -6,8 +6,8 @@ import PaperiCore
 /// Gap resize: dragging the gap between two tiled windows resizes both,
 /// keeping their outer edges (and so the rest of the strip) in place.
 /// Hover tracking runs on mouse-moved monitors; the handle itself
-/// (`DividerHandle`) shows only while the pointer is over the middle of an
-/// exposed gap; elsewhere the gap is left to the windows' own resizing.
+/// (`DividerHandle`) accepts the full exposed boundary between stacked rows
+/// and the central segment between columns.
 extension LiveManager {
     func startDividers() {
         stopDividers()
@@ -41,8 +41,8 @@ extension LiveManager {
 
     /// Shows the handle while the pointer is anywhere along an exposed gap
     /// of an active strip (within `DividerHandle.hoverWidth` across it), and
-    /// hides it otherwise (or during any other interaction). Only the middle
-    /// segment takes clicks; see `DividerHandle`.
+    /// hides it otherwise (or during any other interaction). Row boundaries take
+    /// clicks across their full width; see `DividerHandle`.
     func updateDividerHover() {
         guard dividerDrag == nil else { return }
         guard running, !paused, options.config.gapResize, !motionActive, drag == nil,

@@ -133,6 +133,19 @@ struct DividerTests {
         #expect(abs(after[2].height - (before[2].height - 50)) < 1e-9)
     }
 
+    @Test func rowBoundaryGrabsAcrossEntireStackWidth() {
+        let region = DividerRegion(divider: .rows(column: 0, row: 0),
+            gap: Rect(x: 100, y: 396, width: 600, height: 8), position: 400)
+        #expect(region.hitRegion(hitWidth: 16, length: 120) ==
+            Rect(x: 100, y: 392, width: 600, height: 16))
+        for x in [100.0, 130, 400, 699] {
+            #expect(region.contains(x: x, y: 393, hitWidth: 16, length: 120))
+            #expect(region.contains(x: x, y: 407, hitWidth: 16, length: 120))
+        }
+        #expect(!region.contains(x: 99, y: 400, hitWidth: 16, length: 120))
+        #expect(!region.contains(x: 700, y: 400, hitWidth: 16, length: 120))
+    }
+
     @Test func hitRegionIsACentredSegment() {
         let region = DividerRegion(divider: .columns(0), gap: Rect(x: 300, y: 0, width: 2, height: 600), position: 301)
         #expect(region.hitRegion(hitWidth: 10, length: 64) == Rect(x: 296, y: 268, width: 10, height: 64))

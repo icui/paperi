@@ -375,6 +375,10 @@ import PaperiCore
         guard let current = drag else { endDrag(); return }
         endDrag()
         forceApply = true
+        guard let element = references[current.windowID], let actual = Diagnostics.frame(element),
+              let baseline = expected[current.windowID]?.frame,
+              abs(actual.width - baseline.width) <= 2,
+              abs(actual.height - baseline.height) <= 2 else { return }
         guard let (target, action) = current.hovered, let session = coordinator.sessions[current.space] else { return }
         if session.drop(windowID: current.windowID, on: target.slotID, action: action, ticket: session.ticket) {
             log("dropped \(current.windowID) on slot \(target.slotID) (\(action.rawValue)) after drag")
@@ -743,7 +747,7 @@ import PaperiCore
             focusAnimationSpace = closedSpaces.first { activeSpaces.contains($0) && coordinator.sessions[$0] != nil }
         }
 
-        // 7. Adopt user width changes on active representatives (on mouse up).
+        // 7. Adopt native edge resizes on active representatives (on mouse up).
         let now = ProcessInfo.processInfo.systemUptime
         for space in activeSpaces {
             guard let session = coordinator.sessions[space],
@@ -751,8 +755,20 @@ import PaperiCore
             for placement in placements {
                 guard let exp = expected[placement.windowID], now - exp.at > 0.6,
                       let frame = byID[placement.windowID]?.frame, frame.isValid,
-                      abs(frame.width - exp.frame.width) > 2, let pid = pidForWindow[placement.windowID] else { continue }
+                      (abs(frame.width - exp.frame.width) > 2 || abs(frame.height - exp.frame.height) > 2), let pid = pidForWindow[placement.windowID] else { continue }
+                if dragging == placement.windowID { endDrag() }
                 if mouseDown { continue }
+                // Outer vertical edges belong to the tiled canvas. Restore them
+                // even when no shared row divider can adopt the native resize.
+                if abs(frame.height - exp.frame.height) > 2 { forceApply = true }
+                if let resize = LiveReconciliation.rowResize(layout: session.state.layout,
+                        slotID: placement.slotID, expected: exp.frame, actual: frame, gap: options.gap) {
+                    if session.moveDivider(resize.divider, to: resize.position, gap: options.gap,
+                                           ticket: session.ticket) {
+                        applied.removeValue(forKey: space)
+                        forceApply = true
+                    }
+                }
                 expected[placement.windowID] = (frame, now)
                 let width = min(frame.width, maxColumnWidth(session.canvas))
                 // Wider than the cap: the window is written back to the capped width.
@@ -776,6 +792,7 @@ import PaperiCore
                     let wid = placement.windowID
                     guard let exp = expected[wid], now - exp.at > 0.6,
                           let frame = byID[wid]?.frame, frame.isValid, abs(frame.width - exp.frame.width) <= 2,
+                          abs(frame.height - exp.frame.height) <= 2,
                           abs(frame.x - exp.frame.x) > 2 || abs(frame.y - exp.frame.y) > 2,
                           dragging == wid || displaced[wid] != frame else { continue }
                     displaced[wid] = frame

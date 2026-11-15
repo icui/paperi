@@ -3,6 +3,22 @@ import PaperiCore
 
 /// Pure helpers for the live manager. No OS effects run here.
 enum LiveReconciliation {
+    /// Map a native top/bottom edge resize to the shared boundary of a stack.
+    static func rowResize(layout: Layout, slotID: String, expected: Rect, actual: Rect,
+                          gap: Double) -> (divider: Divider, position: Double)? {
+        guard actual.isValid, abs(actual.height - expected.height) > 2,
+              let index = layout.index(of: slotID) else { return nil }
+        let topChange = abs(actual.y - expected.y)
+        let bottomChange = abs(actual.y + actual.height - expected.y - expected.height)
+        if topChange > bottomChange, index.row > 0 {
+            return (.rows(column: index.column, row: index.row - 1), actual.y - gap / 2)
+        }
+        if bottomChange >= topChange, index.row + 1 < layout.columns[index.column].slots.count {
+            return (.rows(column: index.column, row: index.row), actual.y + actual.height + gap / 2)
+        }
+        return nil
+    }
+
     /// Closing the focused trailing column brings its left neighbor to the
     /// right edge, provided another column remains to that neighbor's left.
     static func offsetAfterTrailingClose(previous: Layout, current: Layout,
