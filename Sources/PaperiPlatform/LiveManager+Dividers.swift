@@ -191,7 +191,11 @@ extension LiveManager {
     func continueDividerDrag(x: Double, y: Double) {
         guard var current = dividerDrag else { return }
         if NSEvent.pressedMouseButtons & 1 == 0 { finishDividerDrag(); return }
-        current.along = current.divider.isVertical ? x : y
+        let along = current.divider.isVertical ? x : y
+        // Perpendicular motion cannot change the layout. Limit updates still
+        // call layOutDividerDrag directly when a window refuses a size.
+        guard along != current.along else { return }
+        current.along = along
         dividerDrag = current
         layOutDividerDrag()
     }

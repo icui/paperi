@@ -28,8 +28,9 @@ import PaperiCore
     static let dwell = 0.12
 
     private var panel: NSPanel?
-    private let pill = CALayer()
     private let arrows = CAShapeLayer()
+    private var morph: CGFloat = 0
+    private var morphTask: Task<Void, Never>?
     private var region: DividerRegion?
     private var fadeTask: Task<Void, Never>?
     private var fadeTarget = false
@@ -39,13 +40,13 @@ import PaperiCore
 
     /// Shows (or moves) the handle at the middle of `region`; `inGrab` is
     /// whether the pointer is over the grab segment (resize cursor).
-    func show(_ region: DividerRegion, inGrab: Bool) {
+    func show(_ region: DividerRegion, inGrab: Bool, updateVisibility: Bool = true) {
         let panel = self.panel ?? make()
         self.panel = panel
         let vertical = region.divider.isVertical
         // Whole points, so the window server does not shift the panel and
         // the pill is placed against the gap's exact centre.
-        let showsArrows = dragging
+        let showsArrows = dragging || morph > 0
         let hit = region.hitRegion(hitWidth: showsArrows ? 56 : Self.grabWidth, length: Self.grabLength)
         let left = hit.x.rounded(.down), top = hit.y.rounded(.down)
         let width = (hit.x + hit.width).rounded(.up) - left, height = (hit.y + hit.height).rounded(.up) - top
@@ -58,16 +59,10 @@ import PaperiCore
         let across = CGFloat(region.position - (vertical ? left : top))
         let along = CGFloat(vertical ? g.y + g.height / 2 - top : g.x + g.width / 2 - left)
         let extent = CGFloat(vertical ? height : width)
-        let thickness: CGFloat = 4
         let length = min(80, max(16, extent - 8))
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        pill.frame = vertical
-            ? CGRect(x: across - thickness / 2, y: along - length / 2, width: thickness, height: length)
-            : CGRect(x: along - length / 2, y: across - thickness / 2, width: length, height: thickness)
-        pill.isHidden = showsArrows
-        arrows.isHidden = !showsArrows
         arrows.frame = CGRect(x: 0, y: 0, width: width, height: height)
         let path = CGMutablePath()
         // Two separated chevrons leave the gap open and indicate the resize
@@ -77,26 +72,27 @@ import PaperiCore
                 : CGPoint(x: along + offset, y: across + cross)
         }
         for sign: CGFloat in [-1, 1] {
-            path.move(to: point(sign * 14, -6))
-            path.addLine(to: point(sign * 21, 0))
-            path.addLine(to: point(sign * 14, 6))
+            path.move(to: point(sign * 14 * morph, -(length / 2 * (1 - morph) + 6 * morph)))
+            path.addLine(to: point(sign * 21 * morph, 0))
+            path.addLine(to: point(sign * 14 * morph, length / 2 * (1 - morph) + 6 * morph))
         }
         arrows.path = path
         arrows.strokeColor = CGColor(gray: 1, alpha: 1)
-        pill.cornerRadius = thickness / 2
-        pill.backgroundColor = CGColor(gray: 1, alpha: 0.92)
-        pill.borderColor = CGColor(gray: 0, alpha: dragging ? 0 : 0.25)
+        arrows.lineWidth = 4 - morph
         CATransaction.commit()
 
-        if inGrab || dragging {
-            (vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).set()
-            ownsCursor = true
-        } else { releaseCursor() }
+        if updateVisibility {
+            if inGrab || dragging {
+                (vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).set()
+                ownsCursor = true
+            } else { releaseCursor() }
+        }
         // Commit drag feedback without waiting for another rendering pass.
         if dragging {
             panel.displayIfNeeded()
             CATransaction.flush()
         }
+        guard updateVisibility else { return }
         if dragging {
             fadeTask?.cancel(); fadeTask = nil
             fadeTarget = true
@@ -105,6 +101,30 @@ import PaperiCore
             if !panel.isVisible { panel.orderFrontRegardless() }
         } else {
             fade(visible: true)
+        }
+    }
+
+    /// Interpolate matching three-point paths so a rapid release reverses
+    /// from the current shape. Window position is never animated.
+    private func animateMorph(to target: CGFloat) {
+        morphTask?.cancel()
+        let from = morph
+        morphTask = Task { [weak self] in
+            let started = ProcessInfo.processInfo.systemUptime
+            do {
+                while true {
+                    try Task.checkCancellation()
+                    guard let self else { return }
+                    let progress = min(1, (ProcessInfo.processInfo.systemUptime - started) / 0.14)
+                    let eased = CGFloat(progress * progress * (3 - 2 * progress))
+                    self.morph = from + (target - from) * eased
+                    if let region = self.region {
+                        self.show(region, inGrab: false, updateVisibility: false)
+                    }
+                    if progress >= 1 { self.morphTask = nil; return }
+                    try await Task.sleep(for: .milliseconds(8))
+                }
+            } catch { return }
         }
     }
 
@@ -186,10 +206,7 @@ import PaperiCore
         arrows.shadowOpacity = 0.65
         arrows.shadowRadius = 2
         arrows.shadowOffset = .zero
-        arrows.isHidden = true
         view.layer?.addSublayer(arrows)
-        pill.borderWidth = 0.5
-        pill.opacity = 1; view.layer?.addSublayer(pill)
         panel.contentView = view
         return panel
     }
@@ -201,7 +218,8 @@ import PaperiCore
         switch phase {
         case 0:
             dragging = true
-            // Show the arrows immediately on mouse down.
+            animateMorph(to: 1)
+            // Keep the overlay responsive while its shape transforms.
             if let region { show(region, inGrab: true) }
             onBegin?(x, y)
         case 1:
@@ -209,8 +227,7 @@ import PaperiCore
         default:
             guard dragging else { return }
             dragging = false
-            arrows.isHidden = true
-            pill.isHidden = false
+            animateMorph(to: 0)
             onEnd?()
         }
     }
