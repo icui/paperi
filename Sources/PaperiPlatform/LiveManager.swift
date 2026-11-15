@@ -71,10 +71,6 @@ import PaperiCore
         let space: UInt64; let divider: Divider
         /// Pointer minus the gap centre along the drag axis at mouse down.
         let grab: Double
-        /// The bar follows the leading (left / upper) window's edge, else the
-        /// trailing one's: whichever was smaller at mouse down (see
-        /// `visibleGap`). Fixed for the drag, so the bar never switches source.
-        let anchorLeading: Bool
         /// Smallest / largest size along the drag axis each slot's app
         /// accepted, learned when it refuses a write (slot ID → points).
         var minimums: [String: Double] = [:]
@@ -87,8 +83,6 @@ import PaperiCore
     /// The gap under the pointer: as laid out, and as actually on screen.
     var dividerHover: (space: UInt64, region: DividerRegion, shown: DividerRegion)?
     var dividerDrag: DividerDrag?
-    /// Keeps the handle on the windows' actual edges during a drag.
-    var dividerTimer: Timer?
     var dividerMonitors: [Any] = []
     var mouseUpWatch = false
     /// Last off-slot frame acted on per window, so an app that clamps its

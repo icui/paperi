@@ -176,7 +176,6 @@ private struct SettingsView: View {
         ("Layout", [Setting(id: "gap", title: "Window gap", detail: "Space between columns and stacked windows, in points."),
                     Setting(id: "outerGap", title: "Outer gap", detail: "Space around the layout, in points."),
                     Setting(id: "gapResize", title: "Gap resize", detail: "Drag the gap between two windows to resize both. A handle appears while the pointer is over the gap."),
-                    Setting(id: "gapResizeHandle", title: "Gap handle while dragging", detail: "Windows keeps the handle on the windows' edges, Pointer keeps it under the pointer (ahead of the windows), Hidden fades it out.", choices: ["windows", "pointer", "hidden"]),
                     Setting(id: "focusAfterClose", title: "Focus after close", detail: "Where focus moves when a tiled window closes.", choices: ["left", "right", "system"]),
                     Setting(id: "autoCenter", title: "Auto center", detail: "Center a sole column or a wide focused column, except at either end of the strip."),
                     Setting(id: "autoCenterThreshold", title: "Auto center threshold", detail: "Fraction of usable display width (0–1, excluding 0). Default: 0.75."),

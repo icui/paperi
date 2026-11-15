@@ -13,7 +13,6 @@ extension LiveManager {
         stopDividers()
         guard options.config.gapResize else { return }
         _ = paperi_set_cursor_in_background(true)
-        dividerHandle.trackingStyle = options.config.gapResizeHandle
         dividerHandle.onBegin = { [weak self] x, y in self?.beginDividerDrag(x: x, y: y) }
         dividerHandle.onDrag = { [weak self] x, y in self?.continueDividerDrag(x: x, y: y) }
         dividerHandle.onEnd = { [weak self] in self?.finishDividerDrag() }
@@ -54,7 +53,7 @@ extension LiveManager {
         dividerHover = hover
         let (x, y) = Self.pointer()
         let inGrab = hover.shown.contains(x: x, y: y, hitWidth: DividerHandle.grabWidth, length: DividerHandle.grabLength)
-        dividerHandle.show(hover.shown, inGrab: inGrab, accent: options.config.swapHighlightColor)
+        dividerHandle.show(hover.shown, inGrab: inGrab)
     }
 
     func dividerUnderPointer() -> (space: UInt64, region: DividerRegion, shown: DividerRegion)? {
@@ -166,23 +165,12 @@ extension LiveManager {
         return result
     }
 
-    /// Mid-drag, keeps the handle on the windows' actual edges every frame,
-    /// including after the pointer stops while the apps catch up.
-    func trackDividerWindows() {
+    /// Shows the requested divider position, without waiting for app redraws.
+    func updateDividerDragIndicator() {
         guard let current = dividerDrag, let session = coordinator.sessions[current.space],
               let region = try? session.state.layout.dividers(in: session.canvas, gap: options.gap)
                 .first(where: { $0.divider == current.divider }) else { return }
-        let columns = session.state.layout.columns
-        let windows: [UInt32]
-        switch current.divider {
-        case .columns(let c): windows = (columns[c].slots + columns[c + 1].slots).map(\.activeMember)
-        case .rows(let c, let r): windows = [columns[c].slots[r].activeMember, columns[c].slots[r + 1].activeMember]
-        }
-        // Following the pointer, the handle shows where the gap is going
-        // (the layout), ahead of the windows.
-        let shown = options.config.gapResizeHandle == .pointer ? region
-            : Self.visibleGap(region, in: session.state.layout, bounds: Self.bounds(of: windows), anchor: current.anchorLeading)
-        dividerHandle.show(shown, inGrab: true, accent: options.config.swapHighlightColor)
+        dividerHandle.show(region, inGrab: true)
     }
 
     func beginDividerDrag(x: Double, y: Double) {
@@ -190,25 +178,13 @@ extension LiveManager {
         cancelMotion(); motionFrames.removeAll()
         let along = hover.region.divider.isVertical ? x : y
         // Against the layout's gap, so the layout follows the pointer exactly.
-        // Anchor the bar to the smaller window: it redraws faster, so its
-        // edge keeps closest to the pointer.
-        let layout = coordinator.sessions[hover.space]!.state.layout
-        let leadingSmaller: Bool
-        switch hover.region.divider {
-        case .columns(let c): leadingSmaller = layout.columns[c].width <= layout.columns[c + 1].width
-        case .rows(let c, let r): leadingSmaller = layout.columns[c].weights[r] <= layout.columns[c].weights[r + 1]
-        }
         dividerDrag = DividerDrag(space: hover.space, divider: hover.region.divider, grab: along - hover.region.position,
-                                  anchorLeading: leadingSmaller, along: along)
+                                  along: along)
         frameWriter.reset()
         frameWriter.onResult = { [weak self] result in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.dividerWritten(result) } }
         }
-        dividerTimer?.invalidate()
-        dividerTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.trackDividerWindows() }
-        }
-        RunLoop.main.add(dividerTimer!, forMode: .common)
+        updateDividerDragIndicator()
         log("gap drag began on \(hover.region.divider) in Space \(hover.space)")
     }
 
@@ -228,7 +204,7 @@ extension LiveManager {
                                   minimums: current.minimums, maximums: current.maximums,
                                   ticket: session.ticket) else { return }
         writeDividerFrames(current)
-        trackDividerWindows()
+        updateDividerDragIndicator()
     }
 
     /// A background write finished. A window that refused its size gets it
@@ -257,7 +233,6 @@ extension LiveManager {
         guard let current = dividerDrag else { return }
         dividerDrag = nil
         frameWriter.onResult = nil
-        dividerTimer?.invalidate(); dividerTimer = nil
         log("gap drag ended on \(current.divider)")
         rememberWidths()
         applied.removeValue(forKey: current.space)
