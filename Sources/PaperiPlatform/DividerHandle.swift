@@ -35,6 +35,8 @@ import PaperiCore
     private var reveal: DispatchWorkItem?
     private var ownsCursor = false
     private(set) var dragging = false
+    /// Set for each drag from `LiveConfig.gapResizeHandle`.
+    var trackingStyle: LiveConfig.GapResizeHandle = .windows
     var isShown: Bool { panel?.isVisible == true }
 
     /// Shows (or moves) the handle at the middle of `region`; `inGrab` is
@@ -78,7 +80,7 @@ import PaperiCore
         } else { releaseCursor() }
         guard fresh else { return }
         panel.orderFrontRegardless()
-        if dragging { setOpacity(1, duration: 0); return }
+        if dragging { setOpacity(trackingStyle == .hidden ? 0 : 1, duration: 0); return }
         setOpacity(0, duration: 0)
         reveal?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.setOpacity(1, duration: 0.15) }
@@ -142,7 +144,7 @@ import PaperiCore
         switch phase {
         case 0:
             dragging = true
-            reveal?.cancel(); setOpacity(1, duration: 0.08)
+            reveal?.cancel(); setOpacity(trackingStyle == .hidden ? 0 : 1, duration: 0.08)
             // Take the accent colour at once, not on the first move.
             if let region, let accent { show(region, inGrab: true, accent: accent) }
             onBegin?(x, y)
@@ -151,6 +153,7 @@ import PaperiCore
         default:
             guard dragging else { return }
             dragging = false
+            if trackingStyle == .hidden { setOpacity(1, duration: 0.15) }
             onEnd?()
         }
     }

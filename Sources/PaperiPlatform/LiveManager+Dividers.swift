@@ -13,6 +13,7 @@ extension LiveManager {
         stopDividers()
         guard options.config.gapResize else { return }
         _ = paperi_set_cursor_in_background(true)
+        dividerHandle.trackingStyle = options.config.gapResizeHandle
         dividerHandle.onBegin = { [weak self] x, y in self?.beginDividerDrag(x: x, y: y) }
         dividerHandle.onDrag = { [weak self] x, y in self?.continueDividerDrag(x: x, y: y) }
         dividerHandle.onEnd = { [weak self] in self?.finishDividerDrag() }
@@ -177,7 +178,10 @@ extension LiveManager {
         case .columns(let c): windows = (columns[c].slots + columns[c + 1].slots).map(\.activeMember)
         case .rows(let c, let r): windows = [columns[c].slots[r].activeMember, columns[c].slots[r + 1].activeMember]
         }
-        let shown = Self.visibleGap(region, in: session.state.layout, bounds: Self.bounds(of: windows), anchor: current.anchorLeading)
+        // Following the pointer, the handle shows where the gap is going
+        // (the layout), ahead of the windows.
+        let shown = options.config.gapResizeHandle == .pointer ? region
+            : Self.visibleGap(region, in: session.state.layout, bounds: Self.bounds(of: windows), anchor: current.anchorLeading)
         dividerHandle.show(shown, inGrab: true, accent: options.config.swapHighlightColor)
     }
 
@@ -195,39 +199,64 @@ extension LiveManager {
         case .rows(let c, let r): leadingSmaller = layout.columns[c].weights[r] <= layout.columns[c].weights[r + 1]
         }
         dividerDrag = DividerDrag(space: hover.space, divider: hover.region.divider, grab: along - hover.region.position,
-                                  anchorLeading: leadingSmaller)
+                                  anchorLeading: leadingSmaller, along: along)
+        frameWriter.reset()
+        frameWriter.onResult = { [weak self] result in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.dividerWritten(result) } }
+        }
         dividerTimer?.invalidate()
         dividerTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.trackDividerWindows() }
         }
-        RunLoop.main.add(dividerTimer!, forMode: .eventTracking)
+        RunLoop.main.add(dividerTimer!, forMode: .common)
         log("gap drag began on \(hover.region.divider) in Space \(hover.space)")
     }
 
     func continueDividerDrag(x: Double, y: Double) {
-        guard var current = dividerDrag, let session = coordinator.sessions[current.space] else { return }
+        guard var current = dividerDrag else { return }
         if NSEvent.pressedMouseButtons & 1 == 0 { finishDividerDrag(); return }
-        let along = current.divider.isVertical ? x : y
-        // A window that refuses a size gets it as its limit and the move is
-        // redone: refusing to shrink stops the gap, refusing to grow makes the
-        // window travel with it.
-        for _ in 0 ..< 3 {
-            guard session.moveDivider(current.divider, to: along - current.grab, gap: options.gap,
-                                      minimums: current.minimums, maximums: current.maximums,
-                                      ticket: session.ticket) else { break }
-            let refused = writeDividerFrames(current)
-            guard !refused.minimums.isEmpty || !refused.maximums.isEmpty else { break }
-            current.minimums.merge(refused.minimums) { max($0, $1) }
-            current.maximums.merge(refused.maximums) { min($0, $1) }
-            dividerDrag = current
-            log("gap drag learned minimums \(refused.minimums) maximums \(refused.maximums)")
-        }
+        current.along = current.divider.isVertical ? x : y
+        dividerDrag = current
+        layOutDividerDrag()
+    }
+
+    /// Moves the dragged gap to the pointer under the limits learned so far
+    /// and queues the windows that moved; the writes run off the main thread.
+    func layOutDividerDrag() {
+        guard let current = dividerDrag, let session = coordinator.sessions[current.space] else { return }
+        guard session.moveDivider(current.divider, to: current.along - current.grab, gap: options.gap,
+                                  minimums: current.minimums, maximums: current.maximums,
+                                  ticket: session.ticket) else { return }
+        writeDividerFrames(current)
         trackDividerWindows()
+    }
+
+    /// A background write finished. A window that refused its size gets it
+    /// as its limit and the gap is laid out again: refusing to shrink stops
+    /// the gap, refusing to grow makes the window travel with it. Refused
+    /// only if the size did not change at all: an app that sizes in steps
+    /// (terminal cells) lands near, not at, the target and keeps resizing.
+    func dividerWritten(_ result: FrameWriter.Result) {
+        guard var current = dividerDrag else { return }
+        guard let size = result.actual else { log("gap drag write failed for \(result.windowID)"); return }
+        guard let previous = result.previous.map({ current.divider.isVertical ? $0.width : $0.height }) else { return }
+        let actual = Double(current.divider.isVertical ? size.width : size.height)
+        let wanted = current.divider.isVertical ? result.wanted.width : result.wanted.height
+        let slot = result.slotID
+        if wanted < previous - 1, actual > wanted + 1, actual >= previous - 1, actual > current.minimums[slot] ?? 0 {
+            current.minimums[slot] = actual
+        } else if wanted > previous + 1, actual < wanted - 1, actual <= previous + 1, actual < current.maximums[slot] ?? .infinity {
+            current.maximums[slot] = actual
+        } else { return }
+        dividerDrag = current
+        log("gap drag learned limit \(Int(actual)) for slot \(slot)")
+        layOutDividerDrag()
     }
 
     func finishDividerDrag(refreshing: Bool = true) {
         guard let current = dividerDrag else { return }
         dividerDrag = nil
+        frameWriter.onResult = nil
         dividerTimer?.invalidate(); dividerTimer = nil
         log("gap drag ended on \(current.divider)")
         rememberWidths()
@@ -236,76 +265,23 @@ extension LiveManager {
         if refreshing { refresh() }
     }
 
-    /// Writes the windows that moved: those beside the dragged gap and, once
-    /// a side travels with the gap, the strip beyond it. The full apply pass
-    /// (and its survey) is skipped mid-drag. Returns the sizes along the drag
-    /// axis of slots whose app refused to shrink / grow to its target.
-    @discardableResult
-    func writeDividerFrames(_ current: DividerDrag) -> (minimums: [String: Double], maximums: [String: Double]) {
+    /// Queues the windows that moved: those beside the dragged gap and,
+    /// once a side travels with the gap, the strip beyond it. The full apply
+    /// pass (and its survey) is skipped mid-drag.
+    func writeDividerFrames(_ current: DividerDrag) {
         guard let session = coordinator.sessions[current.space],
-              let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { return ([:], [:]) }
+              let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { return }
         let tucked = LiveReconciliation.tuck(LiveReconciliation.edgeItems(placements),
                                              canvas: session.canvas, screenInset: options.outerGap)
         let now = ProcessInfo.processInfo.systemUptime
-        // The growing window goes first, so its neighbour never pulls back
-        // before it has covered the space and the desktop never shows through.
-        let moves: [(wid: UInt32, slot: String, element: AXUIElement, from: Rect?, to: Rect)] = placements.compactMap { placement in
+        for placement in placements {
             let wid = placement.windowID
             let target = tucked[wid] ?? placement.frame
-            guard let element = references[wid], expected[wid]?.frame != target else { return nil }
-            return (wid, placement.slotID, element, expected[wid]?.frame, target)
-        }.sorted { ($0.to.width * $0.to.height - ($0.from.map { $0.width * $0.height } ?? 0)) >
-                   ($1.to.width * $1.to.height - ($1.from.map { $0.width * $0.height } ?? 0)) }
-        var minimums: [String: Double] = [:], maximums: [String: Double] = [:]
-        let vertical = current.divider.isVertical
-        for move in moves {
-            session.expect(windowID: move.wid, frame: move.to, now: now, ticket: session.ticket)
-            expected[move.wid] = (move.to, now)
-            guard let size = writeDividerFrame(move.to, from: move.from, to: move.element) else {
-                log("gap drag write failed for \(move.wid)"); continue
-            }
-            // Refused only if it did not change size at all: an app that
-            // sizes in steps (terminal cells) lands near, not at, the target
-            // and must keep resizing.
-            let actual = Double(vertical ? size.width : size.height), wanted = vertical ? move.to.width : move.to.height
-            guard let previous = move.from.map({ vertical ? $0.width : $0.height }) else { continue }
-            if wanted < previous - 1, actual > wanted + 1, actual >= previous - 1, actual > current.minimums[move.slot] ?? 0 {
-                minimums[move.slot] = actual
-            } else if wanted > previous + 1, actual < wanted - 1, actual <= previous + 1,
-                      actual < current.maximums[move.slot] ?? .infinity {
-                maximums[move.slot] = actual
-            }
+            guard let element = references[wid], expected[wid]?.frame != target else { continue }
+            let current = expected[wid]?.frame
+            session.expect(windowID: wid, frame: target, now: now, ticket: session.ticket)
+            expected[wid] = (target, now)
+            frameWriter.submit(windowID: wid, slotID: placement.slotID, element: element, frame: target, current: current)
         }
-        return (minimums, maximums)
-    }
-
-    /// Writes only what changed, ordered so the window briefly overlaps its
-    /// neighbour rather than leaving a gap: a growing window is sized before
-    /// it is moved, a shrinking one moved before it is sized. Each change is
-    /// one AX write, against three for a general placement (`write`).
-    /// Returns the size the app actually took (read back, since an app at its
-    /// minimum clamps the write), or nil if a write failed.
-    func writeDividerFrame(_ frame: Rect, from previous: Rect?, to element: AXUIElement) -> CGSize? {
-        func readSize() -> CGSize? {
-            guard let value = Diagnostics.attribute(element, kAXSizeAttribute), CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
-            var size = CGSize.zero
-            return AXValueGetValue(value as! AXValue, .cgSize, &size) ? size : nil
-        }
-        guard let previous else { return write(frame, to: element) ? readSize() : nil }
-        let start = ProcessInfo.processInfo.systemUptime
-        var point = CGPoint(x: frame.x, y: frame.y), size = CGSize(width: frame.width, height: frame.height)
-        guard let p = AXValueCreate(.cgPoint, &point), let s = AXValueCreate(.cgSize, &size) else { return nil }
-        let moved = previous.x != frame.x || previous.y != frame.y
-        let resized = previous.width != frame.width || previous.height != frame.height
-        let growing = frame.width * frame.height > previous.width * previous.height
-        var writes: [(CFString, AXValue)] = []
-        if resized && growing { writes.append((kAXSizeAttribute as CFString, s)) }
-        if moved { writes.append((kAXPositionAttribute as CFString, p)) }
-        if resized && !growing { writes.append((kAXSizeAttribute as CFString, s)) }
-        var ok = true
-        for (name, value) in writes { ok = AXUIElementSetAttributeValue(element, name, value) == .success && ok }
-        axWriteCalls += writes.count; axWriteMS += (ProcessInfo.processInfo.systemUptime - start) * 1000
-        guard ok else { return nil }
-        return resized ? readSize() : size
     }
 }

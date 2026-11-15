@@ -79,7 +79,10 @@ import PaperiCore
         /// accepted, learned when it refuses a write (slot ID → points).
         var minimums: [String: Double] = [:]
         var maximums: [String: Double] = [:]
+        /// Latest pointer coordinate along the drag axis.
+        var along: Double
     }
+    let frameWriter = FrameWriter()
     let dividerHandle = DividerHandle()
     /// The gap under the pointer: as laid out, and as actually on screen.
     var dividerHover: (space: UInt64, region: DividerRegion, shown: DividerRegion)?
