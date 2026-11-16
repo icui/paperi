@@ -138,7 +138,7 @@ extension LiveManager {
         return state.landing != nil && state.ready
     }
 
-    func cancelSwipe() {
+    func cancelSwipe(file: String = #fileID, line: Int = #line) {
         windowIndicators.finishHorizontalSwipe()
         standaloneOverlay?.fadeOut(); standaloneOverlay = nil
         standalonePull = false
@@ -152,6 +152,7 @@ extension LiveManager {
         state.overlay.hide()
         swipe = nil
         swipeMetrics["state"] = "cancelled"
+        swipeMetrics["cancelledAt"] = "\(file):\(line)"
     }
 
     /// A stalled screenshot must not keep refresh and later gestures blocked.
@@ -638,7 +639,21 @@ extension LiveManager {
         switch action {
         case .none, .openApp: break
         case .minimize:
-            if let window { _ = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue) }
+            if let window {
+                let managed = coordinator.spaceForWindow[paperi_window_id(window)] != nil
+                _ = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
+                // The owner answers no Accessibility call until the Dock effect
+                // ends. A pass now would time out on it, lose its windows from
+                // the survey and place the strip with the gap still open. Wait
+                // for the minimize notification (or the deadline) instead.
+                if managed {
+                    minimizeHoldUntil = ProcessInfo.processInfo.systemUptime + 1
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.02) { [weak self] in
+                        MainActor.assumeIsolated { self?.scheduleRefresh() }
+                    }
+                    return
+                }
+            }
         case .newWindow:
             if let item = Self.newWindowMenuItem(pid: pid),
                AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { return }

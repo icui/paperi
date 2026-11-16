@@ -5,8 +5,8 @@ import PaperiCore
 
 /// Keyboard focus scroll: position-only AX writes on real windows.
 extension LiveManager {
-    func cancelMotion() {
-        cancelSwipe()
+    func cancelMotion(file: String = #fileID, line: Int = #line) {
+        cancelSwipe(file: file, line: line)
         motionGeneration &+= 1
         motionTimer?.invalidate(); motionTimer = nil
         motionBounce = nil

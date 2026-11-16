@@ -4,6 +4,14 @@ import PaperiCore
 @testable import PaperiPlatform
 
 @MainActor struct LiveReconciliationTests {
+    @Test func lateMinimizeDoesNotCancelSurvivorReflow() {
+        #expect(!LiveReconciliation.presentationInterruptsMotion(isMinimize: true, managedOwner: true, affectsStrip: false))
+        #expect(LiveReconciliation.presentationInterruptsMotion(isMinimize: true, managedOwner: true, affectsStrip: true))
+        #expect(LiveReconciliation.presentationInterruptsMotion(isMinimize: true, managedOwner: true, affectsStrip: nil))
+        #expect(LiveReconciliation.presentationInterruptsMotion(isMinimize: false, managedOwner: true, affectsStrip: false))
+        #expect(!LiveReconciliation.presentationInterruptsMotion(isMinimize: false, managedOwner: false, affectsStrip: false))
+    }
+
     @Test func restoreRetriesBrieflyWithoutDisablingHungAppBackoff() {
         #expect(LiveReconciliation.surveyRetryDelay(now: 10, restoringUntil: nil) == 5)
         #expect(LiveReconciliation.surveyRetryDelay(now: 10, restoringUntil: 12) == 0.25)

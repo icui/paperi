@@ -50,6 +50,9 @@ import PaperiCore
     var destroyedNotified: Set<UInt32> = []
     var minimizedNotified: Set<UInt32> = []
     var pendingReflows = PendingReflows()
+    /// Paperi asked a managed window to minimize; no pass runs until its
+    /// owner reports the minimize or this uptime passes.
+    var minimizeHoldUntil: Double?
     /// Neighbour chosen when the focused window closed (`focusAfterClose`). It
     /// overrides the OS focus briefly, while its raise and app activation land.
     var closeFocus: (window: UInt32, until: Double)?
@@ -146,6 +149,7 @@ import PaperiCore
         endDrag(); displaced.removeAll()
         destroyedNotified.removeAll(); minimizedNotified.removeAll(); pendingReflows = PendingReflows()
         closeFocus = nil; slowUntil.removeAll(); restoreRetryUntil.removeAll(); forceApply = true
+        minimizeHoldUntil = nil
         coordinator = DisplaySpaceCoordinator(ownerPIDs: [], displays: topologies())
         recorder = EventRecorder(workspaceCenter: NSWorkspace.shared.notificationCenter,
                                  runningApplications: { NSWorkspace.shared.runningApplications },
@@ -342,6 +346,14 @@ import PaperiCore
                 }
             }
         }
+        if name == kAXWindowMiniaturizedNotification, let pid = event["pid"] as? pid_t {
+            // The owner's main thread is blocked for the whole Dock effect, so
+            // a survey during it times out and backs the app off. This event is
+            // posted once the effect ends: the app answers again, and its
+            // surviving windows must be surveyed to animate into the gap.
+            slowUntil.removeValue(forKey: pid)
+            minimizeHoldUntil = nil
+        }
         if presentationChanged {
             // The fast focus path uses cached policy facts. Never animate or
             // write from those facts after native presentation has changed.
@@ -363,9 +375,15 @@ import PaperiCore
             let managedOwner = pidForWindow.values.contains(pid) || NSRunningApplication(processIdentifier: pid).map {
                 Self.considered($0, config: options.config)
             } == true
-            if managedOwner { cancelMotion(); motionFrames.removeAll() }
+            let wid = event["windowID"] as? UInt32
+            let affectsStrip = wid.map { coordinator.spaceForWindow[$0] != nil || swipe?.surveys[$0] != nil }
+            if LiveReconciliation.presentationInterruptsMotion(isMinimize: name == kAXWindowMiniaturizedNotification,
+                managedOwner: managedOwner, affectsStrip: affectsStrip) {
+                cancelMotion(); motionFrames.removeAll()
+            }
         }
-        if name == kAXResizedNotification, let state = swipe, state.released == nil {
+        if name == kAXResizedNotification, let state = swipe, state.released == nil,
+           let wid = event["windowID"] as? UInt32, state.surveys[wid] != nil {
             cancelMotion(); motionFrames.removeAll()
         }
         if name == kAXMovedNotification || name == kAXResizedNotification {
@@ -574,6 +592,10 @@ import PaperiCore
         // trackpad edge resize holds the strip from the moment it is armed.
         if dividerDrag != nil || edgeResize != nil { return }
         if motionActive { return }
+        if let until = minimizeHoldUntil {
+            if ProcessInfo.processInfo.systemUptime < until { return }
+            minimizeHoldUntil = nil
+        }
         motionFrames.removeAll()
         if animateCachedFocus() { return }
         // Side-by-side displays are unsupported (the app pauses moments later);

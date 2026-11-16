@@ -3,6 +3,13 @@ import PaperiCore
 
 /// Pure helpers for the live manager. No OS effects run here.
 enum LiveReconciliation {
+    /// A late minimize event for an already removed window must not stop the
+    /// survivors' gap-closing animation. Unknown identity remains conservative.
+    static func presentationInterruptsMotion(isMinimize: Bool, managedOwner: Bool,
+                                             affectsStrip: Bool?) -> Bool {
+        managedOwner && (!isMinimize || affectsStrip != false)
+    }
+
     static func surveyRetryDelay(now: Double, restoringUntil: Double?) -> Double {
         if let restoringUntil, now < restoringUntil { return 0.25 }
         return 5
