@@ -44,7 +44,6 @@ extension LiveManager {
         reveal(session)
         animateFocus(space: space, byID: latestSurvey)
         _ = raise(wid)
-        raiseNeighbours(of: wid, pid: pid, in: space)
         windowIndicators.update(coordinator, mode: options.config.bottomDotsVisibility)
         scheduleRefresh()
     }
@@ -119,6 +118,11 @@ extension LiveManager {
         AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
         AXUIElementPerformAction(element, kAXRaiseAction as CFString)
         NSRunningApplication(processIdentifier: pid)?.activate()
+        // Activation can raise parked siblings too. Repair stacking for every
+        // focus path (including swipe landings), not only tray selections.
+        if let space = coordinator.spaceForWindow[wid] {
+            raiseNeighbours(of: wid, pid: pid, in: space)
+        }
         return true
     }
 
