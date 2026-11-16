@@ -641,12 +641,14 @@ extension LiveManager {
         case .minimize:
             if let window {
                 let managed = coordinator.spaceForWindow[paperi_window_id(window)] != nil
-                _ = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
+                // A suspended stacking repair would raise it back (see minimize(_:)).
+                if managed { neighbourTask?.cancel(); neighbourTask = nil }
+                let result = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
                 // The owner answers no Accessibility call until the Dock effect
                 // ends. A pass now would time out on it, lose its windows from
                 // the survey and place the strip with the gap still open. Wait
                 // for the minimize notification (or the deadline) instead.
-                if managed {
+                if managed, result == .success {
                     minimizeHoldUntil = ProcessInfo.processInfo.systemUptime + 1
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.02) { [weak self] in
                         MainActor.assumeIsolated { self?.scheduleRefresh() }

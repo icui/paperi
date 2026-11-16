@@ -321,6 +321,8 @@ import PaperiCore
 
     func receive(_ event: [String: Any]) {
         guard running, let name = event["event"] as? String else { return }
+        // The recorder reports an unresolved window as 0, never as a missing key.
+        let eventWindow = (event["windowID"] as? UInt32).flatMap { $0 == 0 ? nil : $0 }
         if name == kAXUIElementDestroyedNotification, let wid = event["windowID"] as? UInt32, wid > 0 {
             minimizedNotified.remove(wid)
             // The window a swipe-up is closing: its release finishes the overlay.
@@ -357,7 +359,7 @@ import PaperiCore
         if presentationChanged {
             // The fast focus path uses cached policy facts. Never animate or
             // write from those facts after native presentation has changed.
-            if let wid = event["windowID"] as? UInt32 {
+            if let wid = eventWindow {
                 latestSurvey.removeValue(forKey: wid)
                 if name == kAXWindowMiniaturizedNotification {
                     if pidForWindow[wid] != nil { minimizedNotified.insert(wid) }
@@ -375,15 +377,14 @@ import PaperiCore
             let managedOwner = pidForWindow.values.contains(pid) || NSRunningApplication(processIdentifier: pid).map {
                 Self.considered($0, config: options.config)
             } == true
-            let wid = event["windowID"] as? UInt32
-            let affectsStrip = wid.map { coordinator.spaceForWindow[$0] != nil || swipe?.surveys[$0] != nil }
+            let affectsStrip = eventWindow.map { coordinator.spaceForWindow[$0] != nil || swipe?.surveys[$0] != nil }
             if LiveReconciliation.presentationInterruptsMotion(isMinimize: name == kAXWindowMiniaturizedNotification,
                 managedOwner: managedOwner, affectsStrip: affectsStrip) {
                 cancelMotion(); motionFrames.removeAll()
             }
         }
         if name == kAXResizedNotification, let state = swipe, state.released == nil,
-           let wid = event["windowID"] as? UInt32, state.surveys[wid] != nil {
+           eventWindow.map({ state.surveys[$0] != nil }) ?? true {
             cancelMotion(); motionFrames.removeAll()
         }
         if name == kAXMovedNotification || name == kAXResizedNotification {
