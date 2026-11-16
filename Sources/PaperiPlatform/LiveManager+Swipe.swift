@@ -1316,6 +1316,9 @@ extension LiveManager {
 
     /// Minimizes through Accessibility. False when the window refuses.
     func minimize(_ wid: UInt32) -> Bool {
+        // A stacking repair may be suspended between raises with a stale list
+        // that still includes this window. AXRaise would undo the minimize.
+        neighbourTask?.cancel(); neighbourTask = nil
         guard let pid = pidForWindow[wid], let element = references[wid] ?? findWindow(wid, pid: pid) else { return false }
         var settable = DarwinBoolean(false)
         guard AXUIElementIsAttributeSettable(element, kAXMinimizedAttribute as CFString, &settable) == .success,

@@ -62,6 +62,7 @@ extension LiveManager {
             let id = placement.windowID
             guard let cached = latestSurvey[id], cached.spaceID == space,
                   cached.classification.eligibility == .tiled,
+                  Diagnostics.attribute(cached.element, kAXMinimizedAttribute) as? Bool == false,
                   let frame = frames[id], Self.windowSpace(id) == space else { return nil }
             surveys[id] = Survey(windowID: id, pid: cached.pid, element: cached.element,
                                  classification: cached.classification, facts: cached.facts,

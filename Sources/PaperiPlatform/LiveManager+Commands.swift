@@ -76,16 +76,28 @@ extension LiveManager {
                 let highestParked = order.indices.first { !neighbours.contains(order[$0]) && order[$0] != wid } ?? order.count
                 if lowest < highestParked { return }
                 @MainActor func raise(_ id: UInt32, until done: ([UInt32]) -> Bool) async {
-                    guard let element = self.references[id] else { return }
+                    // Every await can outlive a minimize or a layout change.
+                    // Revalidate at the effect, rather than using the old strip.
+                    guard !Task.isCancelled,
+                          self.coordinator.spaceForWindow[id] == space,
+                          self.isActiveRepresentative(id),
+                          let element = self.references[id],
+                          Diagnostics.attribute(element, kAXMinimizedAttribute) as? Bool == false else { return }
                     AXUIElementPerformAction(element, kAXRaiseAction as CFString)
-                    for _ in 0..<10 where !done(stack()) { try? await Task.sleep(for: .milliseconds(10)) }
+                    for _ in 0..<10 where !done(stack()) {
+                        guard !Task.isCancelled else { return }
+                        try? await Task.sleep(for: .milliseconds(10))
+                    }
                 }
                 let siblings = neighbours.filter { self.pidForWindow[$0] == pid }
                 for id in siblings { await raise(id) { $0.first == id } }
                 if !siblings.isEmpty {
-                    if let element = self.references[wid] {
-                        AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
-                    }
+                    guard !Task.isCancelled,
+                          self.coordinator.spaceForWindow[wid] == space,
+                          self.isActiveRepresentative(wid),
+                          let element = self.references[wid],
+                          Diagnostics.attribute(element, kAXMinimizedAttribute) as? Bool == false else { return }
+                    AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
                     await raise(wid) { $0.first == wid }
                 }
                 for id in neighbours where self.pidForWindow[id] != pid {
@@ -115,6 +127,8 @@ extension LiveManager {
 
     func raise(_ wid: UInt32) -> Bool {
         guard let pid = pidForWindow[wid], let element = references[wid] ?? findWindow(wid, pid: pid) else { return false }
+        // Focus repair must never implicitly restore a minimized window.
+        guard Diagnostics.attribute(element, kAXMinimizedAttribute) as? Bool == false else { return false }
         AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
         AXUIElementPerformAction(element, kAXRaiseAction as CFString)
         NSRunningApplication(processIdentifier: pid)?.activate()

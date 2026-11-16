@@ -319,8 +319,18 @@ import PaperiCore
                 destroyedNotified.insert(wid)
                 return
             }
-            cancelMotion(); motionFrames.removeAll()
-            destroyedNotified.insert(wid)
+            // Input-method popups and our own overlays are destroyed during
+            // normal focus changes. They do not invalidate the managed strip.
+            if coordinator.spaceForWindow[wid] != nil || swipe?.surveys[wid] != nil {
+                cancelMotion(); motionFrames.removeAll()
+                destroyedNotified.insert(wid)
+            }
+        }
+        let presentationChanged = [kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification].contains(name)
+        if presentationChanged {
+            // The fast focus path uses cached policy facts. Never animate or
+            // write from those facts after native presentation has changed.
+            latestSurvey.removeAll()
         }
         let ownMinimize = name == kAXWindowMiniaturizedNotification && swipe.map {
             $0.pulling && $0.pullAction == .minimize && $0.released == true && $0.closeWindow == event["windowID"] as? UInt32
@@ -328,8 +338,12 @@ import PaperiCore
         // ⌘N from a released new-window swipe opens a window under the overlay.
         let ownNewWindow = name == kAXWindowCreatedNotification && swipe.map { $0.showsNewWindow && $0.released == true } == true
         if motionActive && !ownMinimize && !ownNewWindow && [kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification,
-                                            kAXWindowCreatedNotification].contains(name) {
-            cancelMotion(); motionFrames.removeAll()
+                                            kAXWindowCreatedNotification].contains(name),
+           let pid = event["pid"] as? pid_t {
+            let managedOwner = pidForWindow.values.contains(pid) || NSRunningApplication(processIdentifier: pid).map {
+                Self.considered($0, config: options.config)
+            } == true
+            if managedOwner { cancelMotion(); motionFrames.removeAll() }
         }
         if name == kAXResizedNotification, let state = swipe, state.released == nil {
             cancelMotion(); motionFrames.removeAll()
@@ -831,7 +845,8 @@ import PaperiCore
                 animateFocus(space: space, byID: byID)
             }
             forceApply = false
-            if let wid = raiseAfterApply, let element = references[wid] {
+            if let wid = raiseAfterApply, let element = references[wid],
+               Diagnostics.attribute(element, kAXMinimizedAttribute) as? Bool == false {
                 AXUIElementPerformAction(element, kAXRaiseAction as CFString)
                 AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
                 log("raised \(wid): app activated without a focused window")
