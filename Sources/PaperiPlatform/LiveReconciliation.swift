@@ -10,11 +10,6 @@ enum LiveReconciliation {
         managedOwner && (!isMinimize || affectsStrip != false)
     }
 
-    static func surveyRetryDelay(now: Double, restoringUntil: Double?) -> Double {
-        if let restoringUntil, now < restoringUntil { return 0.25 }
-        return 5
-    }
-
     /// Map a native top/bottom edge resize to the shared boundary of a stack.
     static func rowResize(layout: Layout, slotID: String, expected: Rect, actual: Rect,
                           gap: Double) -> (divider: Divider, position: Double)? {

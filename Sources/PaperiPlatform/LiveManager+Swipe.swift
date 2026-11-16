@@ -639,23 +639,7 @@ extension LiveManager {
         switch action {
         case .none, .openApp: break
         case .minimize:
-            if let window {
-                let managed = coordinator.spaceForWindow[paperi_window_id(window)] != nil
-                // A suspended stacking repair would raise it back (see minimize(_:)).
-                if managed { neighbourTask?.cancel(); neighbourTask = nil }
-                let result = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
-                // The owner answers no Accessibility call until the Dock effect
-                // ends. A pass now would time out on it, lose its windows from
-                // the survey and place the strip with the gap still open. Wait
-                // for the minimize notification (or the deadline) instead.
-                if managed, result == .success {
-                    minimizeHoldUntil = ProcessInfo.processInfo.systemUptime + 1
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.02) { [weak self] in
-                        MainActor.assumeIsolated { self?.scheduleRefresh() }
-                    }
-                    return
-                }
-            }
+            if let window { requestMinimize(window, holdStrip: true) }
         case .newWindow:
             if let item = Self.newWindowMenuItem(pid: pid),
                AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { return }
@@ -1332,15 +1316,9 @@ extension LiveManager {
     }
 
     /// Minimizes through Accessibility. False when the window refuses.
-    func minimize(_ wid: UInt32) -> Bool {
-        // A stacking repair may be suspended between raises with a stale list
-        // that still includes this window. AXRaise would undo the minimize.
-        neighbourTask?.cancel(); neighbourTask = nil
+    func minimize(_ wid: UInt32, holdStrip: Bool) -> Bool {
         guard let pid = pidForWindow[wid], let element = references[wid] ?? findWindow(wid, pid: pid) else { return false }
-        var settable = DarwinBoolean(false)
-        guard AXUIElementIsAttributeSettable(element, kAXMinimizedAttribute as CFString, &settable) == .success,
-              settable.boolValue else { return false }
-        return AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanTrue) == .success
+        return requestMinimize(element, holdStrip: holdStrip)
     }
 
     /// Committed swipe down: the image leaves through the bottom (under the
@@ -1358,7 +1336,9 @@ extension LiveManager {
                       to: closeFrames(path, progress: 1), spring: spring)
         overlay.fade(wid, to: closeOpacity(1), duration: duration)
         let released = ProcessInfo.processInfo.systemUptime
-        let done = minimize(wid)
+        // The overlay hides the strip and closes the gap itself once the
+        // window has left the screen.
+        let done = minimize(wid, holdStrip: false)
         swipeMetrics["minimize"] = done
         swipeTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(Int(duration * 1000) + 10))
@@ -1612,7 +1592,7 @@ extension LiveManager {
                 _ = openConfiguredApp()
             } else if commit, state.showsNewWindow, let wid = target, let pid = pidForWindow[wid] {
                 _ = Self.openNewWindow(pid: pid, window: wid)
-            } else if commit, state.pulling, state.pullAction == .minimize, let wid = target { _ = minimize(wid) }
+            } else if commit, state.pulling, state.pullAction == .minimize, let wid = target { _ = minimize(wid, holdStrip: true) }
             else if commit, state.closing, (!state.pulling || state.pullAction == .closeTab), let wid = target {
                 if state.showsTabClose && state.tabCloseMode == .app, let pid = pidForWindow[wid] { _ = Self.sendCommandW(to: pid, window: wid) }
                 else { _ = pressClose(wid) }

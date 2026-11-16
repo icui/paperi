@@ -48,11 +48,8 @@ import PaperiCore
     var journal: [UInt32: (pid: pid_t, frame: Rect)] = [:]
     var userFloating: Set<UInt32> = []
     var destroyedNotified: Set<UInt32> = []
-    var minimizedNotified: Set<UInt32> = []
+    var minimizes = MinimizeTracker()
     var pendingReflows = PendingReflows()
-    /// Paperi asked a managed window to minimize; no pass runs until its
-    /// owner reports the minimize or this uptime passes.
-    var minimizeHoldUntil: Double?
     /// Neighbour chosen when the focused window closed (`focusAfterClose`). It
     /// overrides the OS focus briefly, while its raise and app activation land.
     var closeFocus: (window: UInt32, until: Double)?
@@ -100,8 +97,7 @@ import PaperiCore
     var refreshScheduled = false
     /// Apps whose AX requests timed out are skipped briefly so one hung app
     /// cannot stall management of every other app.
-    var slowUntil: [pid_t: Double] = [:]
-    var restoreRetryUntil: [pid_t: Double] = [:]
+    var responsiveness = AppResponsiveness()
     var forceApply = true
     /// After an active-Space change, refreshes re-check real frames for a short
     /// while: macOS and apps (e.g. leaving a fullscreen Space) may move
@@ -147,9 +143,8 @@ import PaperiCore
         running = true; paused = false
         references.removeAll(); pidForWindow.removeAll(); expected.removeAll(); applied.removeAll()
         endDrag(); displaced.removeAll()
-        destroyedNotified.removeAll(); minimizedNotified.removeAll(); pendingReflows = PendingReflows()
-        closeFocus = nil; slowUntil.removeAll(); restoreRetryUntil.removeAll(); forceApply = true
-        minimizeHoldUntil = nil
+        destroyedNotified.removeAll(); minimizes = MinimizeTracker(); pendingReflows = PendingReflows()
+        closeFocus = nil; responsiveness = AppResponsiveness(); forceApply = true
         coordinator = DisplaySpaceCoordinator(ownerPIDs: [], displays: topologies())
         recorder = EventRecorder(workspaceCenter: NSWorkspace.shared.notificationCenter,
                                  runningApplications: { NSWorkspace.shared.runningApplications },
@@ -323,8 +318,11 @@ import PaperiCore
         guard running, let name = event["event"] as? String else { return }
         // The recorder reports an unresolved window as 0, never as a missing key.
         let eventWindow = (event["windowID"] as? UInt32).flatMap { $0 == 0 ? nil : $0 }
-        if name == kAXUIElementDestroyedNotification, let wid = event["windowID"] as? UInt32, wid > 0 {
-            minimizedNotified.remove(wid)
+        if let pid = event["pid"] as? pid_t, name.hasPrefix("AX") {
+            responsiveness.heard(pid, now: ProcessInfo.processInfo.systemUptime)
+        }
+        if name == kAXUIElementDestroyedNotification, let wid = eventWindow {
+            minimizes.forget(wid)
             // The window a swipe-up is closing: its release finishes the overlay.
             if let state = swipe, state.closing, state.released == true, state.closeWindow == wid {
                 destroyedNotified.insert(wid)
@@ -338,23 +336,18 @@ import PaperiCore
             }
         }
         let presentationChanged = [kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification].contains(name)
-        if name == kAXWindowDeminiaturizedNotification, let pid = event["pid"] as? pid_t {
-            slowUntil.removeValue(forKey: pid)
-            restoreRetryUntil[pid] = ProcessInfo.processInfo.systemUptime + 2
-            // Restore may precede the end of the Dock animation and AX readiness.
+        if name == kAXWindowDeminiaturizedNotification {
+            // A restored window may not be listed or ready right away, and no
+            // other event follows. Re-check until it is back in the strip.
             for delay in [0.3, 0.7, 1.3] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                    self?.scheduleRefresh()
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        if let wid = eventWindow, self.coordinator.spaceForWindow[wid] != nil { return }
+                        self.scheduleRefresh()
+                    }
                 }
             }
-        }
-        if name == kAXWindowMiniaturizedNotification, let pid = event["pid"] as? pid_t {
-            // The owner's main thread is blocked for the whole Dock effect, so
-            // a survey during it times out and backs the app off. This event is
-            // posted once the effect ends: the app answers again, and its
-            // surviving windows must be surveyed to animate into the gap.
-            slowUntil.removeValue(forKey: pid)
-            minimizeHoldUntil = nil
         }
         if presentationChanged {
             // The fast focus path uses cached policy facts. Never animate or
@@ -362,8 +355,8 @@ import PaperiCore
             if let wid = eventWindow {
                 latestSurvey.removeValue(forKey: wid)
                 if name == kAXWindowMiniaturizedNotification {
-                    if pidForWindow[wid] != nil { minimizedNotified.insert(wid) }
-                } else { minimizedNotified.remove(wid) }
+                    if pidForWindow[wid] != nil { noteMinimizing(wid) { $0.minimizeNotified(wid) } }
+                } else { minimizes.restoreNotified(wid) }
             } else { latestSurvey.removeAll() }
         }
         let ownMinimize = name == kAXWindowMiniaturizedNotification && swipe.map {
@@ -505,6 +498,12 @@ import PaperiCore
     /// Apps worth an AX survey this pass: those with a normal-level window on
     /// screen (cheap window-server query) or with containers already managed.
     /// Everything else (dozens of background apps) costs nothing.
+    /// Owners playing a minimize Paperi requested: blocked until the Dock
+    /// effect ends, so surveying them would only cost a timeout.
+    func minimizingOwners(now: Double) -> Set<pid_t> {
+        Set(minimizes.pendingWindows(now: now).compactMap { pidForWindow[$0] })
+    }
+
     func appsToSurvey(_ apps: [NSRunningApplication]) -> [NSRunningApplication] {
         let rows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
         var onScreen: Set<pid_t> = []
@@ -513,9 +512,10 @@ import PaperiCore
         }
         let managedOwners = Set(coordinator.spaceForWindow.keys.compactMap { pidForWindow[$0] })
         let now = ProcessInfo.processInfo.systemUptime
+        let minimizing = minimizingOwners(now: now)
         return apps.filter { app in
             let pid = app.processIdentifier
-            guard (slowUntil[pid] ?? 0) <= now else { return false }
+            guard responsiveness.available(pid, now: now), !minimizing.contains(pid) else { return false }
             return onScreen.contains(pid) || managedOwners.contains(pid)
         }
     }
@@ -525,19 +525,25 @@ import PaperiCore
         return spaces[0].uint64Value
     }
 
-    func survey(_ app: NSRunningApplication, levels: [UInt32: Int]) -> [Survey] {
+    /// Nil when the app did not answer: unknown, not "has no windows".
+    func survey(_ app: NSRunningApplication, levels: [UInt32: Int]) -> [Survey]? {
         let pid = app.processIdentifier
         let application = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(application, 0.2)
         var value: CFTypeRef?
         let error = AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value)
         if error == .cannotComplete {
-            let now = ProcessInfo.processInfo.systemUptime
-            let delay = LiveReconciliation.surveyRetryDelay(now: now, restoringUntil: restoreRetryUntil[pid])
-            slowUntil[pid] = now + delay
+            let delay = responsiveness.timedOut(pid, now: ProcessInfo.processInfo.systemUptime)
             log("\(app.bundleIdentifier ?? "pid \(pid)") did not answer AX; skipping for \(delay) s")
-            return []
+            // The 1 s timer covers longer backoffs.
+            if delay < 1 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.01) { [weak self] in
+                    MainActor.assumeIsolated { self?.scheduleRefresh() }
+                }
+            }
+            return nil
         }
+        responsiveness.answered(pid)
         guard error == .success, let windows = value as? [AXUIElement] else { return [] }
         let bundleID = app.bundleIdentifier ?? ""
         return windows.compactMap { ref in
@@ -593,10 +599,7 @@ import PaperiCore
         // trackpad edge resize holds the strip from the moment it is armed.
         if dividerDrag != nil || edgeResize != nil { return }
         if motionActive { return }
-        if let until = minimizeHoldUntil {
-            if ProcessInfo.processInfo.systemUptime < until { return }
-            minimizeHoldUntil = nil
-        }
+        minimizes.expire(now: ProcessInfo.processInfo.systemUptime)
         motionFrames.removeAll()
         if animateCachedFocus() { return }
         // Side-by-side displays are unsupported (the app pauses moments later);
@@ -623,14 +626,13 @@ import PaperiCore
         let apps = allowlistedApps()
         let livePIDs = Set(apps.map(\.processIdentifier))
         for app in apps { coordinator.addOwner(app.processIdentifier) }
-        minimizedNotified = minimizedNotified.filter { wid in
-            pidForWindow[wid].map(livePIDs.contains) == true
-        }
+        minimizes.retain { pidForWindow[$0].map(livePIDs.contains) == true }
+        responsiveness.retain(livePIDs)
 
         // 1. Destruction: native notification, window-server absence, or owner exit.
         let managed = Set(coordinator.spaceForWindow.keys)
         let gone = managed.filter { wid in
-            destroyedNotified.contains(wid) || (levels[wid] == nil && !minimizedNotified.contains(wid)) || pidForWindow[wid].map { !livePIDs.contains($0) } ?? true
+            destroyedNotified.contains(wid) || (levels[wid] == nil && !minimizes.contains(wid)) || pidForWindow[wid].map { !livePIDs.contains($0) } ?? true
         }
         destroyedNotified.removeAll()
         // Spaces whose strip lost a window: the survivors close the gap animated.
@@ -647,7 +649,10 @@ import PaperiCore
         let discoveryStart = ProcessInfo.processInfo.systemUptime
         // 2. Survey allowlisted apps.
         var surveys: [pid_t: [Survey]] = [:]
-        for app in appsToSurvey(apps) where !app.isHidden { surveys[app.processIdentifier] = survey(app, levels: levels) }
+        let minimizingOwners = minimizingOwners(now: discoveryStart)
+        for app in appsToSurvey(apps) where !app.isHidden {
+            if let rows = survey(app, levels: levels) { surveys[app.processIdentifier] = rows }
+        }
         for app in apps where app.isHidden {
             // Hidden apps leave the strip and return at the focused position when shown.
             let windows = coordinator.spaceForWindow.keys.filter { pidForWindow[$0] == app.processIdentifier }
@@ -658,11 +663,18 @@ import PaperiCore
         for (pid, rows) in surveys {
             for row in rows { references[row.windowID] = row.element; pidForWindow[row.windowID] = pid }
         }
-        let priorSurvey = latestSurvey
+        // Decisions use only fresh rows. An app that did not answer (timed
+        // out or backed off) still has its windows: keep their last rows as
+        // the cache, so animations have geometry for its managed windows.
         let byID = Dictionary(surveys.values.flatMap { $0 }.map { ($0.windowID, $0) }, uniquingKeysWith: { a, _ in a })
+        let hiddenPIDs = Set(apps.filter(\.isHidden).map(\.processIdentifier))
+        let carried = latestSurvey.filter { wid, row in
+            surveys[row.pid] == nil && livePIDs.contains(row.pid) && !hiddenPIDs.contains(row.pid)
+                && coordinator.spaceForWindow[wid] != nil
+        }
 
         phaseMS["discovery"] = (ProcessInfo.processInfo.systemUptime - discoveryStart) * 1000
-        latestSurvey = byID
+        latestSurvey = byID.merging(carried) { fresh, _ in fresh }
         let topologyStart = ProcessInfo.processInfo.systemUptime
 
         // 3. Definitive state changes (minimized, fullscreen, floated by the
@@ -671,7 +683,7 @@ import PaperiCore
         // A minimized window leaves like a closed one: the survivors close the
         // gap animated, and focus follows `focusAfterClose`.
         let minimized = Set(byID.filter { $0.value.facts.minimized == true }.keys)
-            .union(minimizedNotified).filter { coordinator.spaceForWindow[$0] != nil && isActiveRepresentative($0) }
+            .union(minimizes.notified).filter { coordinator.spaceForWindow[$0] != nil && isActiveRepresentative($0) }
         if !minimized.isEmpty {
             let members = Set(minimized.flatMap { coordinator.session(containing: $0)?.members(of: $0) ?? [$0] })
             closedSpaces.formUnion(minimized.compactMap { coordinator.spaceForWindow[$0] })
@@ -684,7 +696,7 @@ import PaperiCore
         for wid in minimized { _ = try? coordinator.removeContainer(containing: wid, classification: Self.tiled) }
         // Once the survey confirms the event, ordinary observation owns the
         // state again, including recovery from a missed restore notification.
-        minimizedNotified.subtract(byID.filter { $0.value.facts.minimized == true }.keys)
+        for (wid, row) in byID { minimizes.observe(wid, minimized: row.facts.minimized) }
         for (wid, row) in byID where coordinator.spaceForWindow[wid] != nil &&
             (row.facts.fullscreen == true || row.floatRequested) {
             if isActiveRepresentative(wid) { _ = try? coordinator.removeContainer(containing: wid, classification: Self.tiled) }
@@ -723,7 +735,7 @@ import PaperiCore
             for space in activeSpaces {
                 guard let session = coordinator.sessions[space] else { continue }
                 let candidates = Set(rows.filter {
-                    $0.spaceID == space && $0.classification.eligibility == .tiled && !minimizedNotified.contains($0.windowID)
+                    $0.spaceID == space && $0.classification.eligibility == .tiled && !minimizes.contains($0.windowID)
                         && coordinator.spaceForWindow[$0.windowID] == nil
                 }.map(\.windowID))
                 let mine = Set(session.slots.keys.filter { pidForWindow[$0] == pid })
@@ -766,10 +778,19 @@ import PaperiCore
         pendingReflows.record(spaces: closedSpaces, layouts: layoutsBeforeClose)
         closedSpaces.formUnion(pendingReflows.layouts.keys)
 
+        // Spaces waiting for an owner to confirm Paperi's minimize request:
+        // state is reconciled, but their focus, adoption and writes wait.
+        let heldSpaces = minimizes.pendingSpaces(now: ProcessInfo.processInfo.systemUptime)
+
         // 6. Focus: only an allowlisted, managed representative enables commands.
+        // An app playing a minimize Paperi requested gives no focus evidence:
+        // the read would time out, and the fallback below would pick the
+        // sibling it keeps behind, overriding `focusAfterClose`. Other slow
+        // apps keep the fallback (see STATUS: activation without a click).
         let front = NSWorkspace.shared.frontmostApplication
+        let frontUnanswered = front.map { minimizingOwners.contains($0.processIdentifier) } == true
         var focusedWindow: UInt32?
-        if let front, livePIDs.contains(front.processIdentifier) {
+        if let front, livePIDs.contains(front.processIdentifier), !frontUnanswered {
             let application = AXUIElementCreateApplication(front.processIdentifier)
             AXUIElementSetMessagingTimeout(application, 0.2)
             if let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute),
@@ -783,7 +804,7 @@ import PaperiCore
         // window. Treat its frontmost managed window as focused so the strip
         // reveals it, and raise it after placement so it takes key focus.
         var raiseAfterApply: UInt32?
-        if let front, livePIDs.contains(front.processIdentifier), focusedWindow == nil {
+        if let front, livePIDs.contains(front.processIdentifier), !frontUnanswered, focusedWindow == nil {
             let pid = front.processIdentifier
             focusedWindow = Self.frontToBack().first { id in
                 self.pidForWindow[id] == pid && self.coordinator.spaceForWindow[id].map(activeSpaces.contains) == true
@@ -792,6 +813,7 @@ import PaperiCore
             raiseAfterApply = focusedWindow
         }
         var focusedPID = front?.processIdentifier
+        var focusKnown = !frontUnanswered
         if let hold = closeFocus {
             // A click (or the target being reached, gone, or overdue) ends the hold.
             if mouseDown || focusedWindow == hold.window || ProcessInfo.processInfo.systemUptime > hold.until
@@ -799,16 +821,18 @@ import PaperiCore
                 closeFocus = nil
             } else {
                 focusedWindow = hold.window; focusedPID = pidForWindow[hold.window]
-                raiseAfterApply = nil
+                raiseAfterApply = nil; focusKnown = true
             }
         }
         var focusAnimationSpace: UInt64?
-        for (space, session) in coordinator.sessions where activeSpaces.contains(space) {
+        for (space, session) in coordinator.sessions where activeSpaces.contains(space) && !heldSpaces.contains(space) {
             let previousOffset = session.state.layout.offset
             let owned = focusedWindow.flatMap { session.slots[$0] != nil ? $0 : nil }
             let classification = owned != nil ? Self.tiled : WindowPolicy.classify(WindowFacts(bundleID: "foreign"))
-            try? session.focus(windowID: owned, ownerPID: owned != nil ? focusedPID : nil,
-                               classification: classification, ticket: session.ticket)
+            if focusKnown {
+                try? session.focus(windowID: owned, ownerPID: owned != nil ? focusedPID : nil,
+                                   classification: classification, ticket: session.ticket)
+            }
             if !mouseDown, closedSpaces.contains(space), let previous = pendingReflows.layouts[space],
                let offset = LiveReconciliation.offsetAfterTrailingClose(previous: previous,
                     current: session.state.layout, canvas: session.canvas, gap: options.gap) {
@@ -826,12 +850,14 @@ import PaperiCore
             }
         }
         if focusAnimationSpace == nil, !forceApply, ProcessInfo.processInfo.systemUptime >= forceUntil {
-            focusAnimationSpace = closedSpaces.first { activeSpaces.contains($0) && coordinator.sessions[$0] != nil }
+            focusAnimationSpace = closedSpaces.first {
+                activeSpaces.contains($0) && !heldSpaces.contains($0) && coordinator.sessions[$0] != nil
+            }
         }
 
         // 7. Adopt native edge resizes on active representatives (on mouse up).
         let now = ProcessInfo.processInfo.systemUptime
-        for space in activeSpaces {
+        for space in activeSpaces where !heldSpaces.contains(space) {
             guard let session = coordinator.sessions[space],
                   let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { continue }
             for placement in placements {
@@ -867,7 +893,7 @@ import PaperiCore
         // window it swaps, stacks or splits out (by zone), then snaps into its slot.
         if !mouseDown, drag != nil { finishDrag() }
         if !forceApply, now >= forceUntil {
-            for space in activeSpaces {
+            for space in activeSpaces where !heldSpaces.contains(space) {
                 guard let session = coordinator.sessions[space],
                       let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { continue }
                 for placement in placements {
@@ -905,19 +931,18 @@ import PaperiCore
                 var animationSurvey = byID
                 if placements.contains(where: { byID[$0.windowID] == nil }),
                    let cached = cachedStripSurveys(space: space, placements: placements,
-                       source: priorSurvey.merging(byID) { _, fresh in fresh }) {
+                       source: latestSurvey) {
                     animationSurvey = cached
                 }
                 animateFocus(space: space, byID: animationSurvey)
             }
             // Keep the removal baseline until its animation actually finishes.
             // If an event interrupts it, the next pass must still animate.
-            var completedSpaces = activeSpaces
+            var completedSpaces = activeSpaces.subtracting(heldSpaces)
             if motionTimer != nil, let motionSpace { completedSpaces.remove(motionSpace) }
             pendingReflows.complete(spaces: completedSpaces)
             forceApply = false
-            if let wid = raiseAfterApply, let element = references[wid],
-               Diagnostics.attribute(element, kAXMinimizedAttribute) as? Bool == false {
+            if let wid = raiseAfterApply, let element = raisable(wid) {
                 AXUIElementPerformAction(element, kAXRaiseAction as CFString)
                 AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
                 log("raised \(wid): app activated without a focused window")
@@ -997,7 +1022,7 @@ import PaperiCore
             _ = try? coordinator.reconcileTabs(in: space, partitions: parts, destroyed: destroyed, classification: Self.tiled)
         }
         for wid in gone {
-            minimizedNotified.remove(wid)
+            minimizes.forget(wid)
             references.removeValue(forKey: wid); pidForWindow.removeValue(forKey: wid)
             expected.removeValue(forKey: wid); preferredWidth.removeValue(forKey: wid)
             if journal.removeValue(forKey: wid) != nil { persistJournal() }
@@ -1025,6 +1050,8 @@ import PaperiCore
     var motionTicks = 0
     var motionSpace: UInt64?
     var motionTimer: Timer?
+    /// Call site and uptime of the last interrupted animation (status only).
+    var motionCancelledAt: String?
     var motionBounce: Direction?
     var motionGeneration: UInt64 = 0
     var motionFrames: [UInt32: Rect] = [:]
@@ -1065,7 +1092,16 @@ import PaperiCore
 
     var applied: [UInt64: [Placement]] = [:]
 
+    /// A Space whose owner has not yet confirmed Paperi's minimize request.
+    /// Its windows cannot be moved until the Dock effect ends; a write now
+    /// would time out or land with the gap still open. Every window effect
+    /// checks this here, at its entry point, rather than at each caller.
+    func effectsHeld(_ space: UInt64) -> Bool {
+        minimizes.pendingSpaces(now: ProcessInfo.processInfo.systemUptime).contains(space)
+    }
+
     func apply(space: UInt64, byID: [UInt32: Survey]) {
+        guard !effectsHeld(space) else { applied.removeValue(forKey: space); return }
         guard let session = coordinator.sessions[space],
               let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { return }
         let forced = forceApply || ProcessInfo.processInfo.systemUptime < forceUntil

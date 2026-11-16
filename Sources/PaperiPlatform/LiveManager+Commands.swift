@@ -78,11 +78,7 @@ extension LiveManager {
                 @MainActor func raise(_ id: UInt32, until done: ([UInt32]) -> Bool) async {
                     // Every await can outlive a minimize or a layout change.
                     // Revalidate at the effect, rather than using the old strip.
-                    guard !Task.isCancelled,
-                          self.coordinator.spaceForWindow[id] == space,
-                          self.isActiveRepresentative(id),
-                          let element = self.references[id],
-                          Diagnostics.attribute(element, kAXMinimizedAttribute) as? Bool == false else { return }
+                    guard !Task.isCancelled, let element = self.raisable(id, in: space) else { return }
                     AXUIElementPerformAction(element, kAXRaiseAction as CFString)
                     for _ in 0..<10 where !done(stack()) {
                         guard !Task.isCancelled else { return }
@@ -92,11 +88,7 @@ extension LiveManager {
                 let siblings = neighbours.filter { self.pidForWindow[$0] == pid }
                 for id in siblings { await raise(id) { $0.first == id } }
                 if !siblings.isEmpty {
-                    guard !Task.isCancelled,
-                          self.coordinator.spaceForWindow[wid] == space,
-                          self.isActiveRepresentative(wid),
-                          let element = self.references[wid],
-                          Diagnostics.attribute(element, kAXMinimizedAttribute) as? Bool == false else { return }
+                    guard !Task.isCancelled, let element = self.raisable(wid, in: space) else { return }
                     AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
                     await raise(wid) { $0.first == wid }
                 }
@@ -125,10 +117,51 @@ extension LiveManager {
         windowIndicators.update(coordinator, mode: options.config.bottomDotsVisibility, redrawSpace: space)
     }
 
+    /// The one check before any raise: raising a minimized window restores
+    /// it. With `space`, the window must also still be that Space's active
+    /// representative (a stacking repair may run long after it was planned).
+    /// An unanswered read counts as minimized.
+    func raisable(_ wid: UInt32, in space: UInt64? = nil) -> AXUIElement? {
+        guard let pid = pidForWindow[wid], !minimizes.contains(wid) else { return nil }
+        if let space {
+            guard coordinator.spaceForWindow[wid] == space, isActiveRepresentative(wid) else { return nil }
+        }
+        guard let element = references[wid] ?? findWindow(wid, pid: pid),
+              Diagnostics.attribute(element, kAXMinimizedAttribute) as? Bool == false else { return nil }
+        return element
+    }
+
+    /// Every minimize state change goes through here. A suspended stacking
+    /// repair holds a stale list that may include the window, and its raise
+    /// would undo the minimize, so it is cancelled first.
+    func noteMinimizing(_ wid: UInt32, _ change: (inout MinimizeTracker) -> Void) {
+        neighbourTask?.cancel(); neighbourTask = nil
+        change(&minimizes)
+    }
+
+    /// Every minimize Paperi requests. With `holdStrip`, the window's Space
+    /// keeps its windows still until the owner confirms (see `effectsHeld`);
+    /// a caller that animates the gap itself (the swipe overlay) passes false.
+    @discardableResult func requestMinimize(_ element: AXUIElement, holdStrip: Bool) -> Bool {
+        let wid = paperi_window_id(element)
+        let space = wid == 0 ? nil : coordinator.spaceForWindow[wid]
+        var settable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(element, kAXMinimizedAttribute as CFString, &settable) == .success,
+              settable.boolValue else { return false }
+        if space != nil { neighbourTask?.cancel(); neighbourTask = nil }
+        guard AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanTrue) == .success else { return false }
+        if holdStrip, let space {
+            noteMinimizing(wid) { $0.requested(wid, space: space, now: ProcessInfo.processInfo.systemUptime) }
+            // Release the hold even if the app never confirms.
+            DispatchQueue.main.asyncAfter(deadline: .now() + MinimizeTracker.requestTimeout + 0.02) { [weak self] in
+                MainActor.assumeIsolated { self?.scheduleRefresh() }
+            }
+        }
+        return true
+    }
+
     func raise(_ wid: UInt32) -> Bool {
-        guard let pid = pidForWindow[wid], let element = references[wid] ?? findWindow(wid, pid: pid) else { return false }
-        // Focus repair must never implicitly restore a minimized window.
-        guard Diagnostics.attribute(element, kAXMinimizedAttribute) as? Bool == false else { return false }
+        guard let pid = pidForWindow[wid], let element = raisable(wid) else { return false }
         AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
         AXUIElementPerformAction(element, kAXRaiseAction as CFString)
         NSRunningApplication(processIdentifier: pid)?.activate()
@@ -236,7 +269,7 @@ extension LiveManager {
         for row in CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? [] {
             if let id = row[kCGWindowNumber as String] as? UInt32 { levels[id] = row[kCGWindowLayer as String] as? Int ?? 0 }
         }
-        let rows = appsToSurvey(allowlistedApps()).filter { !$0.isHidden }.flatMap { survey($0, levels: levels) }
+        let rows = appsToSurvey(allowlistedApps()).filter { !$0.isHidden }.flatMap { survey($0, levels: levels) ?? [] }
         for row in rows { references[row.windowID] = row.element; pidForWindow[row.windowID] = row.pid }
         return Dictionary(rows.map { ($0.windowID, $0) }, uniquingKeysWith: { a, _ in a })
     }
@@ -309,7 +342,7 @@ extension LiveManager {
                     tabGroupChildren[wid] = children.contains { nodes.indices.contains($0) && nodes[$0]["AXRole"] as? String == "AXTabGroup" }
                 }
             }
-            let windows = probe.survey(app, levels: levels).map { row -> [String: Any] in
+            let windows = (probe.survey(app, levels: levels) ?? []).map { row -> [String: Any] in
                 let group = groups.first { $0.members.contains(row.windowID) }
                 let decision: String
                 if row.classification.reason == "user floating" { decision = "floating (config rule)" }
@@ -362,6 +395,7 @@ extension LiveManager {
                     "animationTicks": motionTicks, "failedAnimationWindows": motionFailed.sorted(),
                     "lastTickMS": tickMS, "overBudgetTicks": missedTicks,
                     "swipe": swipeMetrics,
+                    "lastAnimationCancel": motionCancelledAt as Any? ?? NSNull(),
                     "animationActive": motionActive]]
     }
 }

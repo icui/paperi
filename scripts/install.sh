@@ -35,7 +35,8 @@ if pgrep -f "$binary" >/dev/null 2>&1; then
 fi
 mkdir -p "$HOME/Applications"
 rm -rf "$dest"
-cp -R dist/Paperi.app "$dest"
+# Keep only the installed bundle so Spotlight does not list a second app in dist.
+mv dist/Paperi.app "$dest"
 printf 'Installed %s\n' "$dest"
 if [ "$launch" -eq 1 ]; then
     open "$dest"

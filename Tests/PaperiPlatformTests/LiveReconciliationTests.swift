@@ -12,13 +12,6 @@ import PaperiCore
         #expect(!LiveReconciliation.presentationInterruptsMotion(isMinimize: false, managedOwner: false, affectsStrip: false))
     }
 
-    @Test func restoreRetriesBrieflyWithoutDisablingHungAppBackoff() {
-        #expect(LiveReconciliation.surveyRetryDelay(now: 10, restoringUntil: nil) == 5)
-        #expect(LiveReconciliation.surveyRetryDelay(now: 10, restoringUntil: 12) == 0.25)
-        #expect(LiveReconciliation.surveyRetryDelay(now: 12, restoringUntil: 12) == 5)
-        #expect(LiveReconciliation.surveyRetryDelay(now: 13, restoringUntil: 12) == 5)
-    }
-
     @Test func removalAnimationSurvivesRefreshesWhileMouseIsHeld() {
         let before = Layout(columns: [Column(slots: [Slot(id: "1", members: [1], activeMember: 1)], width: 400)], focused: "1")
         var pending = PendingReflows()

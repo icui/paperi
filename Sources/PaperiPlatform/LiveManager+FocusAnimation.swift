@@ -6,6 +6,11 @@ import PaperiCore
 /// Keyboard focus scroll: position-only AX writes on real windows.
 extension LiveManager {
     func cancelMotion(file: String = #fileID, line: Int = #line) {
+        // A running focus or gap animation cut short. Completion stops its
+        // timer first, so only interruptions are recorded.
+        if motionTimer != nil {
+            motionCancelledAt = "\(file):\(line) at \(String(format: "%.3f", ProcessInfo.processInfo.systemUptime))"
+        }
         cancelSwipe(file: file, line: line)
         motionGeneration &+= 1
         motionTimer?.invalidate(); motionTimer = nil
@@ -49,21 +54,27 @@ extension LiveManager {
     /// WindowServer frames; nil when any of them is unknown, not tiled, or
     /// not on that Space (the caller then takes the full refresh path).
     func cachedStripSurveys(space: UInt64, placements: [Placement], source: [UInt32: Survey]? = nil) -> [UInt32: Survey]? {
+        guard !effectsHeld(space) else { return nil }
         let source = source ?? latestSurvey
         guard let rows = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else { return nil }
         var frames: [UInt32: Rect] = [:]
+        var onScreen: Set<UInt32> = []
         for row in rows {
             guard let id = row[kCGWindowNumber as String] as? UInt32,
                   let bounds = row[kCGWindowBounds as String] as? [String: Any],
                   let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { continue }
             frames[id] = Rect(x: frame.origin.x, y: frame.origin.y, width: frame.width, height: frame.height)
+            if row[kCGWindowIsOnscreen as String] as? Bool == true { onScreen.insert(id) }
         }
         var surveys: [UInt32: Survey] = [:]
         for placement in placements {
             let id = placement.windowID
             guard let cached = source[id], cached.spaceID == space,
                   cached.classification.eligibility == .tiled,
-                  Diagnostics.attribute(cached.element, kAXMinimizedAttribute) as? Bool == false,
+                  // WindowServer, not the app: a minimized window is ordered
+                  // out (managed windows keep a sliver on screen otherwise),
+                  // and a busy app cannot stall or refuse this check.
+                  onScreen.contains(id), !minimizes.contains(id),
                   let frame = frames[id], Self.windowSpace(id) == space else { return nil }
             surveys[id] = Survey(windowID: id, pid: cached.pid, element: cached.element,
                                  classification: cached.classification, facts: cached.facts,
@@ -74,6 +85,7 @@ extension LiveManager {
 
     /// One target calculation, position-only ticks, no discovery in the scheduler.
     func animateFocus(space: UInt64, byID: [UInt32: Survey], bounce: Direction? = nil) {
+        guard !effectsHeld(space) else { applied.removeValue(forKey: space); return }
         // Key repeat must not stack excursions or keep restarting the return.
         if let bounce, motionTimer != nil, motionBounce == bounce, motionSpace == space { return }
         let configuredDuration = options.config.focusScrollDuration ?? 0.22
@@ -160,6 +172,7 @@ extension LiveManager {
                 if progress >= 1 {
                     self.finalWriteMS = (ProcessInfo.processInfo.systemUptime - self.commandStarted) * 1000
                     self.pendingReflows.complete(spaces: [space])
+                    self.motionTimer?.invalidate(); self.motionTimer = nil
                     self.cancelMotion(); self.motionFrames.removeAll()
                     self.applied.removeValue(forKey: space)
                     self.confirmFocus(targets: targets, generation: self.motionGeneration, attempts: 3)
