@@ -28,7 +28,7 @@ extension LiveManager {
               CFGetTypeID(value) == AXUIElementGetTypeID() else { return false }
         let wid = paperi_window_id((value as! AXUIElement))
         guard pidForWindow[wid] == front.processIdentifier, isActiveRepresentative(wid),
-              let space = coordinator.spaceForWindow[wid],
+              let space = coordinator.spaceForWindow[wid], pendingReflows.layouts[space] == nil,
               Self.windowSpace(wid) == space,
               coordinator.display(forSpace: space)?.activeSpaceID == space,
               let session = coordinator.sessions[space], !session.state.interactionSuppressed,
@@ -48,7 +48,8 @@ extension LiveManager {
     /// Cached surveys for every window placed on `space`, carrying current
     /// WindowServer frames; nil when any of them is unknown, not tiled, or
     /// not on that Space (the caller then takes the full refresh path).
-    func cachedStripSurveys(space: UInt64, placements: [Placement]) -> [UInt32: Survey]? {
+    func cachedStripSurveys(space: UInt64, placements: [Placement], source: [UInt32: Survey]? = nil) -> [UInt32: Survey]? {
+        let source = source ?? latestSurvey
         guard let rows = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else { return nil }
         var frames: [UInt32: Rect] = [:]
         for row in rows {
@@ -60,7 +61,7 @@ extension LiveManager {
         var surveys: [UInt32: Survey] = [:]
         for placement in placements {
             let id = placement.windowID
-            guard let cached = latestSurvey[id], cached.spaceID == space,
+            guard let cached = source[id], cached.spaceID == space,
                   cached.classification.eligibility == .tiled,
                   Diagnostics.attribute(cached.element, kAXMinimizedAttribute) as? Bool == false,
                   let frame = frames[id], Self.windowSpace(id) == space else { return nil }
@@ -158,6 +159,7 @@ extension LiveManager {
                 if self.tickMS > 1000 / 60 { self.missedTicks += 1 }
                 if progress >= 1 {
                     self.finalWriteMS = (ProcessInfo.processInfo.systemUptime - self.commandStarted) * 1000
+                    self.pendingReflows.complete(spaces: [space])
                     self.cancelMotion(); self.motionFrames.removeAll()
                     self.applied.removeValue(forKey: space)
                     self.confirmFocus(targets: targets, generation: self.motionGeneration, attempts: 3)

@@ -1378,7 +1378,10 @@ extension LiveManager {
             overlay.fadeOut(); self.swipe = nil; self.swipeTask = nil; self.resumeDeferredGestureSoon()
             // Sizes changed (e.g. a stacked column): images cannot show that,
             // so the real windows move after the fade.
-            if let space = instantSpace { self.animateFocus(space: space, byID: self.latestSurvey) }
+            // The minimize notification invalidates latestSurvey. The swipe
+            // retains geometry for the survivors; using the invalidated cache
+            // here would skip their animation and jump straight to placement.
+            if let space = instantSpace { self.animateFocus(space: space, byID: path.surveys) }
             self.swipeMetrics["state"] = gone ? "minimized" : (done ? "minimizeUnconfirmed" : "minimizeRefused")
             self.swipeMetrics["minimizeMS"] = (ProcessInfo.processInfo.systemUptime - released) * 1000
             self.swipeMetrics["totalMS"] = (ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 1000

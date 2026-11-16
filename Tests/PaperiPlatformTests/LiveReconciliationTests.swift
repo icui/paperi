@@ -4,6 +4,28 @@ import PaperiCore
 @testable import PaperiPlatform
 
 @MainActor struct LiveReconciliationTests {
+    @Test func restoreRetriesBrieflyWithoutDisablingHungAppBackoff() {
+        #expect(LiveReconciliation.surveyRetryDelay(now: 10, restoringUntil: nil) == 5)
+        #expect(LiveReconciliation.surveyRetryDelay(now: 10, restoringUntil: 12) == 0.25)
+        #expect(LiveReconciliation.surveyRetryDelay(now: 12, restoringUntil: 12) == 5)
+        #expect(LiveReconciliation.surveyRetryDelay(now: 13, restoringUntil: 12) == 5)
+    }
+
+    @Test func removalAnimationSurvivesRefreshesWhileMouseIsHeld() {
+        let before = Layout(columns: [Column(slots: [Slot(id: "1", members: [1], activeMember: 1)], width: 400)], focused: "1")
+        var pending = PendingReflows()
+        pending.record(spaces: [1, 2], layouts: [1: before, 2: before])
+        // A subsequent survey already sees the removal. It must not erase
+        // the baseline needed to animate when the button is released.
+        pending.record(spaces: [1], layouts: [1: Layout()])
+        #expect(pending.layouts[1] == before)
+        pending.complete(spaces: [1])
+        #expect(pending.layouts[1] == nil)
+        #expect(pending.layouts[2] == before)
+        pending.complete(spaces: [2])
+        #expect(pending.layouts.isEmpty)
+    }
+
     @Test func snapshotDepthKeepsNearestEdgesAboveParkedWindows() {
         let canvas = Rect(x: 10, y: 0, width: 1000, height: 800)
         func depth(_ x: Double, width: Double = 500) -> Double {

@@ -3,6 +3,11 @@ import PaperiCore
 
 /// Pure helpers for the live manager. No OS effects run here.
 enum LiveReconciliation {
+    static func surveyRetryDelay(now: Double, restoringUntil: Double?) -> Double {
+        if let restoringUntil, now < restoringUntil { return 0.25 }
+        return 5
+    }
+
     /// Map a native top/bottom edge resize to the shared boundary of a stack.
     static func rowResize(layout: Layout, slotID: String, expected: Rect, actual: Rect,
                           gap: Double) -> (divider: Divider, position: Double)? {
@@ -210,5 +215,18 @@ enum LiveReconciliation {
             deviation = max(deviation, abs(now.x - target.x), abs(now.y - target.y))
         }
         return (settled, landing, deviation)
+    }
+}
+
+/// Retain the layout before a removal until its effects can run on mouse-up.
+struct PendingReflows {
+    private(set) var layouts: [UInt64: Layout] = [:]
+
+    mutating func record(spaces: Set<UInt64>, layouts current: [UInt64: Layout]) {
+        for space in spaces where layouts[space] == nil { layouts[space] = current[space] }
+    }
+
+    mutating func complete(spaces: Set<UInt64>) {
+        for space in spaces { layouts.removeValue(forKey: space) }
     }
 }
