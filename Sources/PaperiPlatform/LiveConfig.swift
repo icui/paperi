@@ -133,8 +133,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             } else {
                 swipeDown = d.swipeDown
             }
-            if [swipeUp, swipeUpRight, swipeUpLeft, swipeDown, swipeDownRight, swipeDownLeft].contains(.openApp), swipeDownApp == nil {
-                throw DecodingError.dataCorruptedError(forKey: .swipeDownApp, in: c, debugDescription: "openApp requires swipeDownApp (an app bundle ID)")
+            if [swipeUp, swipeUpRight, swipeUpLeft, swipeDown, swipeDownRight, swipeDownLeft].contains(where: \.opensApp), swipeDownApp == nil {
+                throw DecodingError.dataCorruptedError(forKey: .swipeDownApp, in: c, debugDescription: "openApp/openAppWindow requires swipeDownApp (an app bundle ID)")
             }
         }
 
@@ -161,7 +161,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
 
     /// Actions shared by all six directional swipe assignments.
     public enum SwipeDownAction: String, Codable, Equatable, Sendable, CaseIterable {
-        case closeTab, minimize, newWindow, openApp, none
+        case closeTab, minimize, newWindow, openApp, openAppWindow, none
         case focusLeft, focusRight, focusUp, focusDown, tray
         case swapLeft, swapRight, swapUp, swapDown
         case alignLeft, center, alignRight, split, splitRight, slurp, barf, float
@@ -185,7 +185,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             case .heightIncrease: return ["height", "+"]
             case .heightDecrease: return ["height", "-"]
             case .tray, .center, .split, .slurp, .barf, .float: return [rawValue]
-            case .closeTab, .minimize, .newWindow, .openApp, .none: return nil
+            case .closeTab, .minimize, .newWindow, .openApp, .openAppWindow, .none: return nil
             }
         }
 
@@ -195,13 +195,17 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             case .minimize: return "Minimize Window"
             case .newWindow: return "New Window"
             case .openApp: return "Open Application"
+            case .openAppWindow: return "Open New Application Window"
             case .none: return "None"
             default: return HotKeyBindings.actionLabel(command!.joined(separator: " "))
             }
         }
 
+        /// Acts on the app configured in `swipeDownApp`.
+        public var opensApp: Bool { self == .openApp || self == .openAppWindow }
+
         public static var groups: [(String, [Self])] { [
-            ("Window Actions", [.newWindow, .closeTab, .minimize, .openApp, .float]),
+            ("Window Actions", [.newWindow, .closeTab, .minimize, .openApp, .openAppWindow, .float]),
             ("Navigation", [.focusLeft, .focusRight, .focusUp, .focusDown, .tray]),
             ("Move Windows", [.swapLeft, .swapRight, .swapUp, .swapDown]),
             ("Column Layout", [.alignLeft, .center, .alignRight, .split, .splitRight, .slurp, .barf]),

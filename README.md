@@ -63,9 +63,9 @@ The window follows your fingers. Move far enough, or flick, to close it on relea
 
 ![Animated illustration of a downward gesture changing from New Window to Close Tab after turning right](assets/demos/close-tab.gif)
 
-Swipe down to **New Window**, down then right for **Split with right**, or down then left to **Minimize**. Turn without lifting, then continue in that direction and release to commit; a short turn cancels. Configure each with `gesture.swipeDown`, `gesture.swipeDownRight`, and `gesture.swipeDownLeft`: `closeTab`, `newWindow`, `openApp`, `minimize`, or `none`. Downward gestures also work when a popup or the desktop has focus; actions target the frontmost app unless `openApp` selects a specific app, and minimizing requires a window. Splits require a managed focused column with a neighbor.
+Swipe down to **New Window**, down then right for **Split with right**, or down then left to **Minimize**. Turn without lifting, then continue in that direction and release to commit; a short turn cancels. Configure each with `gesture.swipeDown`, `gesture.swipeDownRight`, and `gesture.swipeDownLeft`: `closeTab`, `newWindow`, `openApp`, `openAppWindow`, `minimize`, or `none`. Downward gestures also work when a popup or the desktop has focus; actions target the frontmost app unless `openApp` selects a specific app, and minimizing requires a window. Splits require a managed focused column with a neighbor.
 
-New-window creation uses the app's **New Window** menu item, falling back to ⌘N when no matching item is available. To open a window of a specific app, set `gesture.swipeDown` to `openApp` and `gesture.swipeDownApp` to its bundle ID (for example, `com.apple.Terminal`). Paperi launches the app if needed or requests a new window if it is running. You can also change swipe down to minimize, or disable it.
+New-window creation uses the app's **New Window** menu item, falling back to ⌘N when no matching item is available. To open a window of a specific app, set `gesture.swipeDown` to `openApp` and `gesture.swipeDownApp` to its bundle ID (for example, `com.apple.Terminal`). Paperi launches the app if needed or requests a new window if it is running. If the app is already frontmost and listed in `gesture.tabCloseApps`, `openApp` opens a new tab instead (its **New Tab** menu item, else ⌘T), falling back to a new window. `openAppWindow` always opens a new window. You can also change swipe down to minimize, or disable it.
 
 ### Resize with Shift
 
@@ -180,14 +180,14 @@ The six command keys are `swipeUp`, `swipeUpRight`, `swipeUpLeft`,
 `swipeDown`, `swipeDownRight`, and `swipeDownLeft`, within `gesture`.
 The action menus group window actions, navigation, swapping, column layout,
 and sizing into submenus. In JSON, actions include `closeTab`, `minimize`,
-`newWindow`, `openApp`, `none`, `focusLeft/Right/Up/Down`,
+`newWindow`, `openApp`, `openAppWindow`, `none`, `focusLeft/Right/Up/Down`,
 `swapLeft/Right/Up/Down`, `alignLeft`, `center`, `alignRight`, `split`, `splitRight`,
 `slurp`, `barf`, `float`, `tray`, `widthIncrease/Decrease`, and
 `heightIncrease/Decrease` (slash-separated suffixes denote separate values).
 Sizing commands change the dimension by 10% of the usable screen.
 Turns begin with a vertical swipe, followed by a deliberate sideways motion.
 Command assignments are retained when switching to Window Animation.
-Defaults retain upward animation and downward commands; `openApp` commands
+Defaults retain upward animation and downward commands; `openApp` and `openAppWindow` commands
 share the application bundle ID in `gesture.swipeDownApp`.
 
 CLI help is grouped by purpose: `paperi help` lists everyday commands,

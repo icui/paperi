@@ -217,12 +217,12 @@ private struct SettingsView: View {
                       Setting(id: "gesture.swipeDown", title: "Swipe down", detail: "Action for a downward swipe.", choices: actions),
                       Setting(id: "gesture.swipeDownRight", title: "Swipe down, then right", detail: "Action after turning right.", choices: actions),
                       Setting(id: "gesture.swipeDownLeft", title: "Swipe down, then left", detail: "Action after turning left.", choices: actions),
-                      Setting(id: "gesture.swipeDownApp", title: "Open application", detail: "App bundle ID shared by all openApp actions."),
+                      Setting(id: "gesture.swipeDownApp", title: "Open application", detail: "App bundle ID shared by all Open Application actions."),
                       Setting(id: "gesture.tap", title: "Tap", detail: "Action for a quick multi-finger tap.", choices: ["tray", "none"])])
     ] }
     /// Settings whose entries are app bundle IDs, one per line.
     private static let appListFields: Set<String> = ["include", "exclude", "singleton", "strictTabDetection", "autoStack", "gesture.tabCloseApps"]
-    private var actions: [String] { ["newWindow", "closeTab", "minimize", "openApp", "none"] }
+    private var actions: [String] { ["newWindow", "closeTab", "minimize", "openApp", "openAppWindow", "none"] }
     private var categoryIcons: [String: String] {
         ["Layout": "rectangle.split.3x1", "Appearance": "paintpalette", "Applications": "app.badge",
          "Gestures": "hand.draw", "Shortcuts": "keyboard", "General": "gearshape"]

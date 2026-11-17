@@ -119,10 +119,14 @@ struct LiveConfigTests {
         let config = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"swipeDown":"openApp","swipeDownApp":"com.apple.Terminal"}}"#.utf8))
         #expect(config.gesture.swipeDown == .openApp)
         #expect(config.gesture.swipeDownApp == "com.apple.Terminal")
+        let window = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"swipeDownLeft":"openAppWindow","swipeDownApp":"com.apple.Terminal"}}"#.utf8))
+        #expect(window.gesture.swipeDownLeft == .openAppWindow)
+        #expect(window.gesture.swipeDownLeft.title == "Open New Application Window")
         #expect(try JSONDecoder().decode(LiveConfig.self, from: JSONEncoder().encode(config)) == config)
         for json in [
             #"{"gesture":{"swipeDown":"openApp"}}"#,
             #"{"gesture":{"swipeDownRight":"openApp"}}"#,
+            #"{"gesture":{"swipeUpLeft":"openAppWindow"}}"#,
             #"{"gesture":{"swipeDown":"openApp","swipeDownApp":" "}}"#
         ] {
             #expect(throws: DecodingError.self) {

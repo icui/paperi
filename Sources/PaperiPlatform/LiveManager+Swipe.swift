@@ -35,7 +35,7 @@ extension LiveManager {
         /// sends the app's own close-tab shortcut, ⌘W.
         var tabCloseMode: TabClose? { pulling ? tabClose ?? .app : tabClose }
         /// The new-window indicator replaces moving the window.
-        var showsNewWindow: Bool { closing && pulling && (pullAction == .newWindow || pullAction == .openApp) }
+        var showsNewWindow: Bool { closing && pulling && (pullAction == .newWindow || pullAction.opensApp) }
         var showsIndicator: Bool { showsTabClose || showsNewWindow }
         var indicatorStyle: GestureIndicatorStyle {
             var style: GestureIndicatorStyle = pullAction == .minimize && pulling ? .minimize : showsNewWindow ? .newWindow : .closeTab
@@ -244,8 +244,8 @@ extension LiveManager {
         }
         standaloneAction = action
         guard action != .none else { return }
-        var style: GestureIndicatorStyle = (action == .newWindow || action == .openApp) ? .newWindow : action == .minimize ? .minimize : .closeTab
-        if action.command != nil || action == .openApp {
+        var style: GestureIndicatorStyle = (action == .newWindow || action.opensApp) ? .newWindow : action == .minimize ? .minimize : .closeTab
+        if action.command != nil || action.opensApp {
             style = GestureIndicatorStyle(label: action.title, armedLabel: "Release to " + action.title,
                 plus: true, armedColor: NSColor.systemBlue.cgColor, direction: standaloneHintDirection)
         }
@@ -625,7 +625,7 @@ extension LiveManager {
     /// App actions remain available when no tiled window can supply a strip.
     func performStandalonePull(_ action: LiveConfig.SwipeDownAction, restoreManagedFocus: Bool = false) {
         if let command = action.command { _ = handle(command); return }
-        if action == .openApp { _ = openConfiguredApp(); return }
+        if action.opensApp { _ = openConfiguredApp(preferTab: action == .openApp); return }
         guard let focus = gestureFocus() else { return }
         let pid = focus.pid
         let window = focus.window
@@ -637,7 +637,7 @@ extension LiveManager {
             if action == .minimize { keyWindow.performMiniaturize(nil); scheduleRefresh(); return }
         }
         switch action {
-        case .none, .openApp: break
+        case .none, .openApp, .openAppWindow: break
         case .minimize:
             if let window { requestMinimize(window, holdStrip: true) }
         case .newWindow:
@@ -718,16 +718,24 @@ extension LiveManager {
         }
     }
 
-    /// Always opens a new window of the configured app. Launching an app
-    /// creates its initial window. A running app is never reopened through
-    /// `NSWorkspace`: that sends a reopen event, which apps answer by
-    /// restoring a minimized window instead. It is activated directly and
-    /// asked for a new window (menu item, else ⌘N once it is frontmost).
-    @discardableResult func openConfiguredApp() -> Bool {
+    /// Opens the configured app. With `preferTab` (`openApp`), an app that is
+    /// already frontmost and listed in `gesture.tabCloseApps` gets a new tab:
+    /// its "New Tab" menu item, else ⌘T. Otherwise it opens a new window
+    /// (`openAppWindow` always does). Launching an app creates its initial
+    /// window. A running app is never reopened through `NSWorkspace`: that
+    /// sends a reopen event, which apps answer by restoring a minimized
+    /// window instead. It is activated directly and asked for a new window
+    /// (menu item, else ⌘N once it is frontmost).
+    @discardableResult func openConfiguredApp(preferTab: Bool = false) -> Bool {
         guard let bundleID = options.config.gesture.swipeDownApp else { return false }
         if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
             .first(where: { !$0.isTerminated }) {
             let pid = app.processIdentifier
+            if preferTab, options.config.gesture.tabCloseApps.contains(bundleID),
+               NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+               openNewTab(pid: pid) {
+                return true
+            }
             let pressed = Self.newWindowMenuItem(pid: pid)
                 .map { AXUIElementPerformAction($0, kAXPressAction as CFString) == .success } ?? false
             app.activate(options: [])
@@ -748,6 +756,37 @@ extension LiveManager {
         configuration.activates = true
         NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in }
         return true
+    }
+
+    /// A new tab in the frontmost app: its "New Tab" menu item, else ⌘T
+    /// when it has a focused window to receive it.
+    func openNewTab(pid: pid_t) -> Bool {
+        if let item = Self.menuItem(pid: pid, titled: "new tab"),
+           AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { return true }
+        guard let window = gestureFocus().flatMap({ $0.pid == pid ? $0.window : nil }) else { return false }
+        return Self.sendCommand(Self.keyT, to: pid, window: paperi_window_id(window))
+    }
+
+    /// The app's enabled menu item with this exact (English, lowercased)
+    /// title, one level into each menu after the Apple menu.
+    static func menuItem(pid: pid_t, titled wanted: String) -> AXUIElement? {
+        let application = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(application, 0.25)
+        func children(_ element: AXUIElement) -> [AXUIElement] {
+            Diagnostics.attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
+        }
+        guard let bar = Diagnostics.attribute(application, kAXMenuBarAttribute),
+              CFGetTypeID(bar) == AXUIElementGetTypeID() else { return nil }
+        for top in children(bar as! AXUIElement).dropFirst() {
+            for menu in children(top) {
+                for item in children(menu) where Diagnostics.attribute(item, kAXEnabledAttribute) as? Bool != false {
+                    let title = (Diagnostics.attribute(item, kAXTitleAttribute) as? String)?
+                        .trimmingCharacters(in: .whitespaces).lowercased()
+                    if title == wanted { return item }
+                }
+            }
+        }
+        return nil
     }
 
     static func postAppCommand(_ key: CGKeyCode, pid: pid_t) {
@@ -1239,7 +1278,7 @@ extension LiveManager {
         return Self.sendCommandW(to: pid, window: wid) ? .key : .none
     }
 
-    static let keyW: CGKeyCode = 13, keyN: CGKeyCode = 45
+    static let keyW: CGKeyCode = 13, keyN: CGKeyCode = 45, keyT: CGKeyCode = 17
 
     static func sendCommandW(to pid: pid_t, window wid: UInt32) -> Bool { sendCommand(keyW, to: pid, window: wid) }
 
@@ -1507,8 +1546,8 @@ extension LiveManager {
     /// admitted to the strip like any other.
     func finishNewWindow(_ state: Swipe, window wid: UInt32) {
         let generation = state.generation, overlay = state.overlay
-        let method: NewWindowMethod = state.pullAction == .openApp
-            ? (openConfiguredApp() ? .launch : .none)
+        let method: NewWindowMethod = state.pullAction.opensApp
+            ? (openConfiguredApp(preferTab: state.pullAction == .openApp) ? .launch : .none)
             : (pidForWindow[wid].map { Self.openNewWindow(pid: $0, window: wid) } ?? .none)
         let sent = method != .none
         if !sent { overlay.retractIndicator(duration: 0.18) }
@@ -1588,8 +1627,8 @@ extension LiveManager {
             swipeTask = nil
             resumeDeferredGestureSoon()
             scheduleRefresh()
-            if commit, state.pulling, state.pullAction == .openApp {
-                _ = openConfiguredApp()
+            if commit, state.pulling, state.pullAction.opensApp {
+                _ = openConfiguredApp(preferTab: state.pullAction == .openApp)
             } else if commit, state.showsNewWindow, let wid = target, let pid = pidForWindow[wid] {
                 _ = Self.openNewWindow(pid: pid, window: wid)
             } else if commit, state.pulling, state.pullAction == .minimize, let wid = target { _ = minimize(wid, holdStrip: true) }
