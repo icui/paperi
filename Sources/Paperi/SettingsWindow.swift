@@ -208,6 +208,8 @@ private struct SettingsView: View {
                       Setting(id: "gesture.swipeDownApp", title: "Open application", detail: "App bundle ID shared by all openApp actions."),
                       Setting(id: "gesture.tap", title: "Tap", detail: "Action for a quick multi-finger tap.", choices: ["tray", "none"])])
     ] }
+    /// Settings whose entries are app bundle IDs, one per line.
+    private static let appListFields: Set<String> = ["include", "exclude", "singleton", "strictTabDetection", "gesture.tabCloseApps"]
     private var actions: [String] { ["newWindow", "closeTab", "minimize", "openApp", "none"] }
     private var categoryIcons: [String: String] {
         ["Layout": "rectangle.split.3x1", "Appearance": "paintpalette", "Applications": "app.badge",
@@ -442,11 +444,27 @@ private struct SettingsView: View {
         } else if field.id == "float" || field.id == "tile" {
             rules(field.id)
         } else if value is [String] || field.id == "include" {
-            TextEditor(text: Binding(get: { model.textDrafts[field.id] ?? (model.get(field.id) as? [String] ?? []).joined(separator: "\n") }, set: {
+            let current = model.get(field.id) as? [String] ?? []
+            TextEditor(text: Binding(get: { model.textDrafts[field.id] ?? current.joined(separator: "\n") }, set: {
                 let entries = $0.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
                 model.set(field.id, field.id == "include" && entries.isEmpty ? nil : entries)
                 model.textDrafts[field.id] = $0
             })).font(.system(.body, design: .monospaced)).frame(height: 75).border(Color.secondary.opacity(0.2))
+            if Self.appListFields.contains(field.id) {
+                AppPickerButton(title: "Add App…", excluded: Set(current)) { id in
+                    let drafted = model.textDrafts[field.id].map {
+                        $0.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                    } ?? current
+                    if !drafted.contains(id) { model.set(field.id, drafted + [id]) }
+                }
+            }
+        } else if field.id == "gesture.swipeDownApp" {
+            HStack {
+                TextField(field.title, text: Binding(get: { model.get(field.id) as? String ?? "" }, set: { model.set(field.id, $0.isEmpty ? nil : $0) }), prompt: Text("App bundle ID"))
+                    .textFieldStyle(.roundedBorder).labelsHidden()
+                AppPickerButton(title: "Choose…") { model.set(field.id, $0) }
+                    .labelStyle(.iconOnly)
+            }
         } else {
             TextField(field.title, text: Binding(get: { model.get(field.id).map { String(describing: $0) } ?? "" }, set: {
                 if model.value(field.id, in: model.defaults) is NSNumber { model.set(field.id, Double($0).map { $0 as Any } ?? $0) }
@@ -463,6 +481,12 @@ private struct SettingsView: View {
                         TextField(part == "app" ? "App bundle ID" : "Title contains (optional)", text: Binding(get: { rules[index][part] ?? "" }, set: { text in
                             var updated = rules; updated[index][part] = text.isEmpty ? nil : text; model.set(key, updated)
                         })).textFieldStyle(.roundedBorder)
+                        if part == "app" {
+                            AppPickerButton(title: "Choose App…") { id in
+                                var updated = rules; updated[index]["app"] = id; model.set(key, updated)
+                            }
+                            .labelStyle(.iconOnly)
+                        }
                     }
                     Button("Remove") { var updated = rules; updated.remove(at: index); model.set(key, updated) }
                 }
