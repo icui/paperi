@@ -354,11 +354,18 @@ import PaperiPlatform
         menu.removeAllItems()
         menu.autoenablesItems = false
         add(menu, "Settings…", #selector(openSettings), key: ",")
+        menu.addItem(.separator())
         let pause = NSButton(title: manager.paused ? "Resume" : "Pause", target: self, action: #selector(togglePause))
         pause.isEnabled = AXIsProcessTrusted() && arrangementPause == nil
         pause.toolTip = arrangementPause
         let reload = NSButton(title: "Reload", target: self, action: #selector(reloadConfig))
-        for button in [pause, reload] { button.bezelStyle = .rounded }
+        pause.image = NSImage(systemSymbolName: manager.paused ? "play.fill" : "pause.fill", accessibilityDescription: nil)
+        reload.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
+        for button in [pause, reload] {
+            button.bezelStyle = .rounded
+            button.imagePosition = .imageLeading
+            button.imageHugsTitle = true
+        }
         let buttons = NSStackView(views: [pause, reload])
         buttons.distribution = .fillEqually
         buttons.spacing = 8

@@ -51,14 +51,25 @@ import PaperiPlatform
         return object[key]
     }
     func get(_ key: String) -> Any? { value(key, in: values) ?? value(key, in: defaults) }
+    /// A default value is not added for a key the file omits, so the file
+    /// only records real changes (text fields commit on focus loss even when
+    /// untouched). Keys already present keep explicit values.
     func set(_ key: String, _ value: Any?) {
+        let absent = self.value(key, in: values) == nil
+        let stored = absent && Self.same(value, self.value(key, in: defaults)) ? nil : value
+        let before = values
         let parts = key.split(separator: ".").map(String.init)
         if parts.count == 2 {
             var group = values[parts[0]] as? [String: Any] ?? [:]
-            group[parts[1]] = value; values[parts[0]] = group
-        } else { values[key] = value }
+            group[parts[1]] = stored
+            values[parts[0]] = group.isEmpty ? nil : group
+        } else { values[key] = stored }
         textDrafts.removeValue(forKey: key)
-        dirty = true
+        if !NSDictionary(dictionary: before).isEqual(to: values) { dirty = true }
+    }
+    private static func same(_ a: Any?, _ b: Any?) -> Bool {
+        guard let a, let b else { return false }
+        return NSDictionary(dictionary: ["v": a]).isEqual(to: ["v": b])
     }
     func modified(_ key: String) -> Bool {
         let a = get(key) ?? NSNull(), b = value(key, in: defaults) ?? NSNull()
