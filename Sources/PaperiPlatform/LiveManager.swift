@@ -114,6 +114,11 @@ import PaperiCore
     /// consumes the entry, so only genuinely new windows auto-stack, never
     /// ones returning from minimize, hide, fullscreen or float.
     var newWindows: [UInt32: Double] = [:]
+    /// Windows of a column just auto-stacked, until when their height
+    /// mismatches are re-written rather than adopted as a divider drag: an
+    /// app may apply the shrink late (or drop it while opening the new
+    /// window), which must not undo the even split.
+    var autoStackSettling: [UInt32: Double] = [:]
     var timer: Timer?
     var workspaceTokens: [NSObjectProtocol] = []
     private(set) var running = false
@@ -152,7 +157,7 @@ import PaperiCore
         endDrag(); displaced.removeAll()
         destroyedNotified.removeAll(); minimizes = MinimizeTracker(); pendingReflows = PendingReflows()
         closeFocus = nil; responsiveness = AppResponsiveness(); forceApply = true
-        knownWindows = nil; newWindows.removeAll()
+        knownWindows = nil; newWindows.removeAll(); autoStackSettling.removeAll()
         coordinator = DisplaySpaceCoordinator(ownerPIDs: [], displays: topologies())
         recorder = EventRecorder(workspaceCenter: NSWorkspace.shared.notificationCenter,
                                  runningApplications: { NSWorkspace.shared.runningApplications },
@@ -877,6 +882,7 @@ import PaperiCore
 
         // 7. Adopt native edge resizes on active representatives (on mouse up).
         let now = ProcessInfo.processInfo.systemUptime
+        autoStackSettling = autoStackSettling.filter { $0.value > now }
         for space in activeSpaces where !heldSpaces.contains(space) {
             guard let session = coordinator.sessions[space],
                   let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { continue }
@@ -886,6 +892,13 @@ import PaperiCore
                       (abs(frame.width - exp.frame.width) > 2 || abs(frame.height - exp.frame.height) > 2), let pid = pidForWindow[placement.windowID] else { continue }
                 if dragging == placement.windowID { endDrag() }
                 if mouseDown { continue }
+                if let until = autoStackSettling[placement.windowID], now < until {
+                    // Not a user resize: put the even split back.
+                    expected[placement.windowID] = (exp.frame, now)
+                    applied.removeValue(forKey: space); forceApply = true
+                    log("re-writing auto-stacked \(placement.windowID)")
+                    continue
+                }
                 // Outer vertical edges belong to the tiled canvas. Restore them
                 // even when no shared row divider can adopt the native resize.
                 if abs(frame.height - exp.frame.height) > 2 { forceApply = true }
@@ -1039,7 +1052,11 @@ import PaperiCore
         }
         guard listed(wid), let target = session.state.layout.autoStackTarget(for: slotID, stacks: { listed($0.activeMember) })
         else { return }
-        if session.drop(windowID: wid, on: target, action: .stackBelow, ticket: session.ticket) {
+        let older = session.state.layout.columns.flatMap(\.slots).first { $0.id == target }?.activeMember
+        if session.stackEvenly(windowID: wid, below: target, ticket: session.ticket) {
+            let until = ProcessInfo.processInfo.systemUptime + 2
+            for window in [wid] + (older.map { [$0] } ?? []) { autoStackSettling[window] = until }
+            applied.removeValue(forKey: space)
             log("auto-stacked window \(wid) below \(target) on Space \(space)")
         }
     }

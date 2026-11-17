@@ -12,12 +12,13 @@ struct CoreTests {
         let stacks = { (s: Slot) in listed.contains(s.activeMember) }
         // c (distance 1) beats a (distance 2); b is not listed.
         #expect(layout.autoStackTarget(for: "new", stacks: stacks) == "c")
-        let dropped = layout.drop("new", on: "c", action: .stackBelow)
+        layout.columns[3].weights = [1.7]  // left over from an earlier stack
+        let dropped = layout.stackEvenly("new", below: "c")
         #expect(dropped)
         #expect(layout.columns.count == 3)
         #expect(layout.columns[2].slots.map(\.id) == ["c", "new"])
         #expect(layout.columns[2].width == 300)
-        #expect(layout.columns[2].weights == [0.5, 0.5])
+        #expect(layout.columns[2].weights == [1, 1])
         try layout.validate()
         // A full column (two windows) never takes a third; already-stacked slots stay.
         layout.columns.append(Column(slots: [slot("d", 5)], width: 400))

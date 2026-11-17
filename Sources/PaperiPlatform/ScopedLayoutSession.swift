@@ -264,6 +264,13 @@ import PaperiCore
         return apply { $0.drop(id, on: target, action: action) }
     }
 
+    /// Auto-stack: moves the slot holding `windowID` below slot `target`,
+    /// splitting that column evenly; focus is unchanged.
+    @discardableResult func stackEvenly(windowID: UInt32, below target: String, ticket: UUID) -> Bool {
+        guard accepts(ticket), let id = slots[windowID] else { return false }
+        return apply { $0.stackEvenly(id, below: target) }
+    }
+
     /// Moves the slot holding `windowID` to `position` in tray order after a
     /// thumbnail drag; focus is unchanged.
     @discardableResult func move(windowID: UInt32, to position: Int, ticket: UUID) -> Bool {

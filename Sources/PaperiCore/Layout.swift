@@ -264,6 +264,13 @@ public struct Layout: Codable, Equatable, Sendable {
         }
         return nearest.flatMap { columns[$0].slots.last?.id }
     }
+    /// Stacks `source` below `target` (auto-stack) and splits the target's
+    /// column evenly, whatever its previous row weights.
+    @discardableResult public mutating func stackEvenly(_ source: String, below target: String) -> Bool {
+        guard drop(source, on: target, action: .stackBelow), let t = index(of: target) else { return false }
+        columns[t.column].weights = columns[t.column].slots.map { _ in 1 }
+        return true
+    }
     /// Reorders the thumbnail tray: moves slot `source` so it sits at
     /// `position` in the column-major slot order (an index into that order
     /// after the move). Landing between two slots of one column stacks it
