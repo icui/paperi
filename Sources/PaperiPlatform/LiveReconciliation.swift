@@ -3,6 +3,12 @@ import PaperiCore
 
 /// Pure helpers for the live manager. No OS effects run here.
 enum LiveReconciliation {
+    /// Missing window focus alone does not mean keyboard focus is vacant:
+    /// menu bar search fields and other controls may still be accepting input.
+    static func shouldRecoverWindowFocus(focusedWindow: UInt32?, hasFocusedControl: Bool) -> Bool {
+        focusedWindow == nil && !hasFocusedControl
+    }
+
     /// A late minimize event for an already removed window must not stop the
     /// survivors' gap-closing animation. Unknown identity remains conservative.
     static func presentationInterruptsMotion(isMinimize: Bool, managedOwner: Bool,

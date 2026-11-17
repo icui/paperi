@@ -4,6 +4,13 @@ import PaperiCore
 @testable import PaperiPlatform
 
 @MainActor struct LiveReconciliationTests {
+    @Test func menuSearchFocusDoesNotRaiseDocumentWindow() {
+        #expect(!LiveReconciliation.shouldRecoverWindowFocus(focusedWindow: nil, hasFocusedControl: true))
+        #expect(LiveReconciliation.shouldRecoverWindowFocus(focusedWindow: nil, hasFocusedControl: false))
+        #expect(!LiveReconciliation.shouldRecoverWindowFocus(focusedWindow: 42, hasFocusedControl: false))
+        #expect(!LiveReconciliation.shouldRecoverWindowFocus(focusedWindow: 42, hasFocusedControl: true))
+    }
+
     @Test func lateMinimizeDoesNotCancelSurvivorReflow() {
         #expect(!LiveReconciliation.presentationInterruptsMotion(isMinimize: true, managedOwner: true, affectsStrip: false))
         #expect(LiveReconciliation.presentationInterruptsMotion(isMinimize: true, managedOwner: true, affectsStrip: true))

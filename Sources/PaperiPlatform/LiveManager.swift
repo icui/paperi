@@ -790,6 +790,7 @@ import PaperiCore
         let front = NSWorkspace.shared.frontmostApplication
         let frontUnanswered = front.map { minimizingOwners.contains($0.processIdentifier) } == true
         var focusedWindow: UInt32?
+        var hasFocusedControl = false
         if let front, livePIDs.contains(front.processIdentifier), !frontUnanswered {
             let application = AXUIElementCreateApplication(front.processIdentifier)
             AXUIElementSetMessagingTimeout(application, 0.2)
@@ -798,13 +799,22 @@ import PaperiCore
                 let element = value as! AXUIElement
                 focusedWindow = paperi_window_id(element)
             }
+            if focusedWindow == nil,
+               let value = Diagnostics.attribute(application, kAXFocusedUIElementAttribute),
+               CFGetTypeID(value) == AXUIElementGetTypeID() {
+                let element = value as! AXUIElement
+                // A menu search field can own keyboard focus without an AX
+                // focused window. Do not turn that into a window activation.
+                hasFocusedControl = Diagnostics.attribute(element, kAXRoleAttribute) as? String != kAXApplicationRole
+            }
         }
         // An app activated without a click (notification, Dock, ⌘-Tab, `open`)
         // whose windows are all parked off-canvas often has no focused or main
         // window. Treat its frontmost managed window as focused so the strip
         // reveals it, and raise it after placement so it takes key focus.
         var raiseAfterApply: UInt32?
-        if let front, livePIDs.contains(front.processIdentifier), !frontUnanswered, focusedWindow == nil {
+        if let front, livePIDs.contains(front.processIdentifier), !frontUnanswered,
+           LiveReconciliation.shouldRecoverWindowFocus(focusedWindow: focusedWindow, hasFocusedControl: hasFocusedControl) {
             let pid = front.processIdentifier
             focusedWindow = Self.frontToBack().first { id in
                 self.pidForWindow[id] == pid && self.coordinator.spaceForWindow[id].map(activeSpaces.contains) == true
