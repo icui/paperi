@@ -725,7 +725,7 @@ import PaperiCore
         for app in apps where !app.isHidden {
             let pid = app.processIdentifier
             guard let rows = surveys[pid] else { continue }
-            let singletonApp = app.bundleIdentifier.map(options.config.singleton.contains) == true
+            let singletonApp = options.config.usesSingletonWindows(bundleID: app.bundleIdentifier)
             let relevant = rows.contains { row in row.spaceID.map(activeSpaces.contains) == true &&
                 (row.classification.eligibility == .tiled || coordinator.spaceForWindow[row.windowID] != nil) }
             guard relevant else { continue }

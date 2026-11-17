@@ -3,6 +3,33 @@ import Testing
 @testable import PaperiPlatform
 
 struct LiveConfigTests {
+    @Test func zoomUsesIndependentWindowsByDefault() throws {
+        var config = try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8))
+        #expect(config.usesSingletonWindows(bundleID: "us.zoom.xos"))
+        #expect(!config.usesSingletonWindows(bundleID: "com.apple.Terminal"))
+        #expect(!config.usesSingletonWindows(bundleID: nil))
+        config.strictTabDetection = ["us.zoom.xos"]
+        #expect(config.usesSingletonWindows(bundleID: "us.zoom.xos"))
+        config.strictTabDetection = ["*"]
+        #expect(config.usesSingletonWindows(bundleID: "us.zoom.xos"))
+        config.singletonExclude = ["us.zoom.xos"]
+        #expect(!config.usesSingletonWindows(bundleID: "us.zoom.xos"))
+        config.singleton = ["us.zoom.xos", "test.app"]
+        #expect(config.usesSingletonWindows(bundleID: "us.zoom.xos"))
+        #expect(config.usesSingletonWindows(bundleID: "test.app"))
+    }
+
+    @Test func singletonOverridesDecodeAndRoundTrip() throws {
+        let json = Data(#"{"singleton":["test.app"],"singletonExclude":["us.zoom.xos"]}"#.utf8)
+        let config = try JSONDecoder().decode(LiveConfig.self, from: json)
+        #expect(!config.usesSingletonWindows(bundleID: "us.zoom.xos"))
+        #expect(config.usesSingletonWindows(bundleID: "test.app"))
+        let restored = try JSONDecoder().decode(LiveConfig.self, from: JSONEncoder().encode(config))
+        #expect(restored.singletonExclude == ["us.zoom.xos"])
+        #expect(!restored.usesSingletonWindows(bundleID: "us.zoom.xos"))
+        #expect(LiveConfig(singletonExclude: ["us.zoom.xos"]).usesSingletonWindows(bundleID: "us.zoom.xos") == false)
+    }
+
     @Test func directionalActionsRoundTripAndDispatchValidCommands() throws {
         for action in LiveConfig.SwipeDownAction.allCases {
             let config = LiveConfig.GestureConfig(

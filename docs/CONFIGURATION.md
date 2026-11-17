@@ -49,7 +49,8 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 | `exclude` | Skip these app bundle IDs. System UI agents are always excluded. |
 | `float` | Keep matching windows outside the strip. Each rule has `app` and an optional, case-insensitive `titleContains`. |
 | `tile` | Allow matching windows without a fullscreen button to tile. Dialogs and panels still stay outside the strip. |
-| `singleton` | Array of app bundle IDs whose in-content tab bars should be treated as a plain window. |
+| `singleton` | Array of app bundle IDs whose in-content tab bars should be treated as a plain window. Adds to the built-in defaults (currently `us.zoom.xos`). Explicit entries take precedence over `singletonExclude`. |
+| `singletonExclude` | Array of built-in singleton app bundle IDs to return to native tab discovery. For example, `["us.zoom.xos"]` disables Zoom’s default. Defaults to `[]`. |
 | `strictTabDetection` | Array of app bundle IDs, or `["*"]` for every app, that use strict native-tab detection. See [Native tab detection](#native-tab-detection). |
 | `gap`, `outerGap` | Space between windows and around the layout, in points. |
 | `focusAfterClose` | `left` (default), `right`, or `system`. A surviving tab or stacked window keeps the column focused. |
@@ -177,5 +178,11 @@ then wait for complete tab evidence, as in earlier versions; an app with
 ribbon-style tab bars stays unmanaged unless you also add it to `singleton`. Use
 `["*"]` to apply the strict rules to every app. `paperi check-apps` shows which
 rules each app uses (`tabRules`) and the decision for each window.
+
+Zoom uses independent windows by default because its meeting canvas exposes a
+custom accessibility tab group. To enable native tab discovery for Zoom, set
+`"singletonExclude": ["us.zoom.xos"]` and leave Zoom out of `singleton`.
+`strictTabDetection` controls how tab discovery reads evidence; it does not
+override singleton settings.
 
 Set `"hotkeysEnabled": false` or turn off **Settings → Shortcuts → Enable shortcuts** to disable all global shortcuts while keeping your bindings. The default is `true`; `--no-hotkeys` takes precedence. Apply Changes saves and applies the toggle.

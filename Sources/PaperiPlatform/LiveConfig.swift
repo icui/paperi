@@ -224,6 +224,10 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public var exclude: [String]
     /// Apps without native macOS tabs whose tab bars are drawn in-content.
     public var singleton: [String]
+    /// Built-in singleton apps opted back into native tab discovery.
+    /// Explicit entries in `singleton` take precedence.
+    public var singletonExclude: [String] = []
+    public static let defaultSingleton: Set<String> = ["us.zoom.xos"]
     /// Apps whose windows are admitted under the original, strict tab rules:
     /// any direct `AXTabGroup` or empty AX role withholds the window. The
     /// fallback if the structural rules mistake an app's native tab bar for
@@ -261,10 +265,11 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     /// Trackpad swipe gesture configuration.
     public var gesture: GestureConfig
 
-    public init(include: [String]? = nil, exclude: [String] = [], singleton: [String] = [],
+    public init(include: [String]? = nil, exclude: [String] = [], singleton: [String] = [], singletonExclude: [String] = [],
                 float: [FloatRule] = [], tile: [FloatRule] = [], gap: Double? = nil, outerGap: Double? = nil,
                 gesture: GestureConfig? = nil) {
         self.include = include; self.exclude = exclude; self.singleton = singleton
+        self.singletonExclude = singletonExclude
         self.float = float; self.tile = tile; self.gap = gap; self.outerGap = outerGap
         self.hotkeys = [:]
         self.focusAfterClose = .left
@@ -272,7 +277,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case autoCenter, autoCenterThreshold, bottomDotsVisibility, include, exclude, singleton, strictTabDetection, float, tile, gap, outerGap, gapResize, hotkeys, hotkeysEnabled, swapHighlight, focusScrollDuration, focusAfterClose, gesture
+        case autoCenter, autoCenterThreshold, bottomDotsVisibility, include, exclude, singleton, singletonExclude, strictTabDetection, float, tile, gap, outerGap, gapResize, hotkeys, hotkeysEnabled, swapHighlight, focusScrollDuration, focusAfterClose, gesture
     }
 
     public init(from decoder: Decoder) throws {
@@ -280,6 +285,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         include = try c.decodeIfPresent([String].self, forKey: .include)
         exclude = try c.decodeIfPresent([String].self, forKey: .exclude) ?? []
         singleton = try c.decodeIfPresent([String].self, forKey: .singleton) ?? []
+        singletonExclude = try c.decodeIfPresent([String].self, forKey: .singletonExclude) ?? []
         strictTabDetection = try c.decodeIfPresent([String].self, forKey: .strictTabDetection) ?? []
         float = try c.decodeIfPresent([FloatRule].self, forKey: .float) ?? []
         tile = try c.decodeIfPresent([FloatRule].self, forKey: .tile) ?? []
@@ -364,6 +370,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "float": [],
       "tile": [],
       "singleton": [],
+      "singletonExclude": [],
       "strictTabDetection": [],
       "focusScrollDuration": 0.22,
       "autoCenter": true,
@@ -417,6 +424,14 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         if Self.defaultExclude.contains(bundleID) || exclude.contains(bundleID) { return false }
         if let include { return include.contains(bundleID) }
         return regular
+    }
+
+    /// Zoom's meeting canvas exposes an AXTabGroup without AXTabs. Its
+    /// windows are independent, so native AppKit tab discovery cannot admit it.
+    public func usesSingletonWindows(bundleID: String?) -> Bool {
+        guard let bundleID else { return false }
+        if singleton.contains(bundleID) { return true }
+        return Self.defaultSingleton.contains(bundleID) && !singletonExclude.contains(bundleID)
     }
 
     public func usesStrictTabDetection(bundleID: String?) -> Bool {

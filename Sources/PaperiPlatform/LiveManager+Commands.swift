@@ -348,7 +348,7 @@ extension LiveManager {
                 if row.classification.reason == "user floating" { decision = "floating (config rule)" }
                 else if row.classification.eligibility == .floating { decision = "floating: \(row.classification.reason)" }
                 else if row.classification.eligibility != .tiled { decision = "skipped: \(row.classification.reason)" }
-                else if config.singleton.contains(app.bundleIdentifier ?? "") { decision = "managed as window (singleton app)" }
+                else if config.usesSingletonWindows(bundleID: app.bundleIdentifier) { decision = "managed as window (singleton app)" }
                 else if let group { decision = "tab container \(group.members)" }
                 else if singletons.contains(row.windowID) { decision = "managed as window" }
                 else { decision = "withheld: tab membership unknown (add it to singleton if it has no native tabs)" }
@@ -357,7 +357,7 @@ extension LiveManager {
             }
             apps.append(["bundleID": app.bundleIdentifier ?? "", "windowsError": evidence["windowsError"] ?? NSNull(),
                          "truncated": evidence["truncated"] ?? NSNull(),
-                         "tabRules": strictTabs ? "strict (strictTabDetection)" : "structural", "windows": windows])
+                         "tabRules": config.usesSingletonWindows(bundleID: app.bundleIdentifier) ? "singleton" : (strictTabs ? "strict (strictTabDetection)" : "structural"), "windows": windows])
         }
         return ["apps": apps, "note": "Current Space only; read-only"]
     }
