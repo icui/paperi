@@ -14,6 +14,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
   "exclude": ["us.zoom.xos"],
   "float": [{"app": "com.apple.finder", "titleContains": "Copy"}],
   "tile": [{"app": "com.apple.systempreferences"}],
+  "autoStack": ["com.apple.Terminal", "com.mitchellh.ghostty"],
   "focusAfterClose": "left",
   "focusScrollDuration": 0.22,
   "autoCenter": true,
@@ -49,6 +50,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 | `exclude` | Skip these app bundle IDs. System UI agents are always excluded. |
 | `float` | Keep matching windows outside the strip. Each rule has `app` and an optional, case-insensitive `titleContains`. |
 | `tile` | Allow matching windows without a fullscreen button to tile. Dialogs and panels still stay outside the strip. |
+| `autoStack` | Array of app bundle IDs, default `[]`. A newly opened window of a listed app stacks below a window of a listed app on the same Space instead of opening its own column. Only columns holding exactly one window, all of listed apps, qualify, so a column holds at most two windows. The nearest qualifying column wins, the left one on a tie (normally the column that was focused). Windows present when Paperi starts, or returning from minimize, hide, fullscreen or float, are not restacked. |
 | `singleton` | Array of app bundle IDs whose in-content tab bars should be treated as a plain window. Adds to the built-in defaults (currently `us.zoom.xos`). Explicit entries take precedence over `singletonExclude`. |
 | `singletonExclude` | Array of built-in singleton app bundle IDs to return to native tab discovery. For example, `["us.zoom.xos"]` disables Zoom’s default. Defaults to `[]`. |
 | `strictTabDetection` | Array of app bundle IDs, or `["*"]` for every app, that use strict native-tab detection. See [Native tab detection](#native-tab-detection). |

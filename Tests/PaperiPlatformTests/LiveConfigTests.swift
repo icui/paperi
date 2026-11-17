@@ -65,6 +65,20 @@ struct LiveConfigTests {
         }
     }
 
+    @Test func autoStackConfiguration() throws {
+        let defaults = try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8))
+        #expect(defaults.autoStack.isEmpty)
+        let custom = try JSONDecoder().decode(LiveConfig.self,
+            from: Data(#"{"autoStack":["com.apple.Terminal","com.mitchellh.ghostty"]}"#.utf8))
+        #expect(custom.autoStacks(bundleID: "com.apple.Terminal"))
+        #expect(!custom.autoStacks(bundleID: "com.apple.Safari"))
+        #expect(!custom.autoStacks(bundleID: nil))
+        let round = try JSONDecoder().decode(LiveConfig.self, from: JSONEncoder().encode(custom))
+        #expect(round.autoStack == custom.autoStack)
+        let template = try JSONDecoder().decode(LiveConfig.self, from: Data(LiveConfig.template.utf8))
+        #expect(template.autoStack.isEmpty)
+    }
+
     @Test func snapshotStyleConfiguration() throws {
         #expect(LiveConfig.GestureConfig().snapshotStyle == .native)
         for json in ["{}", #"{"gesture":{}}"#] {

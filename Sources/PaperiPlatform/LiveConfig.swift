@@ -238,6 +238,10 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     /// Windows tiled even though they look like utility windows (no
     /// fullscreen button), e.g. System Settings.
     public var tile: [FloatRule]
+    /// Apps whose newly opened windows join a column holding a single window
+    /// of a listed app on the same Space, stacked below it (at most two per
+    /// column), instead of opening a column of their own.
+    public var autoStack: [String] = []
     /// Focus-scroll duration in seconds; zero disables animation.
     public var autoCenter: Bool = true
     public var autoCenterThreshold: Double = 0.75
@@ -277,7 +281,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case autoCenter, autoCenterThreshold, bottomDotsVisibility, include, exclude, singleton, singletonExclude, strictTabDetection, float, tile, gap, outerGap, gapResize, hotkeys, hotkeysEnabled, swapHighlight, focusScrollDuration, focusAfterClose, gesture
+        case autoCenter, autoCenterThreshold, autoStack, bottomDotsVisibility, include, exclude, singleton, singletonExclude, strictTabDetection, float, tile, gap, outerGap, gapResize, hotkeys, hotkeysEnabled, swapHighlight, focusScrollDuration, focusAfterClose, gesture
     }
 
     public init(from decoder: Decoder) throws {
@@ -289,6 +293,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         strictTabDetection = try c.decodeIfPresent([String].self, forKey: .strictTabDetection) ?? []
         float = try c.decodeIfPresent([FloatRule].self, forKey: .float) ?? []
         tile = try c.decodeIfPresent([FloatRule].self, forKey: .tile) ?? []
+        autoStack = try c.decodeIfPresent([String].self, forKey: .autoStack) ?? []
         autoCenter = try c.decodeIfPresent(Bool.self, forKey: .autoCenter) ?? true
         autoCenterThreshold = try c.decodeIfPresent(Double.self, forKey: .autoCenterThreshold) ?? 0.75
         guard autoCenterThreshold.isFinite, autoCenterThreshold > 0, autoCenterThreshold <= 1 else {
@@ -369,6 +374,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
       "exclude": [],
       "float": [],
       "tile": [],
+      "autoStack": [],
       "singleton": [],
       "singletonExclude": [],
       "strictTabDetection": [],
@@ -437,6 +443,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
     public func usesStrictTabDetection(bundleID: String?) -> Bool {
         strictTabDetection.contains("*") || bundleID.map(strictTabDetection.contains) == true
     }
+
+    public func autoStacks(bundleID: String?) -> Bool { bundleID.map(autoStack.contains) ?? false }
 
     public func floats(bundleID: String, title: String?) -> Bool { Self.matches(float, bundleID, title) }
     public func tiles(bundleID: String, title: String?) -> Bool { Self.matches(tile, bundleID, title) }

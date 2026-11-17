@@ -247,6 +247,23 @@ public struct Layout: Codable, Equatable, Sendable {
         }
         return true
     }
+    /// Where a newly admitted slot `id`, alone in its column, auto-stacks:
+    /// the bottom slot of the nearest other column that has fewer than
+    /// `maxRows` slots, all of which satisfy `stacks`. On equal distance the
+    /// left column wins, which is the previously focused one since new
+    /// columns open to its right. Nil when the slot is already stacked or no
+    /// column qualifies.
+    public func autoStackTarget(for id: String, maxRows: Int = 2, stacks: (Slot) -> Bool) -> String? {
+        guard let s = index(of: id), columns[s.column].slots.count == 1 else { return nil }
+        let candidates = columns.indices.filter { c in
+            c != s.column && columns[c].slots.count < maxRows && columns[c].slots.allSatisfy(stacks)
+        }
+        let nearest = candidates.min { a, b in
+            let (da, db) = (abs(a - s.column), abs(b - s.column))
+            return da != db ? da < db : a < b
+        }
+        return nearest.flatMap { columns[$0].slots.last?.id }
+    }
     /// Reorders the thumbnail tray: moves slot `source` so it sits at
     /// `position` in the column-major slot order (an index into that order
     /// after the move). Landing between two slots of one column stacks it

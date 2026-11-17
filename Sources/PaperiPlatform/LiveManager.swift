@@ -107,6 +107,13 @@ import PaperiCore
     /// the strip (minimize, hide, fullscreen, float) so it returns at that
     /// width, as in PaperWM.
     var preferredWidth: [UInt32: Double] = [:]
+    /// WindowServer IDs seen by the previous pass; nil until the first pass,
+    /// so windows present at start (or resume) are never treated as new.
+    var knownWindows: Set<UInt32>?
+    /// Windows that appeared since start, with when they appeared. Admission
+    /// consumes the entry, so only genuinely new windows auto-stack, never
+    /// ones returning from minimize, hide, fullscreen or float.
+    var newWindows: [UInt32: Double] = [:]
     var timer: Timer?
     var workspaceTokens: [NSObjectProtocol] = []
     private(set) var running = false
@@ -145,6 +152,7 @@ import PaperiCore
         endDrag(); displaced.removeAll()
         destroyedNotified.removeAll(); minimizes = MinimizeTracker(); pendingReflows = PendingReflows()
         closeFocus = nil; responsiveness = AppResponsiveness(); forceApply = true
+        knownWindows = nil; newWindows.removeAll()
         coordinator = DisplaySpaceCoordinator(ownerPIDs: [], displays: topologies())
         recorder = EventRecorder(workspaceCenter: NSWorkspace.shared.notificationCenter,
                                  runningApplications: { NSWorkspace.shared.runningApplications },
@@ -623,6 +631,7 @@ import PaperiCore
         for row in cgRows {
             if let id = row[kCGWindowNumber as String] as? UInt32 { levels[id] = row[kCGWindowLayer as String] as? Int ?? 0 }
         }
+        noteNewWindows(Set(levels.keys), now: started)
         let apps = allowlistedApps()
         let livePIDs = Set(apps.map(\.processIdentifier))
         for app in apps { coordinator.addOwner(app.processIdentifier) }
@@ -765,6 +774,7 @@ import PaperiCore
                         remember(group.active, pid: pid, frame: byID[group.active]?.frame)
                         remaining.subtract(group.members)
                         log("admitted tab container \(group.members) active \(group.active) on Space \(space)")
+                        autoStack(group.active, newMembers: group.members, space: space)
                     }
                 }
                 for wid in NativeTabMembership.inspectSingletons(evidence) where remaining.contains(wid) {
@@ -999,6 +1009,38 @@ import PaperiCore
                                              width: admissionWidth([wid], active: wid, byID: byID, canvas: canvas))) == true {
             remember(wid, pid: pid, frame: row.frame)
             log("admitted window \(wid) on Space \(space)")
+            autoStack(wid, newMembers: [wid], space: space)
+        }
+    }
+
+    /// Records windows that appeared since the previous pass. Entries expire
+    /// if the window has not been admitted within a few seconds (e.g. it
+    /// stayed floating), so a later tile does not stack it.
+    func noteNewWindows(_ ids: Set<UInt32>, now: Double) {
+        if let known = knownWindows, !options.config.autoStack.isEmpty {
+            for id in ids.subtracting(known) { newWindows[id] = now }
+        }
+        knownWindows = ids
+        newWindows = newWindows.filter { ids.contains($0.key) && now - $0.value < 10 }
+    }
+
+    /// Stacks a just-admitted container below a lone window of an
+    /// `autoStack` app on the same Space, at most two windows per column.
+    func autoStack(_ wid: UInt32, newMembers: [UInt32], space: UInt64) {
+        let fresh = newMembers.filter { newWindows.removeValue(forKey: $0) != nil }
+        let config = options.config
+        guard !fresh.isEmpty, !config.autoStack.isEmpty, let session = coordinator.sessions[space],
+              let slotID = session.slots[wid] else { return }
+        var bundles: [pid_t: String?] = [:]
+        func listed(_ window: UInt32) -> Bool {
+            guard let pid = pidForWindow[window] else { return false }
+            if bundles[pid] == nil { bundles[pid] = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier }
+            return config.autoStacks(bundleID: bundles[pid] ?? nil)
+        }
+        guard listed(wid), let target = session.state.layout.autoStackTarget(for: slotID, stacks: { listed($0.activeMember) })
+        else { return }
+        if session.drop(windowID: wid, on: target, action: .stackBelow, ticket: session.ticket) {
+            log("auto-stacked window \(wid) below \(target) on Space \(space)")
         }
     }
 

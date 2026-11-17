@@ -2,6 +2,35 @@ import Testing
 @testable import PaperiCore
 
 struct CoreTests {
+    @Test func autoStackTargetPrefersNearestLeftSingleColumnOfListedApps() throws {
+        func slot(_ id: String, _ wid: UInt32) -> Slot { Slot(id: id, members: [wid], activeMember: wid) }
+        // a(listed) | b(unlisted) | new | c(listed)
+        var layout = Layout(columns: [Column(slots: [slot("a", 1)], width: 400), Column(slots: [slot("b", 2)], width: 400),
+                                      Column(slots: [slot("new", 3)], width: 400), Column(slots: [slot("c", 4)], width: 300)],
+                            focused: "b")
+        let listed: Set<UInt32> = [1, 3, 4]
+        let stacks = { (s: Slot) in listed.contains(s.activeMember) }
+        // c (distance 1) beats a (distance 2); b is not listed.
+        #expect(layout.autoStackTarget(for: "new", stacks: stacks) == "c")
+        let dropped = layout.drop("new", on: "c", action: .stackBelow)
+        #expect(dropped)
+        #expect(layout.columns.count == 3)
+        #expect(layout.columns[2].slots.map(\.id) == ["c", "new"])
+        #expect(layout.columns[2].width == 300)
+        #expect(layout.columns[2].weights == [0.5, 0.5])
+        try layout.validate()
+        // A full column (two windows) never takes a third; already-stacked slots stay.
+        layout.columns.append(Column(slots: [slot("d", 5)], width: 400))
+        #expect(layout.autoStackTarget(for: "d", stacks: { _ in true }) == "b")
+        #expect(layout.autoStackTarget(for: "new", stacks: { _ in true }) == nil)
+        // Equal distance: the left column wins.
+        let tie = Layout(columns: [Column(slots: [slot("l", 1)], width: 400), Column(slots: [slot("n", 2)], width: 400),
+                                   Column(slots: [slot("r", 3)], width: 400)])
+        #expect(tie.autoStackTarget(for: "n", stacks: { _ in true }) == "l")
+        #expect(tie.autoStackTarget(for: "n", stacks: { $0.id == "r" }) == "r")
+        #expect(tie.autoStackTarget(for: "n", stacks: { _ in false }) == nil)
+    }
+
     @Test func autoCenterPolicy() throws {
         let canvas = Rect(x: 100, y: 0, width: 1000, height: 800)
         var sole = Layout(columns: [Column(slots: [slot(1), slot(2)], width: 400)], focused: "2")

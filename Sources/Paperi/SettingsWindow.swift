@@ -186,6 +186,7 @@ private struct SettingsView: View {
                           Setting(id: "exclude", title: "Excluded applications", detail: "App bundle IDs to skip, one per line."),
                           Setting(id: "singleton", title: "Singleton applications", detail: "App bundle IDs whose in-content tabs are treated as plain windows."),
                           Setting(id: "strictTabDetection", title: "Strict tab detection", detail: "App bundle IDs whose windows wait for complete native-tab evidence, as before the ribbon/empty-role rules. Use if an app's native tabs end up in separate columns. * applies to all apps."),
+                          Setting(id: "autoStack", title: "Auto-stack applications", detail: "A new window of one of these apps stacks below a lone window of a listed app on the same Space, at most two per column. App bundle IDs, one per line."),
                           Setting(id: "float", title: "Floating windows", detail: "Match an app bundle ID and optionally part of its window title."),
                           Setting(id: "tile", title: "Additional tiled windows", detail: "Allow matching windows without a fullscreen button to tile.")]),
         ("Gestures", [Setting(id: "gesture.enabled", title: "Enable gestures", detail: "Navigate and manage windows with trackpad gestures."),
@@ -209,7 +210,7 @@ private struct SettingsView: View {
                       Setting(id: "gesture.tap", title: "Tap", detail: "Action for a quick multi-finger tap.", choices: ["tray", "none"])])
     ] }
     /// Settings whose entries are app bundle IDs, one per line.
-    private static let appListFields: Set<String> = ["include", "exclude", "singleton", "strictTabDetection", "gesture.tabCloseApps"]
+    private static let appListFields: Set<String> = ["include", "exclude", "singleton", "strictTabDetection", "autoStack", "gesture.tabCloseApps"]
     private var actions: [String] { ["newWindow", "closeTab", "minimize", "openApp", "none"] }
     private var categoryIcons: [String: String] {
         ["Layout": "rectangle.split.3x1", "Appearance": "paintpalette", "Applications": "app.badge",
