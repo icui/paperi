@@ -119,6 +119,8 @@ import PaperiCore
     /// app may apply the shrink late (or drop it while opening the new
     /// window), which must not undo the even split.
     var autoStackSettling: [UInt32: Double] = [:]
+    /// Windows that keep a rounded size for their target (see FrameConstraints).
+    var frameConstraints = FrameConstraints()
     var timer: Timer?
     var workspaceTokens: [NSObjectProtocol] = []
     private(set) var running = false
@@ -157,7 +159,7 @@ import PaperiCore
         endDrag(); displaced.removeAll()
         destroyedNotified.removeAll(); minimizes = MinimizeTracker(); pendingReflows = PendingReflows()
         closeFocus = nil; responsiveness = AppResponsiveness(); forceApply = true
-        knownWindows = nil; newWindows.removeAll(); autoStackSettling.removeAll()
+        knownWindows = nil; newWindows.removeAll(); autoStackSettling.removeAll(); frameConstraints = FrameConstraints()
         coordinator = DisplaySpaceCoordinator(ownerPIDs: [], displays: topologies())
         recorder = EventRecorder(workspaceCenter: NSWorkspace.shared.notificationCenter,
                                  runningApplications: { NSWorkspace.shared.runningApplications },
@@ -1093,7 +1095,7 @@ import PaperiCore
         for wid in gone {
             minimizes.forget(wid)
             references.removeValue(forKey: wid); pidForWindow.removeValue(forKey: wid)
-            expected.removeValue(forKey: wid); preferredWidth.removeValue(forKey: wid)
+            expected.removeValue(forKey: wid); preferredWidth.removeValue(forKey: wid); frameConstraints.forget(wid)
             if journal.removeValue(forKey: wid) != nil { persistJournal() }
         }
         log("removed destroyed members \(gone.sorted())")
@@ -1202,6 +1204,13 @@ import PaperiCore
             let target = tucked[wid] ?? placement.frame
             if let frame = row?.frame, matches(frame, target) {
                 expected[wid] = (target, ProcessInfo.processInfo.systemUptime); displaced.removeValue(forKey: wid); continue
+            }
+            // An app that rounds its size (Terminal: whole text rows) keeps
+            // the rounded frame; it is the baseline for resizes and moves.
+            if let frame = row?.frame, frameConstraints.settledFrame(wid, for: target).map({ matches(frame, $0) }) == true
+                || frameConstraints.settles(wid, at: frame, for: target) {
+                if expected[wid]?.frame != frame { log("\(wid) keeps \(Int(frame.width))x\(Int(frame.height)) for \(Int(target.width))x\(Int(target.height))") }
+                expected[wid] = (frame, ProcessInfo.processInfo.systemUptime); displaced.removeValue(forKey: wid); continue
             }
             session.expect(windowID: wid, frame: target, now: ProcessInfo.processInfo.systemUptime, ticket: session.ticket)
             expected[wid] = (target, ProcessInfo.processInfo.systemUptime)

@@ -131,25 +131,34 @@ public struct DisplaySpaceTopology: Equatable, Sendable {
         displays.first { $0.spaces.contains { $0.id == spaceID } }
     }
 
+    /// True when the window joined the session. The session's own result
+    /// is its layout intent, which is false while focus is foreign (e.g. the
+    /// app is still activating to show this very window), even though the
+    /// slot was inserted.
     @discardableResult func insertSingleton(windowID: UInt32, ownerPID: pid_t, spaceID: UInt64,
                                             classification: Classification, width: Double? = nil) throws -> Bool {
         guard running, spaceForWindow[windowID] == nil, let session = sessions[spaceID] else { return false }
-        let inserted = try session.insert(windowID: windowID, ownerPID: ownerPID, spaceID: spaceID,
-                                          classification: classification, knownSingleton: true,
-                                          width: width, ticket: session.ticket)
-        if session.slots[windowID] != nil { spaceForWindow[windowID] = spaceID }
-        return inserted
+        let known = session.slots[windowID] != nil
+        try session.insert(windowID: windowID, ownerPID: ownerPID, spaceID: spaceID,
+                           classification: classification, knownSingleton: true,
+                           width: width, ticket: session.ticket)
+        guard session.slots[windowID] != nil else { return false }
+        spaceForWindow[windowID] = spaceID
+        return !known
     }
 
     @discardableResult func admitTabs(members: [UInt32], active: UInt32, ownerPID: pid_t, spaceID: UInt64,
                                       classification: Classification,
                                       allowActiveOnly: Bool = false, width: Double? = nil) throws -> Bool {
         guard running, members.allSatisfy({ spaceForWindow[$0] == nil }), let session = sessions[spaceID] else { return false }
-        let admitted = try session.admitTabs(members: members, active: active, ownerPID: ownerPID,
-                                             spaceID: spaceID, classification: classification,
-                                             ticket: session.ticket, allowActiveOnly: allowActiveOnly, width: width)
-        if admitted { for member in members { spaceForWindow[member] = spaceID } }
-        return admitted
+        let known = members.contains { session.slots[$0] != nil }
+        try session.admitTabs(members: members, active: active, ownerPID: ownerPID,
+                              spaceID: spaceID, classification: classification,
+                              ticket: session.ticket, allowActiveOnly: allowActiveOnly, width: width)
+        // As for singletons: admitted even when the layout intent is withheld.
+        guard !known, members.allSatisfy({ session.slots[$0] != nil }) else { return false }
+        for member in members { spaceForWindow[member] = spaceID }
+        return true
     }
 
     @discardableResult func reconcileTabs(in spaceID: UInt64, partitions: [NativeTabPartition],

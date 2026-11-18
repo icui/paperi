@@ -253,6 +253,27 @@ import PaperiCore
         #expect(coordinator.spaceForWindow[2] == nil)
     }
 
+    /// An app activated to show its first window focuses that window before
+    /// Paperi manages it: interaction is suppressed, yet the window is admitted
+    /// (and so logged, journaled and auto-stacked).
+    @Test func admissionUnderForeignFocusStillReportsAdmitted() throws {
+        let coordinator = DisplaySpaceCoordinator(ownerPIDs: [10], displays: [
+            DisplaySpaceTopology(displayUUID: "Main", canvas: canvas, spaces: [.init(id: 7, isUserSpace: true)], activeSpaceID: 7)
+        ])
+        coordinator.addOwner(20)
+        #expect(try coordinator.insertSingleton(windowID: 1, ownerPID: 10, spaceID: 7, classification: eligible))
+        let session = coordinator.sessions[7]!
+        try session.focus(windowID: nil, ownerPID: nil, classification: WindowPolicy.classify(WindowFacts(bundleID: "foreign")),
+                          ticket: session.ticket)
+        #expect(session.state.interactionSuppressed)
+        #expect(try coordinator.insertSingleton(windowID: 2, ownerPID: 20, spaceID: 7, classification: eligible))
+        #expect(coordinator.spaceForWindow[2] == 7)
+        #expect(try !coordinator.insertSingleton(windowID: 2, ownerPID: 20, spaceID: 7, classification: eligible))
+        #expect(try coordinator.admitTabs(members: [3, 4], active: 3, ownerPID: 20, spaceID: 7, classification: eligible))
+        #expect(coordinator.spaceForWindow[4] == 7)
+        #expect(session.state.layout.columns.count == 3)
+    }
+
     @Test func displayUpdatesKeepLayoutAndAdoptCanvas() throws {
         let display = DisplaySpaceTopology(displayUUID: "Main", canvas: canvas, spaces: [.init(id: 7, isUserSpace: true)], activeSpaceID: 7)
         let coordinator = DisplaySpaceCoordinator(ownerPIDs: [10], displays: [display])
