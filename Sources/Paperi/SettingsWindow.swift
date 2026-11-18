@@ -209,7 +209,7 @@ private struct SettingsView: View {
                       Setting(id: "gesture.flickVelocity", title: "Flick velocity", detail: "Speed threshold for committing a quick flick."),
                       Setting(id: "gesture.invert", title: "Invert navigation", detail: "Reverse horizontal navigation."),
                       Setting(id: "gesture.swipeUpMode", title: "Swipe up mode", detail: "Window Animation closes the focused window. Directional Commands uses the assignments below.", choices: ["animation", "commands"]),
-                      Setting(id: "gesture.tabCloseApps", title: "Close tabs in applications", detail: "In Window Animation mode, swipe up closes the current tab in these apps. App bundle IDs, one per line."),
+                      Setting(id: "gesture.tabCloseApps", title: "Close tabs in applications", detail: "In Window Animation mode, swipe up closes the current tab in these apps. Swipe up, then left or right, to close the whole window. App bundle IDs, one per line."),
                       Setting(id: "gesture.swipeUp", title: "Swipe up", detail: "Command for an upward swipe.", choices: actions),
                       Setting(id: "gesture.swipeUpRight", title: "Swipe up, then right", detail: "Command after turning right.", choices: actions),
                       Setting(id: "gesture.swipeUpLeft", title: "Swipe up, then left", detail: "Command after turning left.", choices: actions),

@@ -1157,6 +1157,7 @@ import PaperiCore
     var resumingGesture = false
     var standaloneOverlay: SnapshotTransition?
     var standaloneAction: LiveConfig.SwipeDownAction = .none
+    var windowCloseTarget: (pid: pid_t, window: AXUIElement)?
     var standaloneClose = false
     var standalonePull = false
     var standaloneHintDirection = CGVector(dx: 0, dy: -1)

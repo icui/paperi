@@ -143,6 +143,7 @@ extension LiveManager {
         standaloneOverlay?.fadeOut(); standaloneOverlay = nil
         standalonePull = false
         standaloneClose = false
+        windowCloseTarget = nil
         swipeGuard?.invalidate(); swipeGuard = nil
         swipeSimulation?.invalidate(); swipeSimulation = nil
         swipeTask?.cancel(); swipeTask = nil
@@ -243,6 +244,12 @@ extension LiveManager {
             standaloneOverlay?.replaceIndicator(duration: 0.14)
         }
         standaloneAction = action
+        if windowCloseTarget != nil {
+            let style = GestureIndicatorStyle(label: "Close Window", armedLabel: "Release to Close Window",
+                plus: false, armedColor: GestureIndicatorStyle.closeTab.armedColor, direction: standaloneHintDirection)
+            standaloneOverlay?.trackIndicator(style, window: 0, progress: progress, threshold: config.commitThreshold)
+            return
+        }
         guard action != .none else { return }
         var style: GestureIndicatorStyle = (action == .newWindow || action.opensApp) ? .newWindow : action == .minimize ? .minimize : .closeTab
         if action.command != nil || action.opensApp {
@@ -309,6 +316,10 @@ extension LiveManager {
         switch event {
         case .begin(let time):
             dropDeferredGesture()
+            let gesture = options.config.gesture
+            // A deferred gesture may turn before enterSwipe sees its vertical lock.
+            let allowCloseTurn = gesture.swipeUpMode == .commands
+                || (gestureBlockedByAnimation && listedCloseTarget() != nil)
             let cfg = SlotSwipe.Configuration(
                 travel: options.config.gesture.columnTravel,
                 commitThreshold: options.config.gesture.commitThreshold,
@@ -318,7 +329,7 @@ extension LiveManager {
                 pullTravel: options.config.gesture.travel,
                 turnTravel: options.config.gesture.swipeDownMode == .commands ? options.config.gesture.travel : nil,
                 horizontalAcceleration: false,
-                closeTurnTravel: options.config.gesture.swipeUpMode == .commands ? options.config.gesture.travel : nil
+                closeTurnTravel: allowCloseTurn ? options.config.gesture.travel : nil
             )
             var swipeReducer = SlotSwipe(config: cfg)
             swipeReducer.begin(at: time)
@@ -334,6 +345,7 @@ extension LiveManager {
             }
             standalonePull = false
             standaloneClose = false
+            windowCloseTarget = nil
             if !catching && focusedWindowIsManaged() {
                 // Capture while determining the axis, but keep the overlay hidden
                 // until horizontal movement locks. This overlaps input with capture.
@@ -471,6 +483,9 @@ extension LiveManager {
             applySwipeTravel(to: &reducer)
             if case .active(_, let progress, _, _) = reducer.state { updateSwipe(progress, at: time) }
         case .closing(let progress):
+            if options.config.gesture.swipeUpMode == .animation {
+                reducer.config.closeTurnTravel = listedCloseTarget() == nil ? nil : options.config.gesture.travel
+            }
             if standaloneClose || options.config.gesture.swipeUpMode == .commands || !focusedWindowIsManaged() {
                 if !standaloneClose {
                     cancelSwipe()
@@ -489,6 +504,16 @@ extension LiveManager {
             updateSwipe(progress, at: time)
         case .turning(let progress):
             if reducer.startedUp {
+                if options.config.gesture.swipeUpMode == .animation {
+                    guard let target = listedCloseTarget() else { cancelSwipe(); return false }
+                    cancelSwipe()
+                    standaloneClose = true
+                    windowCloseTarget = target
+                    standaloneAction = .none
+                    standaloneHintDirection = CGVector(dx: reducer.turnDirection == .left ? -1 : 1, dy: 0)
+                    updateStandaloneHint(progress)
+                    return true
+                }
                 if !standaloneClose {
                     cancelSwipe()
                     standaloneClose = true
@@ -511,6 +536,11 @@ extension LiveManager {
         if standaloneClose {
             standaloneOverlay?.fadeOut(); standaloneOverlay = nil
             standaloneClose = false
+            if let target = windowCloseTarget {
+                windowCloseTarget = nil
+                if decision == .turn { closeWholeWindow(target.window, pid: target.pid) }
+                return
+            }
             if decision == .close || decision == .turn { performStandalonePull(standaloneAction, restoreManagedFocus: true) }
             return
         }
@@ -609,6 +639,44 @@ extension LiveManager {
         let value = Diagnostics.attribute(application, kAXFocusedWindowAttribute)
         let window = value.flatMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? ($0 as! AXUIElement) : nil }
         return (pid, window)
+    }
+
+    private func listedCloseTarget() -> (pid: pid_t, window: AXUIElement)? {
+        let apps = options.config.gesture.tabCloseApps
+        guard !apps.isEmpty else { return nil }
+        if let state = swipe, state.released == nil, !standaloneClose, focusedWindowIsManaged() {
+            guard state.tabClose == .app, let wid = state.closeWindow, let pid = pidForWindow[wid],
+                  let window = references[wid] ?? findWindow(wid, pid: pid) else { return nil }
+            return (pid, window)
+        }
+        guard let focus = gestureFocus(), let window = focus.window,
+              let id = NSRunningApplication(processIdentifier: focus.pid)?.bundleIdentifier,
+              apps.contains(id) else { return nil }
+        return (focus.pid, window)
+    }
+
+    private func closeWholeWindow(_ window: AXUIElement, pid: pid_t) {
+        // Native tab groups expose a separate Close Window menu command.
+        let application = AXUIElementCreateApplication(pid)
+        if let focused = Diagnostics.attribute(application, kAXFocusedWindowAttribute), CFEqual(focused, window),
+           let bar = Diagnostics.attribute(application, kAXMenuBarAttribute),
+           CFGetTypeID(bar) == AXUIElementGetTypeID() {
+            func children(_ element: AXUIElement) -> [AXUIElement] {
+                Diagnostics.attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
+            }
+            for top in children(bar as! AXUIElement).dropFirst() {
+                for menu in children(top) {
+                    for item in children(menu) where Diagnostics.attribute(item, kAXTitleAttribute) as? String == "Close Window" {
+                        if AXUIElementPerformAction(item, kAXPressAction as CFString) == .success { scheduleRefresh(); return }
+                    }
+                }
+            }
+        }
+        if let button = Diagnostics.attribute(window, kAXCloseButtonAttribute),
+           CFGetTypeID(button) == AXUIElementGetTypeID() {
+            _ = AXUIElementPerformAction(button as! AXUIElement, kAXPressAction as CFString)
+            scheduleRefresh()
+        }
     }
 
     /// Consult keyboard focus rather than the strip's last focus or menu bar.
