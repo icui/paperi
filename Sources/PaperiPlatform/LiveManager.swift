@@ -306,25 +306,36 @@ import PaperiCore
         }
     }
 
+    /// Within the restore check's tolerance of the journaled frame.
+    static func restoreFrameMatches(_ actual: Rect, _ frame: Rect) -> Bool {
+        abs(actual.x - frame.x) <= 2 && abs(actual.y - frame.y) <= 2
+            && abs(actual.width - frame.width) <= 2 && abs(actual.height - frame.height) <= 2
+    }
+
     static func restoreEntries(_ entries: [RestoreEntry], url: URL,
                                lookup: (UInt32, pid_t) -> AXUIElement? = { findWindow($0, pid: $1) }) -> [String: Any] {
         // WindowServer ownership distinguishes vanished windows from unavailable AX enumeration.
         let rows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]]
         return LiveRestoration.run(entries: entries, url: url) { entry, frame in
             guard let rows else { return .failed("WindowServer inventory unavailable") }
-            guard rows.contains(where: {
+            guard let row = rows.first(where: {
                 ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == entry.windowID &&
                 ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == entry.pid
             }) else { return .gone }
+            // Already back where it was: nothing to write. This also covers a
+            // window on another Space, which AX cannot look up.
+            if let bounds = row[kCGWindowBounds as String] as? NSDictionary,
+               let rect = CGRect(dictionaryRepresentation: bounds),
+               Self.restoreFrameMatches(Rect(x: rect.origin.x, y: rect.origin.y, width: rect.width, height: rect.height), frame) {
+                return .restored
+            }
             guard let element = lookup(entry.windowID, entry.pid) else {
                 return .failed("AX window lookup unavailable")
             }
             AXUIElementSetMessagingTimeout(element, 0.2)
             let errors = writeErrors(frame, to: element)
             guard errors.allSatisfy({ $0 == 0 }) else { return .failed("AX size/position/size errors: \(errors)") }
-            guard let actual = Diagnostics.frame(element),
-                  abs(actual.x - frame.x) <= 2, abs(actual.y - frame.y) <= 2,
-                  abs(actual.width - frame.width) <= 2, abs(actual.height - frame.height) <= 2 else {
+            guard let actual = Diagnostics.frame(element), restoreFrameMatches(actual, frame) else {
                 return .adjusted("AX writes succeeded; final frame differs or is unavailable (app constraints, display changes, or asynchronous updates)")
             }
             return .restored
