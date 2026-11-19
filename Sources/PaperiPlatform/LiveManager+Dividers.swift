@@ -231,24 +231,45 @@ extension LiveManager {
 
     /// A background write finished. A window that refused its size gets it
     /// as its limit and the gap is laid out again: refusing to shrink stops
-    /// the gap, refusing to grow makes the window travel with it. Refused
-    /// only if the size did not change at all: an app that sizes in steps
-    /// (terminal cells) lands near, not at, the target and keeps resizing.
+    /// the gap, refusing to grow makes the window travel with it.
     func dividerWritten(_ result: FrameWriter.Result) {
         guard var current = dividerDrag else { return }
         guard let size = result.actual else { log("gap drag write failed for \(result.windowID)"); return }
-        guard let previous = result.previous.map({ current.divider.isVertical ? $0.width : $0.height }) else { return }
+        let slot = result.slotID
         let actual = Double(current.divider.isVertical ? size.width : size.height)
         let wanted = current.divider.isVertical ? result.wanted.width : result.wanted.height
-        let slot = result.slotID
-        if wanted < previous - 1, actual > wanted + 1, actual >= previous - 1, actual > current.minimums[slot] ?? 0 {
+        // What the window had before this write: what it last took, or (first
+        // write of the drag) what it was asked for before.
+        let before = current.actuals[slot] ?? result.previous.map { current.divider.isVertical ? $0.width : $0.height }
+        current.actuals[slot] = actual
+        dividerDrag = current
+        guard let before, let limit = Self.dividerLimit(wanted: wanted, before: before, actual: actual) else { return }
+        switch limit {
+        case .minimum:
+            guard actual > current.minimums[slot] ?? 0 else { return }
             current.minimums[slot] = actual
-        } else if wanted > previous + 1, actual < wanted - 1, actual <= previous + 1, actual < current.maximums[slot] ?? .infinity {
+        case .maximum:
+            guard actual < current.maximums[slot] ?? .infinity else { return }
             current.maximums[slot] = actual
-        } else { return }
+        }
         dividerDrag = current
         log("gap drag learned limit \(Int(actual)) for slot \(slot)")
         layOutDividerDrag()
+    }
+
+    enum DividerLimit: Equatable, Sendable { case minimum, maximum }
+
+    /// Farthest an app that sizes in steps (Terminal: whole text rows) may
+    /// land from a written size. Within it, a size that did not change is
+    /// rounding, not a limit: a small step rounds back to the same row.
+    nonisolated static let dividerStepAllowance = 24.0
+
+    /// Whether a write of `wanted` that left the window at `actual`, from
+    /// `before` (sizes along the drag axis), shows a size limit.
+    nonisolated static func dividerLimit(wanted: Double, before: Double, actual: Double) -> DividerLimit? {
+        if wanted < before - 1, actual > wanted + dividerStepAllowance, actual >= before - 1 { return .minimum }
+        if wanted > before + 1, actual < wanted - dividerStepAllowance, actual <= before + 1 { return .maximum }
+        return nil
     }
 
     func finishDividerDrag(refreshing: Bool = true) {

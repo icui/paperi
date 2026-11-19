@@ -78,6 +78,8 @@ import PaperiCore
         /// accepted, learned when it refuses a write (slot ID → points).
         var minimums: [String: Double] = [:]
         var maximums: [String: Double] = [:]
+        /// Size along the drag axis each slot's window last took, read back.
+        var actuals: [String: Double] = [:]
         /// Latest pointer coordinate along the drag axis.
         var along: Double
     }
