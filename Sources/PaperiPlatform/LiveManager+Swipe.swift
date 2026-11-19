@@ -1029,15 +1029,19 @@ extension LiveManager {
                 }
                 state.starts = starts.merging(overlay.captured) { _, captured in captured }
                 state.captureState = .ready
-                self.swipe = state
                 self.swipeMetrics = ["state": "tracking", "windows": surveys.count, "captureMS": overlay.captureMS,
                                      "textureBytes": overlay.textureBytes, "capturedWindows": snapshotIDs.count, "snapshotStyle": overlay.snapshotStyle.rawValue]
                 // A quick gesture can finish before capture. Begin that release
                 // at the real windows instead of flashing a displaced snapshot.
                 overlay.place(state.starts)
                 state.lastVisualTime = CACurrentMediaTime()
+                if state.tracking {
+                    overlay.show()
+                    if !state.closing, state.released == nil, state.targetTime > 0 {
+                        self.advanceSnapshotTracking(&state)
+                    }
+                }
                 self.swipe = state
-                if state.tracking { overlay.show() }
                 overlay.startFrameClock { [weak self] link in self?.advanceSwipeVisuals(link) }
                 if let commit = state.released { state.released = nil; self.swipe = state; self.endSwipe(commit: commit, direction: state.releaseDirection) }
             } catch {
@@ -1235,12 +1239,17 @@ extension LiveManager {
             state.lastVisualTime = now
             state.catchingUp = true
         }
+        if state.ready && !wasTracking { state.overlay.show() }
+        // Submit the first horizontal movement immediately. Subsequent
+        // reports still coalesce into one trajectory per display frame.
+        if state.ready, !state.closing, state.trackingMotion == nil {
+            advanceSnapshotTracking(&state)
+        }
         swipe = state
         if !state.closing, let display = coordinator.displays.first(where: { $0.activeSpaceID == state.space }) {
             windowIndicators.beginHorizontalSwipe(display: display.displayUUID, coordinator: coordinator,
                                                    mode: options.config.bottomDotsVisibility)
         }
-        if state.ready && !wasTracking { state.overlay.show() }
     }
 
     /// Display ticks submit horizontal/swipe-up window trajectories.
@@ -1299,7 +1308,7 @@ extension LiveManager {
     func advanceSnapshotTracking(_ state: inout Swipe) {
         let now = CACurrentMediaTime()
         state.sampleTracking(at: now)
-        guard state.animatedReportTime != state.targetTime else { return }
+        guard state.targetTime > 0, state.animatedReportTime != state.targetTime else { return }
         let age = max(0, now - state.targetTime)
         let velocity = state.targetVelocity * max(0, 1 - age / 0.06)
         // Forecast at most 25 ms ahead; never integrate speed indefinitely.
