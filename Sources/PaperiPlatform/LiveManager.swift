@@ -107,6 +107,11 @@ import PaperiCore
     /// the strip (minimize, hide, fullscreen, float) so it returns at that
     /// width, as in PaperWM.
     var preferredWidth: [UInt32: Double] = [:]
+    /// Windows seen fullscreen or with a fullscreen button. Apps with custom
+    /// window controls rebuild their title bar when leaving fullscreen and
+    /// may then report no fullscreen button; such a window is still a
+    /// document, not a utility window, so it returns to the strip.
+    var fullScreenCapable: Set<UInt32> = []
     /// WindowServer IDs seen by the previous pass; nil until the first pass,
     /// so windows present at start (or resume) are never treated as new.
     var knownWindows: Set<UInt32>?
@@ -569,15 +574,19 @@ import PaperiCore
             var move = DarwinBoolean(false), resize = DarwinBoolean(false)
             let moveResult = AXUIElementIsAttributeSettable(ref, kAXPositionAttribute as CFString, &move)
             let resizeResult = AXUIElementIsAttributeSettable(ref, kAXSizeAttribute as CFString, &resize)
+            let fullscreen = Diagnostics.attribute(ref, "AXFullScreen") as? Bool ?? false
+            var fullScreenButton = Self.hasFullScreenButton(ref)
+            if fullscreen || fullScreenButton == true { fullScreenCapable.insert(wid) }
+            else if fullScreenButton == false && fullScreenCapable.contains(wid) { fullScreenButton = true }
             let facts = WindowFacts(bundleID: app.bundleIdentifier ?? "",
                 role: Diagnostics.attribute(ref, kAXRoleAttribute) as? String,
                 subrole: Diagnostics.attribute(ref, kAXSubroleAttribute) as? String,
                 isRoot: parent.map { CFEqual($0, application) },
                 movable: moveResult == .success ? move.boolValue : nil,
                 resizable: resizeResult == .success ? resize.boolValue : nil,
-                fullscreen: Diagnostics.attribute(ref, "AXFullScreen") as? Bool ?? false,
+                fullscreen: fullscreen,
                 minimized: Diagnostics.attribute(ref, kAXMinimizedAttribute) as? Bool,
-                level: levels[wid], hasFullScreenButton: Self.hasFullScreenButton(ref))
+                level: levels[wid], hasFullScreenButton: fullScreenButton)
             let title = (options.config.float.isEmpty && options.config.tile.isEmpty) ? nil
                 : Diagnostics.attribute(ref, kAXTitleAttribute) as? String
             let ruleFloat = !options.config.float.isEmpty && options.config.floats(bundleID: bundleID, title: title)
@@ -661,6 +670,7 @@ import PaperiCore
             log("focus after close: \(closeTarget)")
         }
         preferredWidth = preferredWidth.filter { levels[$0.key] != nil }
+        fullScreenCapable = fullScreenCapable.filter { levels[$0] != nil }
 
         let discoveryStart = ProcessInfo.processInfo.systemUptime
         // 2. Survey allowlisted apps.
