@@ -214,6 +214,9 @@ import ScreenCaptureKit
         trayTasks[id]?.cancel()
         let panel = trayPanels[id] ?? makePanel()
         trayPanels[id] = panel
+        // A summoned tray sits above any window another app can raise,
+        // including apps that float their own panels above pop-up menus.
+        panel.level = .screenSaver
         panel.ignoresMouseEvents = false
         installClickMonitors()
         let rows = tray.rows
@@ -360,8 +363,11 @@ import ScreenCaptureKit
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.ignoresMouseEvents = true
+        // NSPanel hides when its app deactivates by default; Paperi is an
+        // accessory app that is activated now and then (menu, Settings).
+        panel.hidesOnDeactivate = false
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)
-        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         let glass = NSVisualEffectView()
         glass.material = .hudWindow
         glass.blendingMode = .behindWindow
