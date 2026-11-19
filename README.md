@@ -52,6 +52,7 @@ Use **three fingers** by default (four is configurable). Horizontal swipes move 
 | Down, then right without lifting | Split with right. |
 | Shift + left / right | Resize the focused window by moving its right edge. |
 | Shift + up / down | Resize a stacked window by moving the gap below it. |
+| ⌘ + left / right / up / down | Optional: run the directional command assigned to `gesture.cmdSwipeLeft/Right/Up/Down`. Off by default. |
 
 ### Flick a window away
 
@@ -183,7 +184,9 @@ and sizing into submenus. In JSON, actions include `closeTab`, `minimize`,
 `newWindow`, `openApp`, `openAppWindow`, `none`, `focusLeft/Right/Up/Down`,
 `swapLeft/Right/Up/Down`, `alignLeft`, `center`, `alignRight`, `split`, `splitRight`,
 `slurp`, `barf`, `float`, `tray`, `widthIncrease/Decrease`, and
-`heightIncrease/Decrease` (slash-separated suffixes denote separate values).
+`heightIncrease/Decrease`, and `keystroke` (slash-separated suffixes denote separate values).
+`keystroke` sends the key combination in the slot's `<slot>Keystroke` key, such as
+`"swipeUpLeftKeystroke": "cmd-shift-leftbracket"`.
 Sizing commands change the dimension by 10% of the usable screen.
 Turns begin with a vertical swipe, followed by a deliberate sideways motion.
 Command assignments are retained when switching to Window Animation.

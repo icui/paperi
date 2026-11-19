@@ -32,11 +32,14 @@ struct LiveConfigTests {
 
     @Test func directionalActionsRoundTripAndDispatchValidCommands() throws {
         for action in LiveConfig.SwipeDownAction.allCases {
-            let config = LiveConfig.GestureConfig(
+            var config = LiveConfig.GestureConfig(
                 swipeDown: action, swipeDownRight: action, swipeDownLeft: action,
                 swipeDownApp: "com.apple.Terminal",
                 swipeUpMode: .commands, swipeDownMode: .commands,
                 swipeUp: action, swipeUpRight: action, swipeUpLeft: action)
+            if action == .keystroke {
+                for slot in LiveConfig.SwipeSlot.allCases { config.keystrokes[slot] = KeyStroke("ctrl-left") }
+            }
             let data = try JSONEncoder().encode(config)
             #expect(try JSONDecoder().decode(LiveConfig.GestureConfig.self, from: data) == config)
             if let command = action.command {
@@ -128,6 +131,51 @@ struct LiveConfigTests {
             #"{"gesture":{"swipeDownRight":"openApp"}}"#,
             #"{"gesture":{"swipeUpLeft":"openAppWindow"}}"#,
             #"{"gesture":{"swipeDown":"openApp","swipeDownApp":" "}}"#
+        ] {
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(LiveConfig.self, from: Data(json.utf8))
+            }
+        }
+    }
+
+    @Test func keystrokeGesture() throws {
+        let config = try JSONDecoder().decode(LiveConfig.self, from: Data(
+            #"{"gesture":{"swipeUpMode":"commands","swipeUpLeft":"keystroke","swipeUpLeftKeystroke":"Cmd+Shift+LeftBracket","swipeDownKeystroke":"escape"}}"#.utf8))
+        #expect(config.gesture.swipeUpLeft == .keystroke)
+        #expect(config.gesture.action(.swipeUpLeft) == .keystroke)
+        let stroke = try #require(config.gesture.keystrokes[.swipeUpLeft])
+        #expect(stroke.spec == "shift-cmd-leftbracket")
+        #expect(stroke.command && stroke.shift && !stroke.option && !stroke.control)
+        // A keystroke may be configured for a slot not (yet) assigned to it; bare keys are allowed.
+        #expect(config.gesture.keystrokes[.swipeDown]?.spec == "escape")
+        #expect(LiveConfig.SwipeDownAction.keystroke.command == nil)
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: JSONEncoder().encode(config)) == config)
+        for json in [
+            #"{"gesture":{"swipeDownRight":"keystroke"}}"#,
+            #"{"gesture":{"swipeUp":"keystroke","swipeUpKeystroke":"cmd-nosuchkey"}}"#,
+            #"{"gesture":{"swipeDownKeystroke":"hyper-left"}}"#
+        ] {
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(LiveConfig.self, from: Data(json.utf8))
+            }
+        }
+    }
+
+    @Test func commandSwipes() throws {
+        let defaults = try JSONDecoder().decode(LiveConfig.self, from: Data("{}".utf8))
+        #expect(!defaults.gesture.commandSwipesEnabled)
+        #expect(LiveConfig.SwipeSlot.commandSwipes.allSatisfy { defaults.gesture.action($0) == .none })
+        let config = try JSONDecoder().decode(LiveConfig.self, from: Data(
+            #"{"gesture":{"cmdSwipeLeft":"swapLeft","cmdSwipeUp":"keystroke","cmdSwipeUpKeystroke":"ctrl-up","cmdSwipeDown":"openApp","swipeDownApp":"com.apple.Terminal"}}"#.utf8))
+        #expect(config.gesture.commandSwipesEnabled)
+        #expect(config.gesture.action(.cmdSwipeLeft) == .swapLeft)
+        #expect(config.gesture.action(.cmdSwipeRight) == .none)
+        #expect(config.gesture.keystrokes[.cmdSwipeUp]?.spec == "ctrl-up")
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: JSONEncoder().encode(config)) == config)
+        for json in [
+            #"{"gesture":{"cmdSwipeRight":"keystroke"}}"#,
+            #"{"gesture":{"cmdSwipeDown":"openAppWindow"}}"#,
+            #"{"gesture":{"cmdSwipeLeft":"teleport"}}"#
         ] {
             #expect(throws: DecodingError.self) {
                 try JSONDecoder().decode(LiveConfig.self, from: Data(json.utf8))

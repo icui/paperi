@@ -89,6 +89,8 @@ import PaperiCore
     var dividerMonitors: [Any] = []
     /// A Shift + trackpad edge resize (LiveManager+EdgeResize.swift).
     var edgeResize: EdgeResize?
+    /// A ⌘ + trackpad swipe (LiveManager+CommandSwipe.swift).
+    var commandSwipe: CommandSwipe?
     let edgeResizeIndicator = EdgeResizeIndicator()
     var mouseUpWatch = false
     /// Last off-slot frame acted on per window, so an app that clamps its
@@ -1167,6 +1169,8 @@ import PaperiCore
     var resumingGesture = false
     var standaloneOverlay: SnapshotTransition?
     var standaloneAction: LiveConfig.SwipeDownAction = .none
+    /// The directional slot `standaloneAction` came from, for its keystroke.
+    var standaloneSlot: LiveConfig.SwipeSlot?
     var windowCloseTarget: (pid: pid_t, window: AXUIElement)?
     var standaloneClose = false
     var standalonePull = false

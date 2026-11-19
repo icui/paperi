@@ -112,9 +112,11 @@ public enum HotKeySpec {
     }()
 
     /// Requires at least one modifier so a typo cannot swallow plain typing.
-    public static func parse(_ raw: String) -> (spec: String, keyCode: UInt32, modifiers: UInt32)? {
-        let parts = raw.lowercased().split(whereSeparator: { $0 == "-" || $0 == "+" }).map(String.init)
-        guard parts.count >= 2, let key = parts.last, let code = keys[key] else { return nil }
+    /// Keystrokes that Paperi sends (`requireModifier: false`) may be bare keys.
+    public static func parse(_ raw: String, requireModifier: Bool = true) -> (spec: String, keyCode: UInt32, modifiers: UInt32)? {
+        let parts = raw.lowercased().trimmingCharacters(in: .whitespaces)
+            .split(whereSeparator: { $0 == "-" || $0 == "+" }).map(String.init)
+        guard parts.count >= (requireModifier ? 2 : 1), let key = parts.last, let code = keys[key] else { return nil }
         var bits = 0
         var names: Set<String> = []
         for part in parts.dropLast() {
@@ -125,12 +127,45 @@ public enum HotKeySpec {
         return (spec, UInt32(code), UInt32(bits))
     }
 
+    /// The spec for a pressed key, e.g. from a recorded `NSEvent`, or nil
+    /// for keys without a name here (keypad, media keys, bare modifiers).
+    /// `modifiers` holds Carbon bits (`cmdKey`, `optionKey`, ...).
+    public static func spec(keyCode: UInt16, modifiers: UInt32) -> String? {
+        let named = keys.filter { $0.value == Int(keyCode) }.map(\.key)
+        // Aliases share a code ("return"/"enter"); keep the canonical name.
+        guard let key = named.contains("return") ? "return" : named.min() else { return nil }
+        let names = [(controlKey, "ctrl"), (optionKey, "alt"), (shiftKey, "shift"), (cmdKey, "cmd")]
+            .filter { modifiers & UInt32($0.0) != 0 }.map(\.1)
+        return (names + [key]).joined(separator: "-")
+    }
+
     static func display(_ spec: String) -> String {
         let parts = spec.split(separator: "-").map(String.init)
         guard let key = parts.last else { return spec }
         let arrows = ["left": "←", "right": "→", "up": "↑", "down": "↓"]
         return parts.dropLast().compactMap { symbols[$0] }.joined() + (arrows[key] ?? key.uppercased())
     }
+}
+
+/// A key combination a directional swipe command sends, e.g. "ctrl-left"
+/// or "cmd-shift-leftbracket". Bare keys ("escape", "pagedown") are allowed.
+public struct KeyStroke: Equatable, Sendable {
+    /// Normalised spec, e.g. "shift-cmd-leftbracket".
+    public let spec: String
+    public let keyCode: UInt16
+    /// Carbon modifier bits (`cmdKey`, `optionKey`, `controlKey`, `shiftKey`).
+    public let modifiers: UInt32
+
+    public init?(_ raw: String) {
+        guard let parsed = HotKeySpec.parse(raw, requireModifier: false) else { return nil }
+        spec = parsed.spec; keyCode = UInt16(parsed.keyCode); modifiers = parsed.modifiers
+    }
+
+    public var display: String { HotKeySpec.display(spec) }
+    public var command: Bool { modifiers & UInt32(cmdKey) != 0 }
+    public var option: Bool { modifiers & UInt32(optionKey) != 0 }
+    public var control: Bool { modifiers & UInt32(controlKey) != 0 }
+    public var shift: Bool { modifiers & UInt32(shiftKey) != 0 }
 }
 
 /// Shared validation for CLI, socket and hot-key commands.

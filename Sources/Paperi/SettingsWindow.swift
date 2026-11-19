@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 import CoreFoundation
 import PaperiPlatform
@@ -181,7 +182,7 @@ private struct Setting: Identifiable {
 private struct SettingsView: View {
     @ObservedObject var model: SettingsModel
     let openJSON: () -> Void
-    private let gestureTabs = ["General", "Swipe Up", "Swipe Down", "Sensitivity"]
+    private let gestureTabs = ["General", "Swipe Up", "Swipe Down", "⌘ Swipe", "Sensitivity"]
     private let categories = ["Layout", "Appearance", "Applications", "Gestures", "Shortcuts", "General"]
     private var settings: [(String, [Setting])] { [
         ("Layout", [Setting(id: "gap", title: "Window gap", detail: "Space between columns and stacked windows, in points."),
@@ -217,9 +218,24 @@ private struct SettingsView: View {
                       Setting(id: "gesture.swipeDown", title: "Swipe down", detail: "Action for a downward swipe.", choices: actions),
                       Setting(id: "gesture.swipeDownRight", title: "Swipe down, then right", detail: "Action after turning right.", choices: actions),
                       Setting(id: "gesture.swipeDownLeft", title: "Swipe down, then left", detail: "Action after turning left.", choices: actions),
+                      Setting(id: "gesture.swipeUpKeystroke", title: "Swipe up keystroke", detail: Self.keystrokeDetail),
+                      Setting(id: "gesture.swipeUpRightKeystroke", title: "Swipe up, then right keystroke", detail: Self.keystrokeDetail),
+                      Setting(id: "gesture.swipeUpLeftKeystroke", title: "Swipe up, then left keystroke", detail: Self.keystrokeDetail),
+                      Setting(id: "gesture.swipeDownKeystroke", title: "Swipe down keystroke", detail: Self.keystrokeDetail),
+                      Setting(id: "gesture.swipeDownRightKeystroke", title: "Swipe down, then right keystroke", detail: Self.keystrokeDetail),
+                      Setting(id: "gesture.swipeDownLeftKeystroke", title: "Swipe down, then left keystroke", detail: Self.keystrokeDetail),
+                      Setting(id: "gesture.cmdSwipeLeft", title: "⌘ + swipe left", detail: "Command for a swipe left while holding ⌘.", choices: actions),
+                      Setting(id: "gesture.cmdSwipeRight", title: "⌘ + swipe right", detail: "Command for a swipe right while holding ⌘.", choices: actions),
+                      Setting(id: "gesture.cmdSwipeUp", title: "⌘ + swipe up", detail: "Command for a swipe up while holding ⌘.", choices: actions),
+                      Setting(id: "gesture.cmdSwipeDown", title: "⌘ + swipe down", detail: "Command for a swipe down while holding ⌘.", choices: actions),
+                      Setting(id: "gesture.cmdSwipeLeftKeystroke", title: "⌘ + swipe left keystroke", detail: Self.keystrokeDetail),
+                      Setting(id: "gesture.cmdSwipeRightKeystroke", title: "⌘ + swipe right keystroke", detail: Self.keystrokeDetail),
+                      Setting(id: "gesture.cmdSwipeUpKeystroke", title: "⌘ + swipe up keystroke", detail: Self.keystrokeDetail),
+                      Setting(id: "gesture.cmdSwipeDownKeystroke", title: "⌘ + swipe down keystroke", detail: Self.keystrokeDetail),
                       Setting(id: "gesture.swipeDownApp", title: "Open application", detail: "App bundle ID shared by all Open Application actions."),
                       Setting(id: "gesture.tap", title: "Tap", detail: "Action for a quick multi-finger tap.", choices: ["tray", "none"])])
     ] }
+    private static let keystrokeDetail = "Key combination to send, e.g. ctrl-left or cmd-shift-leftbracket."
     /// Settings whose entries are app bundle IDs, one per line.
     private static let appListFields: Set<String> = ["include", "exclude", "singleton", "strictTabDetection", "autoStack", "gesture.tabCloseApps"]
     private var actions: [String] { ["newWindow", "closeTab", "minimize", "openApp", "openAppWindow", "none"] }
@@ -337,6 +353,15 @@ private struct SettingsView: View {
             gestureSection("Trackpad", ids: ["enabled", "fingers", "tap"], fields: fields)
             gestureSection("Navigation and Appearance", ids: ["invert", "snapshotStyle"], fields: fields)
             gestureSection("Shared Command Options", ids: ["swipeDownApp"], fields: fields)
+        } else if model.gestureTab == "⌘ Swipe" {
+            let slots = LiveConfig.SwipeSlot.commandSwipes.map(\.rawValue)
+            gestureSection("⌘ + Swipe Commands", ids: slots.flatMap { slot in
+                model.get("gesture.\(slot)") as? String == LiveConfig.SwipeDownAction.keystroke.rawValue ? [slot, slot + "Keystroke"] : [slot]
+            }, fields: fields, ordered: true)
+            Section {
+                Text("Hold ⌘ and swipe to run the command assigned to that direction. Directions set to None ignore ⌘ + swipes; with all four set to None, ⌘ + swipes behave like ordinary swipes. Shift + swipe still resizes.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         } else if model.gestureTab == "Sensitivity" {
             gestureSection("Travel", ids: ["travel", "columnTravel"], fields: fields)
             gestureSection("Commit and Flick", ids: ["commitThreshold", "flickVelocity"], fields: fields)
@@ -354,18 +379,25 @@ private struct SettingsView: View {
                     }
                 }
             } else {
-                gestureSection("Directional Commands", ids: [prefix, prefix + "Right", prefix + "Left"], fields: fields)
+                let slots = [prefix, prefix + "Right", prefix + "Left"]
+                gestureSection("Directional Commands", ids: slots.flatMap { slot in
+                    model.get("gesture.\(slot)") as? String == LiveConfig.SwipeDownAction.keystroke.rawValue ? [slot, slot + "Keystroke"] : [slot]
+                }, fields: fields, ordered: true)
                 Section {
-                    Text("Swipe vertically, then turn left or right to use a directional command. Open Application commands share the app selected in General.")
+                    Text("Swipe vertically, then turn left or right to use a directional command. Open Application commands share the app selected in General. Send Keystroke posts its key combination (modifiers: ctrl, alt, shift, cmd) as if typed.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
     }
 
-    private func gestureSection(_ title: String, ids: [String], fields: [Setting]) -> some View {
-        Section(title) {
-            ForEach(fields.filter { ids.contains(String($0.id.dropFirst("gesture.".count))) }) { row($0) }
+    /// `ordered` lists rows in `ids` order (keystroke rows follow their slot).
+    private func gestureSection(_ title: String, ids: [String], fields: [Setting], ordered: Bool = false) -> some View {
+        let shown = ordered
+            ? ids.compactMap { id in fields.first { $0.id == "gesture." + id } }
+            : fields.filter { ids.contains(String($0.id.dropFirst("gesture.".count))) }
+        return Section(title) {
+            ForEach(shown) { row($0) }
         }
     }
 
@@ -418,8 +450,7 @@ private struct SettingsView: View {
     }
     @ViewBuilder private func control(_ field: Setting) -> some View {
         let value = model.get(field.id)
-        if ["gesture.swipeUp", "gesture.swipeUpRight", "gesture.swipeUpLeft",
-            "gesture.swipeDown", "gesture.swipeDownRight", "gesture.swipeDownLeft"].contains(field.id) {
+        if LiveConfig.SwipeSlot.allCases.contains(where: { field.id == "gesture." + $0.rawValue }) {
             let selected = LiveConfig.SwipeDownAction(rawValue: value as? String ?? "none") ?? .none
             Menu {
                 Button {
@@ -469,6 +500,12 @@ private struct SettingsView: View {
                     } ?? current
                     if !drafted.contains(id) { model.set(field.id, drafted + [id]) }
                 }
+            }
+        } else if field.id.hasPrefix("gesture."), field.id.hasSuffix("Keystroke") {
+            HStack {
+                TextField(field.title, text: Binding(get: { model.get(field.id) as? String ?? "" }, set: { model.set(field.id, $0.isEmpty ? nil : $0) }), prompt: Text("e.g. ctrl-left"))
+                    .textFieldStyle(.roundedBorder).labelsHidden()
+                KeystrokeRecorder { model.set(field.id, $0) }
             }
         } else if field.id == "gesture.swipeDownApp" {
             HStack {
@@ -579,5 +616,63 @@ private struct SettingsView: View {
             .multilineTextAlignment(.leading)
             }
         }
+    }
+}
+
+/// Captures the next key combination pressed while recording. Escape
+/// without modifiers cancels (type "escape" to send a bare Escape). Keys
+/// that macOS or Paperi's own shortcuts consume first, such as ⌃← for
+/// Spaces, never reach the recorder; type those instead.
+struct KeystrokeRecorder: View {
+    let onRecord: (String) -> Void
+    @StateObject private var state = KeystrokeRecorderState()
+
+    var body: some View {
+        Button {
+            state.recording ? state.stop() : state.start(onRecord)
+        } label: {
+            Label(state.recording ? (state.message ?? "Press keys…") : "Record",
+                  systemImage: state.recording ? "record.circle.fill" : "record.circle")
+        }
+        .foregroundStyle(state.recording ? Color.red : Color.primary)
+        .help("Record a key combination by pressing it")
+        .onDisappear { state.stop() }
+    }
+}
+
+@MainActor final class KeystrokeRecorderState: ObservableObject {
+    @Published var recording = false
+    @Published var message: String?
+    private var monitor: Any?
+
+    func start(_ onRecord: @escaping (String) -> Void) {
+        stop()
+        recording = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if event.keyCode == UInt16(kVK_Escape), flags.isDisjoint(with: [.command, .option, .control, .shift]) {
+                self.stop(); return nil
+            }
+            var bits: UInt32 = 0
+            if flags.contains(.command) { bits |= UInt32(cmdKey) }
+            if flags.contains(.option) { bits |= UInt32(optionKey) }
+            if flags.contains(.control) { bits |= UInt32(controlKey) }
+            if flags.contains(.shift) { bits |= UInt32(shiftKey) }
+            guard let spec = HotKeySpec.spec(keyCode: event.keyCode, modifiers: bits) else {
+                self.message = "Unsupported key"
+                return nil
+            }
+            onRecord(spec)
+            self.stop()
+            return nil
+        }
+    }
+
+    func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        recording = false
+        message = nil
     }
 }

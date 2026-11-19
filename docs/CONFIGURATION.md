@@ -109,6 +109,52 @@ The target must be installed; an unavailable target leaves the current app alone
 Use `newWindow` to target the focused app without specifying `swipeDownApp`.
 Selecting `openApp` for any downward gesture requires `swipeDownApp`; omitting it rejects the configuration.
 
+Any directional command (`swipeUp`, `swipeUpRight`, `swipeUpLeft`, `swipeDown`,
+`swipeDownRight`, `swipeDownLeft`) can be set to `keystroke` to send a key
+combination as if typed. Each slot takes its combination from the matching
+`<slot>Keystroke` key, for example:
+
+```json
+"gesture": {
+  "swipeUpMode": "commands",
+  "swipeUpLeft": "keystroke",
+  "swipeUpLeftKeystroke": "cmd-shift-leftbracket",
+  "swipeUpRight": "keystroke",
+  "swipeUpRightKeystroke": "cmd-shift-rightbracket"
+}
+```
+
+Combinations use the same key names as `hotkeys` (`ctrl`, `alt`, `shift`, `cmd`,
+joined with `-` or `+`), but a bare key such as `escape` or `pagedown` is also
+allowed. The keystroke is posted system-wide, so it reaches the frontmost app and
+global shortcuts alike (for example `ctrl-left` to switch Spaces). Selecting
+`keystroke` without a valid `<slot>Keystroke` rejects the configuration.
+In Settings, each keystroke field has a **Record** button: click it and press the
+combination to fill in its spec (Escape cancels). Shortcuts that macOS or Paperi
+handle first, such as `ctrl-left` or Paperi's own ⌥⌘ bindings, never reach the
+recorder; type those instead.
+
+Holding ⌘ while swiping can run a directional command too. `cmdSwipeLeft`,
+`cmdSwipeRight`, `cmdSwipeUp`, and `cmdSwipeDown` accept the same actions as the
+vertical slots, including `keystroke` (with `cmdSwipeLeftKeystroke`, etc.):
+
+```json
+"gesture": {
+  "cmdSwipeLeft": "keystroke",
+  "cmdSwipeLeftKeystroke": "cmd-leftbracket",
+  "cmdSwipeRight": "keystroke",
+  "cmdSwipeRightKeystroke": "cmd-rightbracket",
+  "cmdSwipeUp": "tray"
+}
+```
+
+All four default to `none`, which leaves ⌘ + swipes behaving like ordinary
+swipes. Once any is assigned, holding ⌘ when the fingers land (or before they
+pick an axis) makes the swipe a command swipe: the first movement picks the
+direction, a pill follows the fingers, and releasing past `commitThreshold` (or
+with a flick) runs the command. A direction left at `none` does nothing.
+Shift + swipe still resizes and takes precedence.
+
 `tabCloseApps` defaults to an empty array. Add apps such as Chrome here to make
 swipe up show the tab-close pill and send ⌘W instead of closing the entire window.
 Native macOS tab groups are handled automatically. ⌘W can close the window when

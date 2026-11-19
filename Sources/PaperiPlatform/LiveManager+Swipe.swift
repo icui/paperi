@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 @preconcurrency import ApplicationServices
 import PaperiBridge
 import PaperiCore
@@ -234,7 +235,8 @@ extension LiveManager {
     func updateStandaloneHint(_ progress: Double, direction: Direction? = nil) {
         guard standalonePull || standaloneClose else { return }
         let config = options.config.gesture
-        let action = direction.map { standaloneClose ? ($0 == .left ? config.swipeUpLeft : config.swipeUpRight) : ($0 == .left ? config.swipeDownLeft : config.swipeDownRight) } ?? standaloneAction
+        let slot: LiveConfig.SwipeSlot? = direction.map { standaloneClose ? ($0 == .left ? .swipeUpLeft : .swipeUpRight) : ($0 == .left ? .swipeDownLeft : .swipeDownRight) }
+        let action = slot.map(config.action) ?? standaloneAction
         if standaloneOverlay == nil {
             let overlay = SnapshotTransition()
             overlay.prepareStandaloneIndicator()
@@ -244,6 +246,7 @@ extension LiveManager {
             standaloneOverlay?.replaceIndicator(duration: 0.14)
         }
         standaloneAction = action
+        if let slot { standaloneSlot = slot }
         if windowCloseTarget != nil {
             let style = GestureIndicatorStyle(label: "Close Window", armedLabel: "Release to Close Window",
                 plus: false, armedColor: GestureIndicatorStyle.closeTab.armedColor, direction: standaloneHintDirection)
@@ -251,20 +254,30 @@ extension LiveManager {
             return
         }
         guard action != .none else { return }
-        var style: GestureIndicatorStyle = (action == .newWindow || action.opensApp) ? .newWindow : action == .minimize ? .minimize : .closeTab
-        if action.command != nil || action.opensApp {
-            style = GestureIndicatorStyle(label: action.title, armedLabel: "Release to " + action.title,
-                plus: true, armedColor: NSColor.systemBlue.cgColor, direction: standaloneHintDirection)
-        }
+        var style = directionalIndicatorStyle(action, slot: standaloneSlot)
         style.direction = direction.map { CGVector(dx: $0 == .left ? -1 : 1, dy: 0) } ?? standaloneHintDirection
         standaloneHintDirection = style.direction
         standaloneOverlay?.trackIndicator(style, window: 0, progress: progress, threshold: config.commitThreshold)
+    }
+
+    /// The pill for a directional command assignment; the caller sets its direction.
+    func directionalIndicatorStyle(_ action: LiveConfig.SwipeDownAction, slot: LiveConfig.SwipeSlot?) -> GestureIndicatorStyle {
+        var style: GestureIndicatorStyle = (action == .newWindow || action.opensApp) ? .newWindow : action == .minimize ? .minimize : .closeTab
+        if action.command != nil || action.opensApp || action == .keystroke {
+            let title = action == .keystroke
+                ? (slot.flatMap { options.config.gesture.keystrokes[$0] }.map { "Send \($0.display)" } ?? action.title)
+                : action.title
+            style = GestureIndicatorStyle(label: title, armedLabel: "Release to " + title,
+                plus: action != .keystroke, armedColor: NSColor.systemBlue.cgColor, direction: style.direction)
+        }
+        return style
     }
 
 
     func handleTouchEvent(_ event: TouchEvent) {
         guard running, !paused, DisplayArrangement.currentProblem() == nil else {
             endEdgeResize()
+            endCommandSwipe(commit: false)
             dropDeferredGesture()
             cancelSwipe()
             slotSwipe?.cancel()
@@ -284,6 +297,31 @@ extension LiveManager {
             case .begin: endEdgeResize()
             case .tap: return
             }
+        }
+        // ⌘ turns the sequence into a command swipe (LiveManager+CommandSwipe).
+        if commandSwipe != nil {
+            switch event {
+            case .move(let dx, let dy, _): moveCommandSwipe(dx: dx, dy: dy); return
+            case .end: endCommandSwipe(commit: true); return
+            case .cancel: endCommandSwipe(commit: false); return
+            case .begin: endCommandSwipe(commit: false)
+            case .tap: return
+            }
+        }
+        if case .begin = event, !Self.shiftHeld, commandSwipeArmed {
+            dropDeferredGesture()
+            catchPending = false
+            slotSwipe = nil
+            beginCommandSwipe()
+            return
+        }
+        if case .move(let dx, let dy, _) = event, !Self.shiftHeld, commandSwipeArmed, !gestureDeferred, !catchPending,
+           case .detecting? = slotSwipe?.state, swipe?.released == nil {
+            cancelSwipe()
+            slotSwipe = nil
+            beginCommandSwipe()
+            moveCommandSwipe(dx: dx, dy: dy)
+            return
         }
         if case .begin = event, Self.shiftHeld {
             dropDeferredGesture()
@@ -471,6 +509,7 @@ extension LiveManager {
             }
             if standalonePull {
                 standaloneAction = options.config.gesture.swipeDownMode == .animation ? .minimize : options.config.gesture.swipeDown
+                standaloneSlot = options.config.gesture.swipeDownMode == .animation ? nil : .swipeDown
                 standaloneHintDirection = CGVector(dx: 0, dy: -1)
             }
         }
@@ -491,6 +530,7 @@ extension LiveManager {
                     cancelSwipe()
                     standaloneClose = true
                     standaloneAction = options.config.gesture.swipeUpMode == .commands ? options.config.gesture.swipeUp : .closeTab
+                    standaloneSlot = options.config.gesture.swipeUpMode == .commands ? .swipeUp : nil
                     standaloneHintDirection = CGVector(dx: 0, dy: 1)
                 }
                 updateStandaloneHint(progress)
@@ -510,6 +550,7 @@ extension LiveManager {
                     standaloneClose = true
                     windowCloseTarget = target
                     standaloneAction = .none
+                    standaloneSlot = nil
                     standaloneHintDirection = CGVector(dx: reducer.turnDirection == .left ? -1 : 1, dy: 0)
                     updateStandaloneHint(progress)
                     return true
@@ -518,6 +559,7 @@ extension LiveManager {
                     cancelSwipe()
                     standaloneClose = true
                     standaloneAction = options.config.gesture.swipeUp
+                    standaloneSlot = .swipeUp
                     standaloneHintDirection = CGVector(dx: 0, dy: 1)
                 }
                 updateStandaloneHint(progress, direction: reducer.turnDirection)
@@ -541,14 +583,14 @@ extension LiveManager {
                 if decision == .turn { closeWholeWindow(target.window, pid: target.pid) }
                 return
             }
-            if decision == .close || decision == .turn { performStandalonePull(standaloneAction, restoreManagedFocus: true) }
+            if decision == .close || decision == .turn { performStandalonePull(standaloneAction, slot: standaloneSlot, restoreManagedFocus: true) }
             return
         }
         if standalonePull {
             standaloneOverlay?.fadeOut(); standaloneOverlay = nil
             standalonePull = false
             if decision == .pull || decision == .turn {
-                performStandalonePull(standaloneAction)
+                performStandalonePull(standaloneAction, slot: standaloneSlot)
             }
             return
         }
@@ -691,8 +733,13 @@ extension LiveManager {
     }
 
     /// App actions remain available when no tiled window can supply a strip.
-    func performStandalonePull(_ action: LiveConfig.SwipeDownAction, restoreManagedFocus: Bool = false) {
+    func performStandalonePull(_ action: LiveConfig.SwipeDownAction, slot: LiveConfig.SwipeSlot? = nil,
+                               restoreManagedFocus: Bool = false) {
         if let command = action.command { _ = handle(command); return }
+        if action == .keystroke {
+            if let stroke = slot.flatMap({ options.config.gesture.keystrokes[$0] }) { Self.postKeystroke(stroke) }
+            return
+        }
         if action.opensApp { _ = openConfiguredApp(preferTab: action == .openApp); return }
         guard let focus = gestureFocus() else { return }
         let pid = focus.pid
@@ -705,7 +752,7 @@ extension LiveManager {
             if action == .minimize { keyWindow.performMiniaturize(nil); scheduleRefresh(); return }
         }
         switch action {
-        case .none, .openApp, .openAppWindow: break
+        case .none, .openApp, .openAppWindow, .keystroke: break
         case .minimize:
             if let window { requestMinimize(window, holdStrip: true) }
         case .newWindow:
@@ -855,6 +902,31 @@ extension LiveManager {
             }
         }
         return nil
+    }
+
+    /// Posts a configured keystroke at the HID level, so it reaches the
+    /// frontmost app and system-wide shortcuts (e.g. ⌃← for Spaces) alike.
+    /// The flags are exactly the configured modifiers.
+    static func postKeystroke(_ stroke: KeyStroke) {
+        var flags: CGEventFlags = []
+        if stroke.command { flags.insert(.maskCommand) }
+        if stroke.option { flags.insert(.maskAlternate) }
+        if stroke.control { flags.insert(.maskControl) }
+        if stroke.shift { flags.insert(.maskShift) }
+        // Arrow and navigation keys carry these flags when typed for real;
+        // some shortcut handlers (Mission Control's ⌃←/⌃→) require them.
+        let arrows: Set<Int> = [kVK_LeftArrow, kVK_RightArrow, kVK_UpArrow, kVK_DownArrow]
+        let function: Set<Int> = arrows.union([kVK_Home, kVK_End, kVK_PageUp, kVK_PageDown, kVK_ForwardDelete,
+            kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
+            kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20])
+        if arrows.contains(Int(stroke.keyCode)) { flags.insert(.maskNumericPad) }
+        if function.contains(Int(stroke.keyCode)) { flags.insert(.maskSecondaryFn) }
+        let source = CGEventSource(stateID: .hidSystemState)
+        for down in [true, false] {
+            guard let event = CGEvent(keyboardEventSource: source, virtualKey: stroke.keyCode, keyDown: down) else { return }
+            event.flags = flags
+            event.post(tap: .cghidEventTap)
+        }
     }
 
     static func postAppCommand(_ key: CGKeyCode, pid: pid_t) {

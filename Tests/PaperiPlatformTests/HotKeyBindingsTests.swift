@@ -4,6 +4,20 @@ import Testing
 @testable import PaperiPlatform
 
 struct HotKeyBindingsTests {
+    @Test func recordedKeysRoundTripThroughKeystrokeSpecs() throws {
+        let spec = try #require(HotKeySpec.spec(keyCode: UInt16(kVK_ANSI_LeftBracket), modifiers: UInt32(cmdKey | shiftKey)))
+        #expect(spec == "shift-cmd-leftbracket")
+        #expect(KeyStroke(spec)?.keyCode == UInt16(kVK_ANSI_LeftBracket))
+        #expect(HotKeySpec.spec(keyCode: UInt16(kVK_Return), modifiers: 0) == "return")
+        #expect(HotKeySpec.spec(keyCode: UInt16(kVK_LeftArrow), modifiers: UInt32(controlKey)) == "ctrl-left")
+        #expect(HotKeySpec.spec(keyCode: UInt16(kVK_ANSI_Keypad1), modifiers: 0) == nil)
+        // Every named key records back to a spec that parses to the same key.
+        for (name, code) in HotKeySpec.keys {
+            let recorded = try #require(HotKeySpec.spec(keyCode: UInt16(code), modifiers: UInt32(optionKey)), "\(name)")
+            #expect(KeyStroke(recorded)?.keyCode == UInt16(code))
+        }
+    }
+
     @Test func defaultsUseArrowsForFocusAndShiftForSwap() {
         let defaults = HotKeyBindings.defaults
         let table = Dictionary(uniqueKeysWithValues: defaults.map { ($0.spec, $0.command) })

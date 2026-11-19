@@ -23,6 +23,16 @@ public struct LiveConfig: Codable, Equatable, Sendable {
 
     public enum VerticalSwipeMode: String, Codable, Equatable, Sendable { case animation, commands }
 
+    /// The directional command assignments: six vertical swipes and turns,
+    /// and four optional ⌘ + swipes. Raw values are their config keys.
+    public enum SwipeSlot: String, CaseIterable, Sendable {
+        case swipeUp, swipeUpRight, swipeUpLeft, swipeDown, swipeDownRight, swipeDownLeft
+        case cmdSwipeLeft, cmdSwipeRight, cmdSwipeUp, cmdSwipeDown
+        public static let commandSwipes: [Self] = [.cmdSwipeLeft, .cmdSwipeRight, .cmdSwipeUp, .cmdSwipeDown]
+        /// Config key holding this slot's `keystroke` combination.
+        public var keystrokeKey: String { rawValue + "Keystroke" }
+    }
+
     public struct GestureConfig: Codable, Equatable, Sendable {
         public var swipeUpMode: VerticalSwipeMode
         public var swipeDownMode: VerticalSwipeMode
@@ -53,6 +63,32 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public var swipeDownLeft: SwipeDownAction
         /// What a quick tap with all `fingers` does.
         public var tap: TapAction
+        /// Key combinations sent by slots assigned `keystroke`, stored as
+        /// `swipeUpKeystroke`, `swipeDownLeftKeystroke`, etc.
+        public var keystrokes: [SwipeSlot: KeyStroke] = [:]
+        /// ⌘ + swipe in each direction; `none` (the default for all four)
+        /// leaves ⌘ + swipes to behave like plain swipes.
+        public var cmdSwipeLeft: SwipeDownAction = .none
+        public var cmdSwipeRight: SwipeDownAction = .none
+        public var cmdSwipeUp: SwipeDownAction = .none
+        public var cmdSwipeDown: SwipeDownAction = .none
+        /// Holding ⌘ turns a swipe into a command swipe.
+        public var commandSwipesEnabled: Bool { SwipeSlot.commandSwipes.contains { action($0) != .none } }
+
+        public func action(_ slot: SwipeSlot) -> SwipeDownAction {
+            switch slot {
+            case .swipeUp: return swipeUp
+            case .swipeUpRight: return swipeUpRight
+            case .swipeUpLeft: return swipeUpLeft
+            case .swipeDown: return swipeDown
+            case .swipeDownRight: return swipeDownRight
+            case .swipeDownLeft: return swipeDownLeft
+            case .cmdSwipeLeft: return cmdSwipeLeft
+            case .cmdSwipeRight: return cmdSwipeRight
+            case .cmdSwipeUp: return cmdSwipeUp
+            case .cmdSwipeDown: return cmdSwipeDown
+            }
+        }
 
         public init(enabled: Bool = true, fingers: Int = 3, travel: Double = 0.4, columnTravel: Double = 0.3,
                     commitThreshold: Double = 0.5, flickVelocity: Double = 1.5, invert: Bool = false,
@@ -90,6 +126,10 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             case enabled, fingers, travel, columnTravel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDown, swipeDownRight, swipeDownLeft, tap
             /// Legacy boolean: `false` reads as `swipeDown: "none"`.
             case swipeDownToMinimize
+            case swipeUpKeystroke, swipeUpRightKeystroke, swipeUpLeftKeystroke
+            case swipeDownKeystroke, swipeDownRightKeystroke, swipeDownLeftKeystroke
+            case cmdSwipeLeft, cmdSwipeRight, cmdSwipeUp, cmdSwipeDown
+            case cmdSwipeLeftKeystroke, cmdSwipeRightKeystroke, cmdSwipeUpKeystroke, cmdSwipeDownKeystroke
         }
 
         /// Omitted keys keep their defaults.
@@ -133,8 +173,26 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             } else {
                 swipeDown = d.swipeDown
             }
-            if [swipeUp, swipeUpRight, swipeUpLeft, swipeDown, swipeDownRight, swipeDownLeft].contains(where: \.opensApp), swipeDownApp == nil {
+            cmdSwipeLeft = try c.decodeIfPresent(SwipeDownAction.self, forKey: .cmdSwipeLeft) ?? d.cmdSwipeLeft
+            cmdSwipeRight = try c.decodeIfPresent(SwipeDownAction.self, forKey: .cmdSwipeRight) ?? d.cmdSwipeRight
+            cmdSwipeUp = try c.decodeIfPresent(SwipeDownAction.self, forKey: .cmdSwipeUp) ?? d.cmdSwipeUp
+            cmdSwipeDown = try c.decodeIfPresent(SwipeDownAction.self, forKey: .cmdSwipeDown) ?? d.cmdSwipeDown
+            if SwipeSlot.allCases.map(action).contains(where: \.opensApp), swipeDownApp == nil {
                 throw DecodingError.dataCorruptedError(forKey: .swipeDownApp, in: c, debugDescription: "openApp/openAppWindow requires swipeDownApp (an app bundle ID)")
+            }
+            for slot in SwipeSlot.allCases {
+                let key = CodingKeys(rawValue: slot.keystrokeKey)!
+                if let raw = try c.decodeIfPresent(String.self, forKey: key) {
+                    guard let stroke = KeyStroke(raw) else {
+                        throw DecodingError.dataCorruptedError(forKey: key, in: c,
+                            debugDescription: "expected a key combination such as \"ctrl-left\" or \"cmd-shift-leftbracket\", got \(raw)")
+                    }
+                    keystrokes[slot] = stroke
+                }
+                if action(slot) == .keystroke, keystrokes[slot] == nil {
+                    throw DecodingError.dataCorruptedError(forKey: key, in: c,
+                        debugDescription: "\(slot.rawValue): keystroke requires \(slot.keystrokeKey) (e.g. \"ctrl-left\")")
+                }
             }
         }
 
@@ -156,6 +214,13 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             try c.encode(swipeDownRight, forKey: .swipeDownRight)
             try c.encode(swipeDownLeft, forKey: .swipeDownLeft)
             try c.encode(tap, forKey: .tap)
+            try c.encode(cmdSwipeLeft, forKey: .cmdSwipeLeft)
+            try c.encode(cmdSwipeRight, forKey: .cmdSwipeRight)
+            try c.encode(cmdSwipeUp, forKey: .cmdSwipeUp)
+            try c.encode(cmdSwipeDown, forKey: .cmdSwipeDown)
+            for (slot, stroke) in keystrokes {
+                try c.encode(stroke.spec, forKey: CodingKeys(rawValue: slot.keystrokeKey)!)
+            }
         }
     }
 
@@ -166,6 +231,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         case swapLeft, swapRight, swapUp, swapDown
         case alignLeft, center, alignRight, split, splitRight, slurp, barf, float
         case widthIncrease, widthDecrease, heightIncrease, heightDecrease
+        /// Sends the slot's configured key combination to the frontmost app.
+        case keystroke
 
         public var command: [String]? {
             switch self {
@@ -185,7 +252,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             case .heightIncrease: return ["height", "+"]
             case .heightDecrease: return ["height", "-"]
             case .tray, .center, .split, .slurp, .barf, .float: return [rawValue]
-            case .closeTab, .minimize, .newWindow, .openApp, .openAppWindow, .none: return nil
+            case .closeTab, .minimize, .newWindow, .openApp, .openAppWindow, .none, .keystroke: return nil
             }
         }
 
@@ -197,6 +264,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             case .openApp: return "Open Application"
             case .openAppWindow: return "Open New Application Window"
             case .none: return "None"
+            case .keystroke: return "Send Keystroke"
             default: return HotKeyBindings.actionLabel(command!.joined(separator: " "))
             }
         }
@@ -209,7 +277,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             ("Navigation", [.focusLeft, .focusRight, .focusUp, .focusDown, .tray]),
             ("Move Windows", [.swapLeft, .swapRight, .swapUp, .swapDown]),
             ("Column Layout", [.alignLeft, .center, .alignRight, .split, .splitRight, .slurp, .barf]),
-            ("Size", [.widthDecrease, .widthIncrease, .heightDecrease, .heightIncrease])
+            ("Size", [.widthDecrease, .widthIncrease, .heightDecrease, .heightIncrease]),
+            ("Keyboard", [.keystroke])
         ] }
     }
 
