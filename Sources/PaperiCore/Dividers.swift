@@ -112,6 +112,23 @@ extension Layout {
         return result
     }
 
+    /// Where row `divider` goes for the slot `id` beside it to be `height`
+    /// tall with its outer edge in place, in `moveDivider`'s coordinate; nil
+    /// if `divider` is not a row gap beside that slot.
+    public func rowDividerPosition(_ divider: Divider, keeping id: String, height: Double, in canvas: Rect,
+                                   gap: Double = 8, edgeMargin: Double? = nil) throws -> Double? {
+        guard case .rows(let c, let r) = divider, height.isFinite, columns.indices.contains(c),
+              r >= 0, r + 1 < columns[c].slots.count else { return nil }
+        let placements = try self.placements(in: canvas, gap: gap, edgeMargin: edgeMargin)
+        let upper = columns[c].slots[r].id, lower = columns[c].slots[r + 1].id
+        guard let above = placements.first(where: { $0.slotID == upper })?.frame,
+              let below = placements.first(where: { $0.slotID == lower })?.frame else { return nil }
+        let spacing = below.y - (above.y + above.height)
+        if id == upper { return above.y + height + spacing / 2 }
+        if id == lower { return below.y + below.height - height - spacing / 2 }
+        return nil
+    }
+
     /// Moves a divider so its gap is centred on `position` (a screen x for a
     /// column divider, y for a row divider). The windows on either side
     /// resize while their outer edges stay put, so the rest of the strip does

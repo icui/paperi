@@ -225,6 +225,8 @@ extension LiveManager {
             current.grab -= session.state.layout.offset - offset
             dividerDrag = current
         }
+        // A leader is written alone; the rest follow its real edge.
+        if let leader = current.leader, writeDividerFrames(current, only: leader) { return }
         writeDividerFrames(current)
         updateDividerDragIndicator()
     }
@@ -234,7 +236,12 @@ extension LiveManager {
     /// the gap, refusing to grow makes the window travel with it.
     func dividerWritten(_ result: FrameWriter.Result) {
         guard var current = dividerDrag else { return }
-        guard let size = result.actual else { log("gap drag write failed for \(result.windowID)"); return }
+        guard let size = result.actual else {
+            log("gap drag write failed for \(result.windowID)")
+            // The windows held back for the leader still follow the layout.
+            if result.slotID == current.leader { writeDividerFrames(current); updateDividerDragIndicator() }
+            return
+        }
         let slot = result.slotID
         let actual = Double(current.divider.isVertical ? size.width : size.height)
         let wanted = current.divider.isVertical ? result.wanted.width : result.wanted.height
@@ -242,6 +249,18 @@ extension LiveManager {
         // write of the drag) what it was asked for before.
         let before = current.actuals[slot] ?? result.previous.map { current.divider.isVertical ? $0.width : $0.height }
         current.actuals[slot] = actual
+        if case .rows(let c, let r) = current.divider, let session = coordinator.sessions[current.space],
+           let at = session.state.layout.index(of: slot), at.column == c, at.row == r || at.row == r + 1 {
+            if current.leader == nil, let before, Self.steppedWrite(wanted: wanted, before: before, actual: actual) {
+                current.leader = slot
+                log("gap drag follows slot \(slot): took \(Int(actual)) for \(Int(wanted))")
+            }
+            if current.leader == slot {
+                dividerDrag = current
+                followDividerLeader(result, size: actual)
+                return
+            }
+        }
         dividerDrag = current
         guard let before, let limit = Self.dividerLimit(wanted: wanted, before: before, actual: actual) else { return }
         switch limit {
@@ -255,6 +274,29 @@ extension LiveManager {
         dividerDrag = current
         log("gap drag learned limit \(Int(actual)) for slot \(slot)")
         layOutDividerDrag()
+    }
+
+    /// The leader's write finished: the gap moves to the window's real edge
+    /// (staying put if it refused), and the windows held back meanwhile are
+    /// fitted to it. A result superseded by a queued write is skipped.
+    func followDividerLeader(_ result: FrameWriter.Result, size: Double) {
+        guard let current = dividerDrag, let session = coordinator.sessions[current.space] else { return }
+        guard dividerTargets(session)[result.windowID] == result.wanted else { return }
+        if abs(size - result.wanted.height) > 1,
+           let position = try? session.state.layout.rowDividerPosition(current.divider, keeping: result.slotID,
+                                                                       height: size, in: session.canvas, gap: options.gap) {
+            session.moveDivider(current.divider, to: position, gap: options.gap,
+                                minimums: current.minimums, maximums: current.maximums, ticket: session.ticket)
+        }
+        writeDividerFrames(current)
+        updateDividerDragIndicator()
+    }
+
+    /// A write that changed the window's size without reaching the request:
+    /// it sizes in steps or clamps on the way, so its real edge leads.
+    /// Integral window sizes leave up to a point of rounding.
+    nonisolated static func steppedWrite(wanted: Double, before: Double, actual: Double) -> Bool {
+        abs(actual - wanted) > 1 && abs(actual - before) > 1
     }
 
     enum DividerLimit: Equatable, Sendable { case minimum, maximum }
@@ -283,23 +325,34 @@ extension LiveManager {
         if refreshing { refresh() }
     }
 
-    /// Queues the windows that moved: those beside the dragged gap and,
-    /// once a side travels with the gap, the strip beyond it. The full apply
-    /// pass (and its survey) is skipped mid-drag.
-    func writeDividerFrames(_ current: DividerDrag) {
-        guard let session = coordinator.sessions[current.space],
-              let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { return }
+    /// Where the drag puts each window now (tucked past a display edge).
+    func dividerTargets(_ session: ScopedLayoutSession) -> [UInt32: Rect] {
+        guard let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { return [:] }
         let tucked = LiveReconciliation.tuck(LiveReconciliation.edgeItems(placements),
                                              canvas: session.canvas, screenInset: options.outerGap)
+        return Dictionary(uniqueKeysWithValues: placements.map { ($0.windowID, tucked[$0.windowID] ?? $0.frame) })
+    }
+
+    /// Queues the windows that moved: those beside the dragged gap and,
+    /// once a side travels with the gap, the strip beyond it (or, with
+    /// `only`, just that slot's window). The full apply pass (and its survey)
+    /// is skipped mid-drag. Returns whether anything was queued.
+    @discardableResult
+    func writeDividerFrames(_ current: DividerDrag, only slotID: String? = nil) -> Bool {
+        guard let session = coordinator.sessions[current.space],
+              let placements = try? session.state.layout.placements(in: session.canvas, gap: options.gap) else { return false }
+        let targets = dividerTargets(session)
         let now = ProcessInfo.processInfo.systemUptime
-        for placement in placements {
+        var queued = false
+        for placement in placements where slotID == nil || placement.slotID == slotID {
             let wid = placement.windowID
-            let target = tucked[wid] ?? placement.frame
-            guard let element = references[wid], expected[wid]?.frame != target else { continue }
+            guard let target = targets[wid], let element = references[wid], expected[wid]?.frame != target else { continue }
             let current = expected[wid]?.frame
             session.expect(windowID: wid, frame: target, now: now, ticket: session.ticket)
             expected[wid] = (target, now)
             frameWriter.submit(windowID: wid, slotID: placement.slotID, element: element, frame: target, current: current)
+            queued = true
         }
+        return queued
     }
 }

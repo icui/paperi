@@ -157,4 +157,25 @@ struct DividerTests {
         let row = DividerRegion(divider: .rows(column: 0, row: 0), gap: Rect(x: 0, y: 296, width: 40, height: 8), position: 300)
         #expect(row.hitRegion(hitWidth: 10, length: 64) == Rect(x: 0, y: 295, width: 40, height: 10))
     }
+
+    @Test func rowDividerPositionGivesEitherSideItsHeight() throws {
+        let divider = Divider.rows(column: 1, row: 0)
+        for (id, other, height) in [("s2", "s3", 307.0), ("s3", "s2", 251.0)] {
+            var l = layout()
+            let before = try l.placements(in: canvas)
+            let position = try #require(try l.rowDividerPosition(divider, keeping: id, height: height, in: canvas))
+            #expect(try l.moveDivider(divider, to: position, in: canvas))
+            let after = try l.placements(in: canvas)
+            func frame(_ placements: [Placement], _ id: String) -> Rect { placements.first { $0.slotID == id }!.frame }
+            #expect(abs(frame(after, id).height - height) < 0.001)
+            // The column's outer edges stay put.
+            #expect(abs(frame(after, "s2").y - frame(before, "s2").y) < 0.001)
+            let bottom = { (f: Rect) in f.y + f.height }
+            #expect(abs(bottom(frame(after, "s3")) - bottom(frame(before, "s3"))) < 0.001)
+            #expect(frame(after, other).height != frame(before, other).height)
+        }
+        // Not beside that gap.
+        #expect(try layout().rowDividerPosition(divider, keeping: "s1", height: 300, in: canvas) == nil)
+        #expect(try layout().rowDividerPosition(.columns(0), keeping: "s2", height: 300, in: canvas) == nil)
+    }
 }

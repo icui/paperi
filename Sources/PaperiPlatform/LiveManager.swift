@@ -80,6 +80,10 @@ import PaperiCore
         var maximums: [String: Double] = [:]
         /// Size along the drag axis each slot's window last took, read back.
         var actuals: [String: Double] = [:]
+        /// Row gaps: the slot beside the gap whose window sizes in steps
+        /// (Terminal: whole text rows) or clamps, once one shows it. Its real
+        /// edge is the gap; the other windows are fitted to it.
+        var leader: String?
         /// Latest pointer coordinate along the drag axis.
         var along: Double
     }
