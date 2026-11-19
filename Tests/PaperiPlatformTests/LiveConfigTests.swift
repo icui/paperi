@@ -117,6 +117,14 @@ struct LiveConfigTests {
         }
     }
 
+    @Test func trayAllSpaces() throws {
+        #expect(LiveConfig.GestureConfig().trayAllSpaces)
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{}}"#.utf8)).gesture.trayAllSpaces)
+        let config = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"trayAllSpaces":false}}"#.utf8))
+        #expect(!config.gesture.trayAllSpaces)
+        #expect(try JSONDecoder().decode(LiveConfig.self, from: JSONEncoder().encode(config)) == config)
+    }
+
     @Test func openAppGesture() throws {
         #expect(LiveConfig.GestureConfig().swipeDownApp == nil)
         let config = try JSONDecoder().decode(LiveConfig.self, from: Data(#"{"gesture":{"swipeDown":"openApp","swipeDownApp":"com.apple.Terminal"}}"#.utf8))

@@ -74,7 +74,7 @@ Hold Shift while swiping to resize the focused window instead of moving through 
 
 ### Window tray
 
-Tap with three fingers to show thumbnails of every window in the strip, centred on the pointer. Click one to focus it, or drag one sideways to reorder the strip. The tray closes on a click outside it, or shortly after the pointer leaves it. ⌥⌘T opens it too. Thumbnails require Screen Recording permission.
+Tap with three fingers to show thumbnails of every window in the strip, centred on the pointer. Click one to focus it, or drag one sideways to reorder the strip. The tray closes on a click outside it, or shortly after the pointer leaves it. ⌥⌘T opens it too. By default the tray lists every Space of the display, one row per Space (the current Space's focused window is outlined; other Spaces' rows are slightly faded); clicking a window on another Space switches to it. A Space's row appears once Paperi has shown that Space since it started. Set `gesture.trayAllSpaces` to `false` (Settings › Gestures › Tray shows all Spaces) to show only the current Space. Thumbnails require Screen Recording permission.
 
 If macOS uses the same finger count for Mission Control, Spaces, or three-finger drag, Paperi disables its conflicting swipe and shows a warning. Change the system gesture or set `gesture.fingers` to `4`.
 

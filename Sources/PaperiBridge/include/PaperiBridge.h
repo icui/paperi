@@ -8,6 +8,9 @@ CFArrayRef paperi_copy_display_spaces(void) CF_RETURNS_RETAINED;
 CFArrayRef paperi_copy_window_spaces(uint32_t window) CF_RETURNS_RETAINED;
 int paperi_space_type(uint64_t space);
 uint64_t paperi_active_space(void);
+// Focuses a window as a user click would, switching to its Space if needed.
+// Returns false if the private functions are unavailable.
+bool paperi_focus_window(pid_t pid, uint32_t window);
 // Names of the private SkyLight/AX functions above that cannot be resolved.
 CFArrayRef paperi_copy_missing_private_functions(void) CF_RETURNS_RETAINED;
 // SLSMainConnectionID(), or 0 if unavailable.

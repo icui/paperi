@@ -63,6 +63,9 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         public var swipeDownLeft: SwipeDownAction
         /// What a quick tap with all `fingers` does.
         public var tap: TapAction
+        /// The tray shows windows from every Space of its display, one row
+        /// per Space, instead of only the current Space.
+        public var trayAllSpaces: Bool = true
         /// Key combinations sent by slots assigned `keystroke`, stored as
         /// `swipeUpKeystroke`, `swipeDownLeftKeystroke`, etc.
         public var keystrokes: [SwipeSlot: KeyStroke] = [:]
@@ -123,7 +126,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         enum CodingKeys: String, CodingKey {
             case swipeUpMode, swipeDownMode, swipeUp, swipeUpRight, swipeUpLeft
             case swipeDownApp, snapshotStyle
-            case enabled, fingers, travel, columnTravel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDown, swipeDownRight, swipeDownLeft, tap
+            case enabled, fingers, travel, columnTravel, commitThreshold, flickVelocity, invert, swipeUpToClose, tabCloseApps, swipeDown, swipeDownRight, swipeDownLeft, tap, trayAllSpaces
             /// Legacy boolean: `false` reads as `swipeDown: "none"`.
             case swipeDownToMinimize
             case swipeUpKeystroke, swipeUpRightKeystroke, swipeUpLeftKeystroke
@@ -162,6 +165,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             swipeDownRight = try c.decodeIfPresent(SwipeDownAction.self, forKey: .swipeDownRight) ?? d.swipeDownRight
             swipeDownLeft = try c.decodeIfPresent(SwipeDownAction.self, forKey: .swipeDownLeft) ?? d.swipeDownLeft
             tap = try c.decodeIfPresent(TapAction.self, forKey: .tap) ?? d.tap
+            trayAllSpaces = try c.decodeIfPresent(Bool.self, forKey: .trayAllSpaces) ?? d.trayAllSpaces
             if let raw = try c.decodeIfPresent(String.self, forKey: .swipeDown) {
                 guard let action = SwipeDownAction(rawValue: raw) else {
                     throw DecodingError.dataCorruptedError(forKey: .swipeDown, in: c,
@@ -214,6 +218,7 @@ public struct LiveConfig: Codable, Equatable, Sendable {
             try c.encode(swipeDownRight, forKey: .swipeDownRight)
             try c.encode(swipeDownLeft, forKey: .swipeDownLeft)
             try c.encode(tap, forKey: .tap)
+            try c.encode(trayAllSpaces, forKey: .trayAllSpaces)
             try c.encode(cmdSwipeLeft, forKey: .cmdSwipeLeft)
             try c.encode(cmdSwipeRight, forKey: .cmdSwipeRight)
             try c.encode(cmdSwipeUp, forKey: .cmdSwipeUp)
@@ -479,7 +484,8 @@ public struct LiveConfig: Codable, Equatable, Sendable {
         "swipeDown": "newWindow",
         "swipeDownRight": "splitRight",
         "swipeDownLeft": "minimize",
-        "tap": "tray"
+        "tap": "tray",
+        "trayAllSpaces": true
       },
       "hotkeys": {
         "alt-cmd-j": "focus left",

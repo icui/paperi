@@ -33,10 +33,37 @@ extension LiveManager {
 
     func focusThumbnail(_ wid: UInt32, in space: UInt64) {
         guard running, !paused, DisplayArrangement.currentProblem() == nil,
-              coordinator.spaceForWindow[wid] == space,
-              coordinator.display(forSpace: space)?.activeSpaceID == space,
-              let session = coordinator.sessions[space], !session.state.interactionSuppressed,
+              coordinator.spaceForWindow[wid] == space else { return }
+        guard coordinator.display(forSpace: space)?.activeSpaceID == space else {
+            focusThumbnailOnOtherSpace(wid, in: space)
+            return
+        }
+        guard let session = coordinator.sessions[space], !session.state.interactionSuppressed,
               isActiveRepresentative(wid), let pid = pidForWindow[wid], edgeResize == nil else { return }
+        focusThumbnailOnActiveSpace(wid, pid: pid, session: session, space: space)
+    }
+
+    /// A tray row of another Space: focus the window in that Space's strip
+    /// and scroll it into view, then switch to the Space by bringing the
+    /// window forward as a click would. The Space change triggers the
+    /// refresh that lays the strip out. Its (usually stale) interaction
+    /// suppression is ignored: focusing a strip window clears it.
+    private func focusThumbnailOnOtherSpace(_ wid: UInt32, in space: UInt64) {
+        guard let session = coordinator.sessions[space],
+              isActiveRepresentative(wid), let pid = pidForWindow[wid], edgeResize == nil,
+              raisable(wid) != nil else { return }
+        cancelMotion(); motionFrames.removeAll()
+        try? session.focus(windowID: wid, ownerPID: pid, classification: Self.tiled, ticket: session.ticket)
+        reveal(session)
+        forceApply = true
+        windowIndicators.hide()
+        if !paperi_focus_window(pid, wid) { log("tray: private focus unavailable for \(wid); raising instead") }
+        _ = raise(wid)
+        log("tray: focused \(wid) on Space \(space)")
+        scheduleRefresh()
+    }
+
+    private func focusThumbnailOnActiveSpace(_ wid: UInt32, pid: pid_t, session: ScopedLayoutSession, space: UInt64) {
         cancelMotion(); motionFrames.removeAll()
         commandStarted = ProcessInfo.processInfo.systemUptime
         firstWriteMS = nil; finalWriteMS = nil; confirmedMS = nil
@@ -104,7 +131,9 @@ extension LiveManager {
     func moveThumbnail(_ wid: UInt32, to position: Int, in space: UInt64) {
         guard running, !paused, DisplayArrangement.currentProblem() == nil,
               coordinator.spaceForWindow[wid] == space,
-              let session = coordinator.sessions[space], !session.state.interactionSuppressed,
+              let session = coordinator.sessions[space],
+              // Inactive Spaces keep a stale suppression; see focusThumbnail.
+              !session.state.interactionSuppressed || coordinator.display(forSpace: space)?.activeSpaceID != space,
               session.move(windowID: wid, to: position, ticket: session.ticket) else {
             windowIndicators.update(coordinator, mode: options.config.bottomDotsVisibility, redrawSpace: space)
             return

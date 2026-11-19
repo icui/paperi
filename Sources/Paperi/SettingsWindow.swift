@@ -233,7 +233,8 @@ private struct SettingsView: View {
                       Setting(id: "gesture.cmdSwipeUpKeystroke", title: "⌘ + swipe up keystroke", detail: Self.keystrokeDetail),
                       Setting(id: "gesture.cmdSwipeDownKeystroke", title: "⌘ + swipe down keystroke", detail: Self.keystrokeDetail),
                       Setting(id: "gesture.swipeDownApp", title: "Open application", detail: "App bundle ID shared by all Open Application actions."),
-                      Setting(id: "gesture.tap", title: "Tap", detail: "Action for a quick multi-finger tap.", choices: ["tray", "none"])])
+                      Setting(id: "gesture.tap", title: "Tap", detail: "Action for a quick multi-finger tap.", choices: ["tray", "none"]),
+                      Setting(id: "gesture.trayAllSpaces", title: "Tray shows all Spaces", detail: "Show windows from every Space of the display in the tray, one row per Space.")])
     ] }
     private static let keystrokeDetail = "Key combination to send, e.g. ctrl-left or cmd-shift-leftbracket."
     /// Settings whose entries are app bundle IDs, one per line.
@@ -350,7 +351,7 @@ private struct SettingsView: View {
             .labelsHidden()
         }
         if model.gestureTab == "General" {
-            gestureSection("Trackpad", ids: ["enabled", "fingers", "tap"], fields: fields)
+            gestureSection("Trackpad", ids: ["enabled", "fingers", "tap", "trayAllSpaces"], fields: fields)
             gestureSection("Navigation and Appearance", ids: ["invert", "snapshotStyle"], fields: fields)
             gestureSection("Shared Command Options", ids: ["swipeDownApp"], fields: fields)
         } else if model.gestureTab == "⌘ Swipe" {

@@ -655,7 +655,8 @@ extension LiveManager {
     /// the pointer. Returns false when that display has no tray to show.
     @discardableResult func showTray() -> Bool {
         guard let display = pointerDisplay() else { return false }
-        return windowIndicators.summon(display: display.displayUUID, at: NSEvent.mouseLocation, coordinator: coordinator)
+        return windowIndicators.summon(display: display.displayUUID, at: NSEvent.mouseLocation,
+                                       allSpaces: options.config.gesture.trayAllSpaces, coordinator: coordinator)
     }
 
     /// Accessory apps can own keyboard focus without owning the menu bar.

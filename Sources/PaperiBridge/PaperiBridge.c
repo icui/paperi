@@ -11,6 +11,7 @@
 #include "PaperiBridge.h"
 #include <dlfcn.h>
 #include <pthread.h>
+#include <string.h>
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static void *sky;
 // Resolved once: these run per window on every refresh and in swipe paths.
@@ -70,6 +71,37 @@ bool paperi_set_cursor_in_background(bool enabled) {
     if (!set_property && sky) set_property = dlsym(sky, "SLSSetConnectionProperty");
     if (!cid || !set_property) return false;
     return set_property(cid, cid, CFSTR("SetsCursorInBackground"), enabled ? kCFBooleanTrue : kCFBooleanFalse) == 0;
+}
+// Brings `window` of `pid` to the front as if the user clicked it, switching
+// to its Space when it is on another one. SkyLight's front-process call plus
+// a synthetic make-key-window event record (the approach window switchers
+// such as AltTab use); AXRaise and activation alone do not switch Spaces
+// when the app also has windows on the current one. Returns false when the
+// private functions are unavailable or the process cannot be found.
+bool paperi_focus_window(pid_t pid, uint32_t window) {
+    pthread_once(&once, load);
+    static int (*set_front)(ProcessSerialNumber *, uint32_t, uint32_t);
+    static int (*post_record)(ProcessSerialNumber *, uint8_t *);
+    if (!set_front && sky) set_front = dlsym(sky, "_SLPSSetFrontProcessWithOptions");
+    if (!post_record && sky) post_record = dlsym(sky, "SLPSPostEventRecordTo");
+    if (!set_front || !post_record || !window) return false;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    ProcessSerialNumber psn = {0, 0};
+    if (GetProcessForPID(pid, &psn) != noErr) return false;
+#pragma clang diagnostic pop
+    // 0x200: kCPSUserGenerated.
+    if (set_front(&psn, window, 0x200) != 0) return false;
+    uint8_t bytes[0xf8] = {0};
+    bytes[0x04] = 0xf8;
+    bytes[0x3a] = 0x10;
+    memcpy(bytes + 0x3c, &window, sizeof window);
+    memset(bytes + 0x20, 0xff, 0x10);
+    bytes[0x08] = 0x01;
+    post_record(&psn, bytes);
+    bytes[0x08] = 0x02;
+    post_record(&psn, bytes);
+    return true;
 }
 CFArrayRef paperi_copy_missing_private_functions(void) {
     pthread_once(&once, load);

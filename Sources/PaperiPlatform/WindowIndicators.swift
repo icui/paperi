@@ -12,6 +12,17 @@ import ScreenCaptureKit
         let layout: Layout
         let canvas: Rect
     }
+    /// One tray row: a Space's windows, strip order first.
+    private struct TrayRow: Equatable {
+        let space: UInt64
+        let ids: [UInt32]
+        let selected: Int?
+    }
+    private struct TrayPresentation: Equatable {
+        let active: UInt64
+        let rows: [TrayRow]
+        let canvas: Rect
+    }
     var onSelect: ((UInt32, UInt64) -> Void)?
     /// A thumbnail was dragged to a new position in tray order.
     var onMove: ((UInt32, Int, UInt64) -> Void)?
@@ -50,22 +61,28 @@ import ScreenCaptureKit
     private var dotPresentations: [String: Presentation] = [:]
     // Open thumbnail trays, by display UUID.
     private var trayPanels: [String: NSPanel] = [:]
-    private var trayPresentations: [String: Presentation] = [:]
+    private var trayPresentations: [String: TrayPresentation] = [:]
     private var trayTasks: [String: Task<Void, Never>] = [:]
     /// Where each open tray was summoned (AppKit screen coordinates).
     private var anchors: [String: CGPoint] = [:]
+    /// Open trays that list every Space of their display, one row each.
+    private var allSpaceTrays: Set<String> = []
     private var requestedCaptureAccess = false
     /// Mouse-down monitors that close the tray on outside clicks.
     private var clickMonitors: [Any] = []
 
-    /// Shows the thumbnail tray of `displayUUID`'s current Space centred on
+    /// Shows the thumbnail tray of `displayUUID`'s current Space (with
+    /// `allSpaces`, every Space of that display, one row each) centred on
     /// `point`. Returns false when that display has no tray to show.
     @discardableResult
-    func summon(display displayUUID: String, at point: CGPoint, coordinator: DisplaySpaceCoordinator) -> Bool {
+    func summon(display displayUUID: String, at point: CGPoint, allSpaces: Bool = false,
+                coordinator: DisplaySpaceCoordinator) -> Bool {
         anchors[displayUUID] = point
+        if allSpaces { allSpaceTrays.insert(displayUUID) } else { allSpaceTrays.remove(displayUUID) }
         update(coordinator, mode: mode, redrawTray: displayUUID)
         guard trayPresentations[displayUUID] != nil else {
             anchors[displayUUID] = nil
+            allSpaceTrays.remove(displayUUID)
             return false
         }
         return true
@@ -98,23 +115,41 @@ import ScreenCaptureKit
                   !session.state.interactionSuppressed else { continue }
             let layout = session.state.layout
             let slots = layout.columns.flatMap(\.slots)
-            guard slots.count > 1 else { continue }
             let id = display.displayUUID
             let presentation = Presentation(space: space, layout: layout, canvas: display.canvas)
             let screen = NSRect(x: display.canvas.x, y: primaryTop - display.canvas.y - display.canvas.height,
                                 width: display.canvas.width, height: display.canvas.height)
+            if let anchor = anchors[id] {
+                let current = TrayRow(space: space, ids: slots.map(\.activeMember),
+                                      selected: slots.firstIndex { $0.id == layout.focused })
+                // Rows follow Mission Control order, skipping Spaces without
+                // windows. Paperi learns a Space's strip while it is shown.
+                // An inactive Space usually keeps interaction suppressed (its
+                // last focus event named a window elsewhere) until shown
+                // again; that does not hide its row.
+                let rows: [TrayRow] = allSpaceTrays.contains(id)
+                    ? display.userSpaces.compactMap { other in
+                        if other == space { return current.ids.isEmpty ? nil : current }
+                        let ids = coordinator.sessions[other]?.state.layout.columns.flatMap(\.slots).map(\.activeMember) ?? []
+                        return ids.isEmpty ? nil : TrayRow(space: other, ids: ids, selected: nil)
+                    }
+                    : [current]
+                let count = rows.reduce(0) { $0 + $1.ids.count }
+                if count > 0 {
+                    trays.insert(id)
+                    let tray = TrayPresentation(active: space, rows: rows, canvas: display.canvas)
+                    if trayPresentations[id] != tray || id == redrawTray || rows.contains(where: { $0.space == redrawSpace }) {
+                        trayPresentations[id] = tray
+                        showTray(id, tray: tray, screen: screen, anchor: anchor)
+                    }
+                }
+            }
+            guard slots.count > 1 else { continue }
             if mode == .visible || (mode == .auto && autoDotsDisplay == id) {
                 dots.insert(id)
                 if dotPresentations[id] != presentation || dotPanels[id]?.isVisible != true {
                     dotPresentations[id] = presentation
                     showDots(id, slots: slots, focused: layout.focused, screen: screen)
-                }
-            }
-            if let anchor = anchors[id] {
-                trays.insert(id)
-                if trayPresentations[id] != presentation || id == redrawTray || space == redrawSpace {
-                    trayPresentations[id] = presentation
-                    showTray(id, space: space, slots: slots, focused: layout.focused, screen: screen, anchor: anchor)
                 }
             }
         }
@@ -173,30 +208,46 @@ import ScreenCaptureKit
         }
     }
 
-    private func showTray(_ id: String, space: UInt64, slots: [Slot], focused: String?, screen: NSRect, anchor: CGPoint) {
+    private static let rowHeight: CGFloat = 86
+
+    private func showTray(_ id: String, tray: TrayPresentation, screen: NSRect, anchor: CGPoint) {
         trayTasks[id]?.cancel()
         let panel = trayPanels[id] ?? makePanel()
         trayPanels[id] = panel
         panel.ignoresMouseEvents = false
         installClickMonitors()
-        let width = min(CGFloat(slots.count) * 116 + 20, max(28, screen.width - 32))
-        let height: CGFloat = 96
+        let rows = tray.rows
+        let capacity = max(1, rows.map(\.ids.count).max() ?? 1)
+        let width = min(CGFloat(capacity) * 116 + 20, max(28, screen.width - 32))
+        let height = min(CGFloat(rows.count) * Self.rowHeight + 10, max(28, screen.height - 16))
+        let rowHeight = (height - 10) / CGFloat(max(1, rows.count))
         // Centred on the pointer, kept on its display.
         let frame = NSRect(x: min(max(anchor.x - width / 2, screen.minX + 8), screen.maxX - 8 - width),
                            y: min(max(anchor.y - height / 2, screen.minY + 8), screen.maxY - 8 - height),
                            width: width, height: height)
         panel.setFrame(frame, display: false)
         guard let glass = panel.contentView else { return }
-        let cachedImages = (glass.subviews.first as? WindowPreviews)?.images ?? [:]
+        var cachedImages: [UInt32: NSImage] = [:]
+        for view in glass.subviews { (view as? WindowPreviews)?.images.forEach { cachedImages[$0.key] = $0.value } }
         glass.subviews.forEach { $0.removeFromSuperview() }
-        let previews = WindowPreviews(frame: NSRect(origin: .zero, size: frame.size))
-        previews.ids = slots.map(\.activeMember)
-        previews.onSelect = { [weak self] window in self?.onSelect?(window, space) }
-        previews.onMove = { [weak self] window, position in self?.onMove?(window, position, space) }
-        previews.images = cachedImages.filter { previews.ids.contains($0.key) }
-        previews.selected = slots.firstIndex { $0.id == focused }
-        glass.addSubview(previews)
-        if previews.images.isEmpty {
+        var strips: [WindowPreviews] = []
+        // The first Space is the top row.
+        for (index, row) in rows.enumerated() {
+            let y = 5 + CGFloat(rows.count - 1 - index) * rowHeight
+            let previews = WindowPreviews(frame: NSRect(x: 0, y: y, width: frame.width, height: rowHeight))
+            previews.capacity = capacity
+            previews.dimmed = row.space != tray.active
+            previews.ids = row.ids
+            let space = row.space
+            previews.onSelect = { [weak self] window in self?.onSelect?(window, space) }
+            previews.onMove = { [weak self] window, position in self?.onMove?(window, position, space) }
+            previews.images = cachedImages.filter { previews.ids.contains($0.key) }
+            previews.selected = row.selected
+            glass.addSubview(previews)
+            strips.append(previews)
+        }
+        let hasImages = { strips.contains { !$0.images.isEmpty } }
+        if !hasImages() {
             panel.orderOut(nil)
         } else {
             panel.alphaValue = 1
@@ -213,23 +264,33 @@ import ScreenCaptureKit
             guard !Task.isCancelled else { return }
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
-                for wid in previews.ids {
-                    try Task.checkCancellation()
-                    guard let window = content.windows.first(where: { $0.windowID == wid }) else { continue }
-                    let filter = SCContentFilter(desktopIndependentWindow: window)
-                    let config = SCStreamConfiguration()
-                    let aspect = max(0.1, window.frame.width / max(1, window.frame.height))
-                    config.width = 224
-                    config.height = max(1, min(448, Int(224 / aspect)))
-                    config.showsCursor = false
-                    config.ignoreShadowsSingleWindow = true
-                    let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-                    try Task.checkCancellation()
-                    previews.images[wid] = NSImage(cgImage: image, size: .zero)
+                for previews in strips {
+                    for wid in previews.ids {
+                        try Task.checkCancellation()
+                        guard let window = content.windows.first(where: { $0.windowID == wid }) else { continue }
+                        let filter = SCContentFilter(desktopIndependentWindow: window)
+                        let config = SCStreamConfiguration()
+                        let aspect = max(0.1, window.frame.width / max(1, window.frame.height))
+                        config.width = 224
+                        config.height = max(1, min(448, Int(224 / aspect)))
+                        config.showsCursor = false
+                        config.ignoreShadowsSingleWindow = true
+                        // One window that cannot be captured (e.g. on
+                        // another Space) leaves only its own cell empty.
+                        let image: CGImage
+                        do {
+                            image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                        } catch {
+                            try Task.checkCancellation()
+                            continue
+                        }
+                        try Task.checkCancellation()
+                        previews.images[wid] = NSImage(cgImage: image, size: .zero)
+                        previews.needsDisplay = true
+                    }
                 }
                 try Task.checkCancellation()
-                guard !previews.images.isEmpty else { self.closeTray(id); return }
-                previews.needsDisplay = true
+                guard hasImages() else { self.closeTray(id); return }
                 panel?.alphaValue = 1
                 panel?.orderFrontRegardless()
                 // Hovering anywhere in the tray holds it open, including its
@@ -239,7 +300,7 @@ import ScreenCaptureKit
                 // under the pointer (near a screen edge) waits a full second
                 // until the pointer first enters it.
                 try await ThumbnailFade.run(delay: 1, leaveDelay: 0.3, shouldStayVisible: {
-                    previews.isDragging || panel.map { $0.frame.contains(NSEvent.mouseLocation) } == true
+                    strips.contains(where: \.isDragging) || panel.map { $0.frame.contains(NSEvent.mouseLocation) } == true
                 }) { panel?.alphaValue = $0 }
                 try Task.checkCancellation()
                 self.closeTray(id)
@@ -254,6 +315,7 @@ import ScreenCaptureKit
         trayTasks.removeValue(forKey: id)?.cancel()
         trayPresentations.removeValue(forKey: id)
         anchors.removeValue(forKey: id)
+        allSpaceTrays.remove(id)
         trayPanels[id]?.orderOut(nil)
         if anchors.isEmpty { removeClickMonitors() }
     }
@@ -284,7 +346,8 @@ import ScreenCaptureKit
     private func closeTrays(outside point: CGPoint) {
         for (id, panel) in trayPanels where anchors[id] != nil {
             guard !panel.frame.contains(point),
-                  (panel.contentView?.subviews.first as? WindowPreviews)?.isDragging != true else { continue }
+                  panel.contentView?.subviews.contains(where: { ($0 as? WindowPreviews)?.isDragging == true }) != true
+            else { continue }
             closeTray(id)
         }
     }
@@ -323,6 +386,11 @@ import ScreenCaptureKit
         var position: Int
     }
     var ids: [UInt32] = []
+    /// Cells laid out per row: the longest row's count, so rows of
+    /// different lengths share one cell size and are centred.
+    var capacity = 1
+    /// Rows of Spaces other than the current one draw slightly faded.
+    var dimmed = false
     var selected: Int?
     var images: [UInt32: NSImage] = [:]
     var onSelect: ((UInt32) -> Void)?
@@ -331,11 +399,13 @@ import ScreenCaptureKit
     private var pressed: (window: UInt32, index: Int, point: NSPoint)?
     private var drag: Drag?
 
-    private var cellWidth: CGFloat { (bounds.width - 20) / CGFloat(max(1, ids.count)) }
+    private var cellWidth: CGFloat { (bounds.width - 20) / CGFloat(max(1, capacity, ids.count)) }
+    /// Left edge of the first cell.
+    private var leading: CGFloat { (bounds.width - CGFloat(ids.count) * cellWidth) / 2 }
 
     private func cell(at index: Int) -> NSRect {
-        NSRect(x: 10 + CGFloat(index) * cellWidth + 3, y: 10,
-               width: max(1, cellWidth - 6), height: bounds.height - 20)
+        NSRect(x: leading + CGFloat(index) * cellWidth + 3, y: 5,
+               width: max(1, cellWidth - 6), height: bounds.height - 10)
     }
 
     private func index(at point: NSPoint) -> Int? {
@@ -361,13 +431,13 @@ import ScreenCaptureKit
             // A small wobble while clicking must not start a reorder.
             guard hypot(point.x - pressed.point.x, point.y - pressed.point.y) >= 4 else { return }
             drag = Drag(window: pressed.window, from: pressed.index,
-                        grab: pressed.point.x - (10 + CGFloat(pressed.index) * cellWidth),
+                        grab: pressed.point.x - (leading + CGFloat(pressed.index) * cellWidth),
                         x: point.x, position: pressed.index)
             NSCursor.closedHand.push()
         }
         guard var current = drag else { return }
         current.x = point.x
-        let left = point.x - current.grab - 10
+        let left = point.x - current.grab - leading
         current.position = min(ids.count - 1, max(0, Int((left / cellWidth).rounded())))
         drag = current
         needsDisplay = true
@@ -426,10 +496,12 @@ import ScreenCaptureKit
         NSColor.white.withAlphaComponent(drag?.from == index ? 0.2 : 0.1).setFill()
         path.fill()
         if let image = images[ids[index]] {
+            let alpha: CGFloat = dimmed && drag?.from != index ? 0.7 : 1
             let scale = min((cell.width - 4) / image.size.width, (cell.height - 4) / image.size.height)
             let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
             image.draw(in: NSRect(x: cell.midX - size.width / 2, y: cell.midY - size.height / 2,
-                                  width: size.width, height: size.height))
+                                  width: size.width, height: size.height),
+                       from: .zero, operation: .sourceOver, fraction: alpha)
         }
         if index == selected {
             NSColor.white.withAlphaComponent(0.95).setStroke()
