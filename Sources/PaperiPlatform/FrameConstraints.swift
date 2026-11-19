@@ -17,6 +17,15 @@ struct FrameConstraints {
         settled[wid].flatMap { $0.target == target ? $0.frame : nil }
     }
 
+    /// True when the window settled at `actual`'s size for a target of
+    /// `target`'s size. Position-only motion (a scroll moves the target, not
+    /// its size) can then slide the window at the size it keeps.
+    func keepsSize(_ wid: UInt32, _ actual: Rect, for target: Rect) -> Bool {
+        guard let entry = settled[wid] else { return false }
+        return abs(entry.target.width - target.width) <= 0.5 && abs(entry.target.height - target.height) <= 0.5
+            && abs(entry.frame.width - actual.width) <= 1 && abs(entry.frame.height - actual.height) <= 1
+    }
+
     /// Called instead of writing `target` to a window found at `frame`. True
     /// when the previous write of this target also found the window there,
     /// with its position honoured and its size only rounded: it has settled,

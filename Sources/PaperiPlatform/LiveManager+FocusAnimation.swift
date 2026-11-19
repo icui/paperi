@@ -53,6 +53,13 @@ extension LiveManager {
     /// Cached surveys for every window placed on `space`, carrying current
     /// WindowServer frames; nil when any of them is unknown, not tiled, or
     /// not on that Space (the caller then takes the full refresh path).
+    /// `LiveReconciliation.animationSizeMatches`, also accepting the size an
+    /// app keeps for the target (Terminal's whole text rows can be further
+    /// off than the fixed tolerance, e.g. after a stacked resize).
+    func animationSizeMatches(_ wid: UInt32, _ actual: Rect, _ target: Rect) -> Bool {
+        LiveReconciliation.animationSizeMatches(actual, target) || frameConstraints.keepsSize(wid, actual, for: target)
+    }
+
     func cachedStripSurveys(space: UInt64, placements: [Placement], source: [UInt32: Survey]? = nil) -> [UInt32: Survey]? {
         guard !effectsHeld(space) else { return nil }
         let source = source ?? latestSurvey
@@ -110,7 +117,7 @@ extension LiveManager {
                 cancelMotion(); apply(space: space, byID: byID); return
             }
             // Position-only animation cannot apply admission or resize changes.
-            guard LiveReconciliation.animationSizeMatches(frame, target) else {
+            guard animationSizeMatches(wid, frame, target) else {
                 cancelMotion(); apply(space: space, byID: byID); return
             }
             if bounce != nil || !matches(frame, target) { starts[wid] = frame }

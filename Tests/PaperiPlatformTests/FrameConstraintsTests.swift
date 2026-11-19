@@ -46,4 +46,23 @@ struct FrameConstraintsTests {
         let r9 = constraints.settles(4, at: Rect(x: 704, y: 38, width: 720, height: 875), for: target)
         #expect(!r9)
     }
+
+    @Test func settledSizeCountsForMovedTargetsOfTheSameSize() {
+        var constraints = FrameConstraints()
+        // Terminal keeps whole rows: 5 points taller than a stacked target.
+        let stacked = Rect(x: 1378, y: 502, width: 776, height: 422)
+        let kept = Rect(x: 1378, y: 503, width: 776, height: 427)
+        #expect(!constraints.keepsSize(5, kept, for: stacked))
+        _ = constraints.settles(5, at: kept, for: stacked)
+        _ = constraints.settles(5, at: kept, for: stacked)
+        // A scroll moves the target but keeps its size.
+        var scrolled = stacked; scrolled.x -= 700
+        var slid = kept; slid.x -= 700
+        #expect(constraints.keepsSize(5, slid, for: scrolled))
+        // A resized target, or a window at another size, needs its own proof.
+        var taller = stacked; taller.height += 40
+        #expect(!constraints.keepsSize(5, slid, for: taller))
+        var grown = slid; grown.height += 15
+        #expect(!constraints.keepsSize(5, grown, for: scrolled))
+    }
 }

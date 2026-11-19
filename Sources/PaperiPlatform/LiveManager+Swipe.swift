@@ -1078,7 +1078,7 @@ extension LiveManager {
             let targets = LiveReconciliation.focusTargets(placements, canvas: session.canvas, screenInset: options.outerGap)
             guard surveys.allSatisfy({ wid, row in
                 guard let frame = row.frame, let target = targets[wid] else { return false }
-                return LiveReconciliation.animationSizeMatches(frame, target)
+                return animationSizeMatches(wid, frame, target)
             }) else { return nil }
             ends[direction] = targets
             neighbours[direction] = layout.columns[loc.column].slots[loc.row].activeMember
@@ -1595,7 +1595,7 @@ extension LiveManager {
         // Every survivor needs an image of the right size to slide.
         guard targets.allSatisfy({ id, frame in
             guard let start = state.starts[id] else { return false }
-            return LiveReconciliation.animationSizeMatches(start, frame)
+            return animationSizeMatches(id, start, frame)
         }) else { return nil }
         state.overlay.slide(to: targets, duration: duration, easeIn: true)
         apply(space: state.space, byID: state.surveys)
