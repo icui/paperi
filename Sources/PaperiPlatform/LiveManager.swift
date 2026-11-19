@@ -888,6 +888,16 @@ import PaperiCore
                 focusAnimationSpace = space
             }
         }
+        if let arrival = spaceArrival {
+            if ProcessInfo.processInfo.systemUptime > arrival.until {
+                spaceArrival = nil
+            } else if activeSpaces.contains(arrival.space), !heldSpaces.contains(arrival.space), !mouseDown {
+                spaceArrival = nil
+                if focusAnimationSpace == nil, !forceApply, ProcessInfo.processInfo.systemUptime >= forceUntil {
+                    focusAnimationSpace = arrival.space
+                }
+            }
+        }
         if focusAnimationSpace == nil, !forceApply, ProcessInfo.processInfo.systemUptime >= forceUntil {
             focusAnimationSpace = closedSpaces.first {
                 activeSpaces.contains($0) && !heldSpaces.contains($0) && coordinator.sessions[$0] != nil
@@ -1150,6 +1160,9 @@ import PaperiCore
     var swipe: Swipe?
     var swipeTask: Task<Void, Never>?
     var neighbourTask: Task<Void, Never>?
+    /// A Space being switched to from the tray, until the deadline: the
+    /// first refresh with it active animates any remaining placement.
+    var spaceArrival: (space: UInt64, until: Double)?
     var swipeGuard: Timer?
     var swipeSimulation: Timer?
     var swipeMetrics: [String: Any] = [:]

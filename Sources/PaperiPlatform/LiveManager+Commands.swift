@@ -45,9 +45,16 @@ extension LiveManager {
 
     /// A tray row of another Space: focus the window in that Space's strip
     /// and scroll it into view, then switch to the Space by bringing the
-    /// window forward as a click would. The Space change triggers the
-    /// refresh that lays the strip out. Its (usually stale) interaction
+    /// window forward as a click would. Its (usually stale) interaction
     /// suppression is ignored: focusing a strip window clears it.
+    ///
+    /// The strip is written while its Space is still hidden, so the Space
+    /// change animation already shows the final layout. Writes go through
+    /// cached references with no survey rows (`apply` then checks each
+    /// window's Space and never trusts a stale frame) and stay unconfirmed,
+    /// so the refresh after the switch verifies them. Anything still off
+    /// then (an app that ignores writes while hidden) animates into place
+    /// instead of jumping (`spaceArrival`).
     private func focusThumbnailOnOtherSpace(_ wid: UInt32, in space: UInt64) {
         guard let session = coordinator.sessions[space],
               isActiveRepresentative(wid), let pid = pidForWindow[wid], edgeResize == nil,
@@ -55,7 +62,8 @@ extension LiveManager {
         cancelMotion(); motionFrames.removeAll()
         try? session.focus(windowID: wid, ownerPID: pid, classification: Self.tiled, ticket: session.ticket)
         reveal(session)
-        forceApply = true
+        apply(space: space, byID: [:])
+        spaceArrival = (space, ProcessInfo.processInfo.systemUptime + 2)
         windowIndicators.hide()
         if !paperi_focus_window(pid, wid) { log("tray: private focus unavailable for \(wid); raising instead") }
         _ = raise(wid)
