@@ -40,33 +40,59 @@ import PaperiCore
     private(set) var capturePhases: [String: Any] = [:]
     private var captureLaunch = 0.0
     private var windowTimings: [[String: Any]] = []
-    private static func ms(_ since: Double) -> Double {
+    nonisolated private static func ms(_ since: Double) -> Double {
         ((ProcessInfo.processInfo.systemUptime - since) * 10000).rounded() / 10
     }
 
-    func prepare(windows ids: Set<UInt32>, excluding stripIDs: Set<UInt32> = [], canvas: Rect) async throws {
+    /// The window list a capture starts from, and how long it took (ms).
+    /// Wrapped so callers need not import ScreenCaptureKit (whose types are
+    /// only treated as Sendable here, under `@preconcurrency`).
+    struct WindowList: @unchecked Sendable {
+        fileprivate let task: Task<(SCShareableContent, Double), Error>
+        func cancel() { task.cancel() }
+    }
+
+    /// Starts listing windows off the main thread. `LiveManager.beginSwipe`
+    /// calls this before its own setup so the two overlap (see there).
+    nonisolated static func listWindows() -> WindowList {
+        WindowList(task: Task.detached(priority: .userInitiated) {
+            let began = ProcessInfo.processInfo.systemUptime
+            // On-screen windows only: about 13 ms instead of 30 ms on a desktop
+            // with ~150 windows (measured 2026-11-19, macOS 27.2), and the cost
+            // grows with visible windows, not every window on the system.
+            // Trade-off: windows WindowServer does not count as on screen are not
+            // listed: minimized, in hidden apps, on other Spaces. A swipe needs
+            // none of them; strip windows parked past the display edge are still
+            // listed (verified at x = -1019). A window caught mid-appearance
+            // (restored from the Dock, during a Space switch) can be missed: the
+            // `missingWindow` guard in `prepare` then fails the capture and the swipe
+            // runs without images. Everything the background excludes is visible
+            // (strip windows, fading overlays, Dock/menu bar), so it is still
+            // listed. If that fallback ever shows up in `performance.swipe`
+            // ("state": "fallback", "reason": "missingWindow"), pass `false` to go
+            // back to listing every window.
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            return (content, ms(began))
+        })
+    }
+
+    /// `windowList`: a listing already under way (from `listWindows()`);
+    /// nil lists now.
+    func prepare(windows ids: Set<UInt32>, excluding stripIDs: Set<UInt32> = [], canvas: Rect,
+                 windowList: WindowList? = nil) async throws {
         self.canvas = canvas
         let began = ProcessInfo.processInfo.systemUptime
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else { throw Failure.permission }
         capturePhases = ["permissionMS": Self.ms(began)]
         windowTimings = []
-        let listed = ProcessInfo.processInfo.systemUptime
-        // On-screen windows only: about 13 ms instead of 30 ms on a desktop
-        // with ~150 windows (measured 2026-11-19, macOS 27.2), and the cost
-        // grows with visible windows, not every window on the system.
-        // Trade-off: windows WindowServer does not count as on screen are not
-        // listed: minimized, in hidden apps, on other Spaces. A swipe needs
-        // none of them; strip windows parked past the display edge are still
-        // listed (verified at x = -1019). A window caught mid-appearance
-        // (restored from the Dock, during a Space switch) can be missed: the
-        // `missingWindow` guard below then fails the capture and the swipe
-        // runs without images. Everything the background excludes is visible
-        // (strip windows, fading overlays, Dock/menu bar), so it is still
-        // listed. If that fallback ever shows up in `performance.swipe`
-        // ("state": "fallback", "reason": "missingWindow"), pass `false` to go
-        // back to listing every window.
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        capturePhases["contentMS"] = Self.ms(listed)
+        let waited = ProcessInfo.processInfo.systemUptime
+        let list = windowList ?? Self.listWindows()
+        // A cancelled swipe lets the listing finish (~11 ms, off the main
+        // thread); the check below drops its result.
+        let (content, listMS) = try await list.task.value
+        capturePhases["contentMS"] = listMS
+        // How much of the listing the caller's head start did not hide.
+        capturePhases["contentWaitMS"] = Self.ms(waited)
         capturePhases["contentWindows"] = content.windows.count
         try Task.checkCancellation()
         mainHeight = Double(NSScreen.screens.first?.frame.height ?? 0)
@@ -94,7 +120,7 @@ import PaperiCore
         // would blur a picture of itself: a doubled, stale Dock background.
         let above = content.windows.filter { $0.windowLayer > Self.level.rawValue }
         captureLaunch = ProcessInfo.processInfo.systemUptime
-        capturePhases["setupMS"] = Self.ms(listed) - (capturePhases["contentMS"] as? Double ?? 0)
+        capturePhases["setupMS"] = Self.ms(waited) - (capturePhases["contentWaitMS"] as? Double ?? 0)
         let background = Task {
             let image = try await self.capture(SCContentFilter(display: display, excludingWindows: stripWindows + fadingOverlays + above),
                                                scale: scale)

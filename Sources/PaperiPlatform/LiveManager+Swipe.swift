@@ -951,6 +951,24 @@ extension LiveManager {
         guard !gestureBlockedByAnimation else { return ["ok": false, "error": "animation in progress"] }
         cancelMotion(); motionFrames.removeAll()
         guard running, AXIsProcessTrusted(), NSEvent.pressedMouseButtons == 0, drag == nil else { return fail("mouse interaction") }
+        // Head start: list windows while the strip is surveyed below and the
+        // capture task waits for the main actor (~9 ms together), instead of
+        // after. Measured 2026-11-19 (simulated swipes, 2 windows, 16 each):
+        // swipe-to-ready 56.2 -> 49.5 ms median; waiting on the list drops
+        // from ~11.7 to ~1 ms, but the captures that follow run ~1-4 ms
+        // slower, so the net gain is ~7 ms rather than the full listing.
+        // Trade-offs: a swipe refused below still pays for one listing off
+        // the main thread (~11 ms; it lists, captures nothing; not verified
+        // whether listing alone can show the capture dot); the
+        // list is a few ms older when used, which the `missingWindow` guard
+        // in `prepare` covers. Started after `cancelMotion()` and the guards
+        // so no animation is moving windows and a mouse interaction costs
+        // nothing. Not started without Screen Recording permission, so it
+        // never triggers the permission prompt. To undo, delete `windowList`
+        // here and below; `prepare` then lists for itself.
+        let windowList = CGPreflightScreenCaptureAccess() ? SnapshotTransition.listWindows() : nil
+        var windowListUsed = false
+        defer { if !windowListUsed { windowList?.cancel() } }
         guard DisplayArrangement.currentProblem() == nil else { return fail("display arrangement") }
         if !isSimulation {
             guard options.config.gesture.enabled else { return fail("gesture disabled") }
@@ -1021,10 +1039,12 @@ extension LiveManager {
         var captureIDs = LiveReconciliation.swipeCaptureIDs(starts: starts, destinations: Array(ends.values), canvas: canvas)
         if let closeWindow { captureIDs.insert(closeWindow) }
         let snapshotIDs = captureIDs
+        windowListUsed = true
         swipeTask = Task { [weak self] in
             do {
                 let prepareStarted = ProcessInfo.processInfo.systemUptime
-                try await overlay.prepare(windows: snapshotIDs, excluding: Set(surveys.keys), canvas: canvas)
+                try await overlay.prepare(windows: snapshotIDs, excluding: Set(surveys.keys), canvas: canvas,
+                                          windowList: windowList)
                 let prepared = ProcessInfo.processInfo.systemUptime
                 guard let self, var state = self.swipe, state.generation == generation else { overlay.hide(); return }
                 guard self.running, AXIsProcessTrusted(), NSEvent.pressedMouseButtons == 0,
