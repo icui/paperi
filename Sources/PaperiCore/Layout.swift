@@ -147,7 +147,7 @@ public struct Layout: Codable, Equatable, Sendable {
         let preceding = columns.prefix(i.column).reduce(0) { $0 + min($1.width, maximum) + gap }
         offset = (canvas.width - min(columns[i.column].width, maximum)) / 2 - preceding
     }
-    /// With autoCenter enabled, centers sole columns and wide interior columns.
+    /// With autoCenter enabled, centers the strip when it fits with room to spare, or a wide focused interior column.
     /// Otherwise scrolls the minimum distance needed to show the whole focused column
     /// (PaperWM-style "ensure visible"); returns whether the offset changed.
     /// While further columns exist on a side, the focused column keeps
@@ -167,11 +167,17 @@ public struct Layout: Codable, Equatable, Sendable {
         let maximum = Self.maxColumnWidth(in: canvas, edgeMargin: margin)
         let preceding = columns.prefix(i.column).reduce(0) { $0 + min($1.width, maximum) + gap }
         let width = min(columns[i.column].width, maximum)
-        if autoCenter && (columns.count == 1 ||
-            (i.column > 0 && i.column < columns.count - 1 && width >= canvas.width * autoCenterThreshold)) {
+        if autoCenter {
+            let stripWidth = columns.reduce(0.0) { $0 + min($1.width, maximum) } + Double(columns.count - 1) * gap
             let previous = offset
-            offset = (canvas.width - width) / 2 - preceding
-            return offset != previous
+            if stripWidth < canvas.width {
+                offset = (canvas.width - stripWidth) / 2
+                return offset != previous
+            }
+            if i.column > 0 && i.column < columns.count - 1 && width >= canvas.width * autoCenterThreshold {
+                offset = (canvas.width - width) / 2 - preceding
+                return offset != previous
+            }
         }
         let room = canvas.width - width
         let lowest = min(i.column > 0 ? margin : 0, room)

@@ -39,6 +39,19 @@ struct CoreTests {
         #expect(sole.offset == 300)
         #expect(try !sole.reveal(in: canvas, autoCenter: true))
 
+        var pair = Layout(columns: [
+            Column(slots: [slot(1), slot(2)], width: 300),
+            Column(slots: [slot(3)], width: 500)
+        ], focused: "1")
+        #expect(try pair.reveal(in: canvas, gap: 20, autoCenter: true))
+        #expect(pair.offset == 90)
+        pair.focused = "3"
+        #expect(try !pair.reveal(in: canvas, gap: 20, autoCenter: true))
+        pair.columns[1].width = 680
+        pair.focused = "1"
+        #expect(try !pair.reveal(in: canvas, gap: 20, autoCenter: true))
+        #expect(pair.offset == 90)
+
         for width in [749.0, 750.0, 900.0] {
             var layout = Layout(columns: [
                 Column(slots: [slot(1)], width: 200),

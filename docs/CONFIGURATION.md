@@ -56,7 +56,7 @@ Choose **Reload Config** after saving. Invalid entries appear in the menu/status
 | `strictTabDetection` | Array of app bundle IDs, or `["*"]` for every app, that use strict native-tab detection. See [Native tab detection](#native-tab-detection). |
 | `gap`, `outerGap` | Space between windows and around the layout, in points. |
 | `focusAfterClose` | `left` (default), `right`, or `system`. A surviving tab or stacked window keeps the column focused. |
-| `autoCenter` | Default `true`. Center a sole column; center wide focused interior columns. First and last columns in a multi-column strip keep normal positioning. Stacked windows share their column’s position. |
+| `autoCenter` | Default `true`. Center the entire strip when its column widths and inter-column gaps total less than the usable display width. Otherwise, only wide focused interior columns auto-center. Stacked windows share their column’s position. |
 | `autoCenterThreshold` | Width fraction of the usable layout on the current display, default `0.75`; greater than 0 and at most 1. Applied after focus, size, or membership changes and when gestures settle. |
 | `focusScrollDuration` | Focus animation in seconds, default `0.22`; `0` disables it. |
 | `bottomDotsVisibility` | `visible`, `hidden`, or `auto` (default). Auto shows dots during horizontal swipes, through the landing animation, and for 650 ms afterward. Legacy `bottom: dot`, `dots`, or `thumbnail` loads as `visible`; `bottom: none` loads as `hidden`. Choose from **Settings → Appearance** or edit this key. |
