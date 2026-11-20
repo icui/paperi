@@ -942,6 +942,7 @@ extension LiveManager {
     /// Captures the strip of the focused window's Space and shows it frozen
     /// in place. Updates and a release may arrive before the capture finishes.
     @discardableResult func beginSwipe(isSimulation: Bool = false, pendingLock: Bool = false) -> [String: Any] {
+        let entered = ProcessInfo.processInfo.systemUptime
         defer { if running { windowIndicators.update(coordinator, mode: options.config.bottomDotsVisibility) } }
         func fail(_ reason: String) -> [String: Any] {
             swipeMetrics = ["state": "refused", "reason": reason]
@@ -998,6 +999,7 @@ extension LiveManager {
         motionSpace = space
         swipeBegan = ProcessInfo.processInfo.systemUptime
         swipeMetrics = ["state": "capturing", "windows": surveys.count]
+        let setupMS = ((swipeBegan - entered) * 10000).rounded() / 10
         let guardTimer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -1021,7 +1023,9 @@ extension LiveManager {
         let snapshotIDs = captureIDs
         swipeTask = Task { [weak self] in
             do {
+                let prepareStarted = ProcessInfo.processInfo.systemUptime
                 try await overlay.prepare(windows: snapshotIDs, excluding: Set(surveys.keys), canvas: canvas)
+                let prepared = ProcessInfo.processInfo.systemUptime
                 guard let self, var state = self.swipe, state.generation == generation else { overlay.hide(); return }
                 guard self.running, AXIsProcessTrusted(), NSEvent.pressedMouseButtons == 0,
                       self.coordinator.display(forSpace: space)?.activeSpaceID == space else {
@@ -1030,7 +1034,12 @@ extension LiveManager {
                 state.starts = starts.merging(overlay.captured) { _, captured in captured }
                 state.captureState = .ready
                 self.swipeMetrics = ["state": "tracking", "windows": surveys.count, "captureMS": overlay.captureMS,
-                                     "textureBytes": overlay.textureBytes, "capturedWindows": snapshotIDs.count, "snapshotStyle": overlay.snapshotStyle.rawValue]
+                                     "textureBytes": overlay.textureBytes, "capturedWindows": snapshotIDs.count, "snapshotStyle": overlay.snapshotStyle.rawValue,
+                                     "capturePhases": overlay.capturePhases,
+                                     "beginSetupMS": setupMS,
+                                     "taskStartMS": ((prepareStarted - self.swipeBegan) * 10000).rounded() / 10,
+                                     "resumeMS": ((ProcessInfo.processInfo.systemUptime - prepared) * 10000).rounded() / 10,
+                                     "readyMS": ((ProcessInfo.processInfo.systemUptime - self.swipeBegan) * 10000).rounded() / 10]
                 // A quick gesture can finish before capture. Begin that release
                 // at the real windows instead of flashing a displaced snapshot.
                 overlay.place(state.starts)

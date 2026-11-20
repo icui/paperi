@@ -35,12 +35,39 @@ import PaperiCore
     private(set) var captured: [UInt32: Rect] = [:]
     private(set) var captureMS = 0.0
     private(set) var textureBytes = 0
+    /// Where `captureMS` went (ms): permission, window list, each capture
+    /// relative to their common launch, layer composition, overlay window.
+    private(set) var capturePhases: [String: Any] = [:]
+    private var captureLaunch = 0.0
+    private var windowTimings: [[String: Any]] = []
+    private static func ms(_ since: Double) -> Double {
+        ((ProcessInfo.processInfo.systemUptime - since) * 10000).rounded() / 10
+    }
 
     func prepare(windows ids: Set<UInt32>, excluding stripIDs: Set<UInt32> = [], canvas: Rect) async throws {
         self.canvas = canvas
         let began = ProcessInfo.processInfo.systemUptime
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else { throw Failure.permission }
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        capturePhases = ["permissionMS": Self.ms(began)]
+        windowTimings = []
+        let listed = ProcessInfo.processInfo.systemUptime
+        // On-screen windows only: about 13 ms instead of 30 ms on a desktop
+        // with ~150 windows (measured 2026-11-19, macOS 27.2), and the cost
+        // grows with visible windows, not every window on the system.
+        // Trade-off: windows WindowServer does not count as on screen are not
+        // listed: minimized, in hidden apps, on other Spaces. A swipe needs
+        // none of them; strip windows parked past the display edge are still
+        // listed (verified at x = -1019). A window caught mid-appearance
+        // (restored from the Dock, during a Space switch) can be missed: the
+        // `missingWindow` guard below then fails the capture and the swipe
+        // runs without images. Everything the background excludes is visible
+        // (strip windows, fading overlays, Dock/menu bar), so it is still
+        // listed. If that fallback ever shows up in `performance.swipe`
+        // ("state": "fallback", "reason": "missingWindow"), pass `false` to go
+        // back to listing every window.
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        capturePhases["contentMS"] = Self.ms(listed)
+        capturePhases["contentWindows"] = content.windows.count
         try Task.checkCancellation()
         mainHeight = Double(NSScreen.screens.first?.frame.height ?? 0)
         guard let screen = NSScreen.screens.first(where: { screen in
@@ -66,9 +93,14 @@ import PaperiCore
         // live on top of it. Left in the capture, their translucent material
         // would blur a picture of itself: a doubled, stale Dock background.
         let above = content.windows.filter { $0.windowLayer > Self.level.rawValue }
+        captureLaunch = ProcessInfo.processInfo.systemUptime
+        capturePhases["setupMS"] = Self.ms(listed) - (capturePhases["contentMS"] as? Double ?? 0)
         let background = Task {
-            try await self.capture(SCContentFilter(display: display, excludingWindows: stripWindows + fadingOverlays + above),
-                                   scale: scale)
+            let image = try await self.capture(SCContentFilter(display: display, excludingWindows: stripWindows + fadingOverlays + above),
+                                               scale: scale)
+            self.capturePhases["backgroundMS"] = Self.ms(self.captureLaunch)
+            self.capturePhases["backgroundPixels"] = image.width * image.height
+            return image
         }
         let windowCaptures = windows.reversed().map { item in
             (item, Task { try await self.captureWindow(item, scale: scale) })
@@ -84,11 +116,14 @@ import PaperiCore
         // macOS's larger active shadow.
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let key = windows.first { $0.owningApplication?.processID == frontPID }?.windowID
+        var composeMS = 0.0
         // ScreenCaptureKit's list is front to back; compose back to front.
         for (item, task) in windowCaptures {
             let frame = Rect(x: item.frame.minX, y: item.frame.minY, width: item.frame.width, height: item.frame.height)
             let snapshot = try await task.value
             try Task.checkCancellation()
+            let composing = ProcessInfo.processInfo.systemUptime
+            defer { composeMS += Self.ms(composing) }
             let layer = CALayer()
             layer.actions = Self.noActions
             layer.frame = local(frame)
@@ -98,6 +133,10 @@ import PaperiCore
             layers[item.windowID] = layer
             captured[item.windowID] = frame
         }
+        capturePhases["allCapturedMS"] = Self.ms(captureLaunch)
+        capturePhases["composeMS"] = composeMS
+        capturePhases["windows"] = windowTimings.sorted { ($0["doneMS"] as? Double ?? 0) < ($1["doneMS"] as? Double ?? 0) }
+        let windowCreation = ProcessInfo.processInfo.systemUptime
         self.root = root
         let overlay = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
         overlay.isReleasedWhenClosed = false
@@ -114,6 +153,7 @@ import PaperiCore
         overlay.contentView = view
         window = overlay
         applyIndicatorOnly()
+        capturePhases["overlayWindowMS"] = Self.ms(windowCreation)
         captureMS = (ProcessInfo.processInfo.systemUptime - began) * 1000
     }
 
@@ -165,9 +205,18 @@ import PaperiCore
     }
 
     private func captureWindow(_ window: SCWindow, scale: Double) async throws -> WindowSnapshot {
+        let started = ProcessInfo.processInfo.systemUptime
+        var timing: [String: Any] = ["id": window.windowID, "startMS": Self.ms(captureLaunch)]
+        defer {
+            timing["doneMS"] = Self.ms(captureLaunch)
+            timing["totalMS"] = Self.ms(started)
+            windowTimings.append(timing)
+        }
         let filter = SCContentFilter(desktopIndependentWindow: window)
         if snapshotStyle == .simple {
             let image = try await capture(filter, scale: scale)
+            timing["shotMS"] = Self.ms(started)
+            timing["pixels"] = image.width * image.height
             return WindowSnapshot(image: image, content: nil, imageScale: scale)
         }
         let nativeScale = Double(filter.pointPixelScale)
@@ -186,11 +235,15 @@ import PaperiCore
         textureBytes += reserve
         do {
             let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+            timing["shotMS"] = Self.ms(started)
+            timing["pixels"] = image.width * image.height
             try Task.checkCancellation()
             let size = CGSize(width: window.frame.width * nativeScale, height: window.frame.height * nativeScale)
+            let scanning = ProcessInfo.processInfo.systemUptime
             let content = await Task.detached(priority: .userInitiated) {
                 WindowSnapshotGeometry.contentRect(in: image, size: size)
             }.value
+            timing["scanMS"] = Self.ms(scanning)
             try Task.checkCancellation()
             if let content {
                 let bytes = image.bytesPerRow * image.height
@@ -206,6 +259,7 @@ import PaperiCore
             throw error
         }
         textureBytes -= reserve
+        timing["fallback"] = true
         let image = try await capture(filter, scale: scale)
         return WindowSnapshot(image: image, content: nil, imageScale: scale)
     }
