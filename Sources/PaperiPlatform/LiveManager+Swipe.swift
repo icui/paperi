@@ -958,10 +958,12 @@ extension LiveManager {
         // from ~11.7 to ~1 ms, but the captures that follow run ~1-4 ms
         // slower, so the net gain is ~7 ms rather than the full listing.
         // Trade-offs: a swipe refused below still pays for one listing off
-        // the main thread (~11 ms; it lists, captures nothing; not verified
-        // whether listing alone can show the capture dot); the
-        // list is a few ms older when used, which the `missingWindow` guard
-        // in `prepare` covers. Started after `cancelMotion()` and the guards
+        // the main thread (~11 ms). Listing alone does not show the capture
+        // dot (checked 2026-11-19: ten listings, no dot; one capture, dot).
+        // The list is a few ms older when used: a window it lacks fails the
+        // capture via the `missingWindow` guard in `prepare`, and a window
+        // that moved is still placed right, because `prepare` re-reads
+        // bounds just before capturing. Started after `cancelMotion()` and the guards
         // so no animation is moving windows and a mouse interaction costs
         // nothing. Not started without Screen Recording permission, so it
         // never triggers the permission prompt. To undo, delete `windowList`

@@ -121,6 +121,17 @@ import PaperiCore
         let above = content.windows.filter { $0.windowLayer > Self.level.rawValue }
         captureLaunch = ProcessInfo.processInfo.systemUptime
         capturePhases["setupMS"] = Self.ms(waited) - (capturePhases["contentWaitMS"] as? Double ?? 0)
+        // Bounds as of now, not as of the listing: `LiveManager.beginSwipe`
+        // starts the list before surveying the strip, and a window that
+        // moved meanwhile would otherwise start its image at the old place.
+        let current = Self.currentFrames(ids)
+        capturePhases["currentFramesMS"] = Self.ms(captureLaunch)
+        func frame(_ item: SCWindow) -> CGRect { current[item.windowID] ?? item.frame }
+        capturePhases["listFrameDrift"] = windows.map { item in
+            let now = frame(item), listed = item.frame
+            return max(abs(now.minX - listed.minX), abs(now.minY - listed.minY),
+                       abs(now.width - listed.width), abs(now.height - listed.height))
+        }.max() ?? 0
         let background = Task {
             let image = try await self.capture(SCContentFilter(display: display, excludingWindows: stripWindows + fadingOverlays + above),
                                                scale: scale)
@@ -129,7 +140,7 @@ import PaperiCore
             return image
         }
         let windowCaptures = windows.reversed().map { item in
-            (item, Task { try await self.captureWindow(item, scale: scale) })
+            (item, Task { try await self.captureWindow(item, frame: frame(item), scale: scale) })
         }
         defer {
             background.cancel()
@@ -145,7 +156,8 @@ import PaperiCore
         var composeMS = 0.0
         // ScreenCaptureKit's list is front to back; compose back to front.
         for (item, task) in windowCaptures {
-            let frame = Rect(x: item.frame.minX, y: item.frame.minY, width: item.frame.width, height: item.frame.height)
+            let bounds = frame(item)
+            let frame = Rect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: bounds.height)
             let snapshot = try await task.value
             try Task.checkCancellation()
             let composing = ProcessInfo.processInfo.systemUptime
@@ -230,7 +242,8 @@ import PaperiCore
         let imageScale: Double
     }
 
-    private func captureWindow(_ window: SCWindow, scale: Double) async throws -> WindowSnapshot {
+    /// `frame`: the window's bounds when the capture starts (top-left points).
+    private func captureWindow(_ window: SCWindow, frame: CGRect, scale: Double) async throws -> WindowSnapshot {
         let started = ProcessInfo.processInfo.systemUptime
         var timing: [String: Any] = ["id": window.windowID, "startMS": Self.ms(captureLaunch)]
         defer {
@@ -250,8 +263,8 @@ import PaperiCore
         // fit the window bounds. scalesToFit=false preserves native pixels;
         // unused canvas remains transparent. Geometry is measured, not guessed.
         let config = SCStreamConfiguration()
-        config.width = Int(((window.frame.width + 256) * nativeScale).rounded(.up))
-        config.height = Int(((window.frame.height + 256) * nativeScale).rounded(.up))
+        config.width = Int(((frame.width + 256) * nativeScale).rounded(.up))
+        config.height = Int(((frame.height + 256) * nativeScale).rounded(.up))
         config.scalesToFit = false
         config.ignoreShadowsSingleWindow = false
         config.ignoreGlobalClipSingleWindow = true
@@ -264,7 +277,7 @@ import PaperiCore
             timing["shotMS"] = Self.ms(started)
             timing["pixels"] = image.width * image.height
             try Task.checkCancellation()
-            let size = CGSize(width: window.frame.width * nativeScale, height: window.frame.height * nativeScale)
+            let size = CGSize(width: frame.width * nativeScale, height: frame.height * nativeScale)
             let scanning = ProcessInfo.processInfo.systemUptime
             let content = await Task.detached(priority: .userInitiated) {
                 WindowSnapshotGeometry.contentRect(in: image, size: size)
@@ -288,6 +301,22 @@ import PaperiCore
         timing["fallback"] = true
         let image = try await capture(filter, scale: scale)
         return WindowSnapshot(image: image, content: nil, imageScale: scale)
+    }
+
+    /// Current bounds of `ids` (top-left points, like `SCWindow.frame`),
+    /// straight from WindowServer; windows it does not report are omitted.
+    private static func currentFrames(_ ids: Set<UInt32>) -> [UInt32: CGRect] {
+        var values: [UnsafeRawPointer?] = ids.map { UnsafeRawPointer(bitPattern: UInt($0)) }
+        guard let array = CFArrayCreate(nil, &values, values.count, nil),
+              let rows = CGWindowListCreateDescriptionFromArray(array) as? [[String: Any]] else { return [:] }
+        var frames: [UInt32: CGRect] = [:]
+        for row in rows {
+            guard let id = (row[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let bounds = row[kCGWindowBounds as String] as? NSDictionary,
+                  let rect = CGRect(dictionaryRepresentation: bounds) else { continue }
+            frames[id] = rect
+        }
+        return frames
     }
 
     private static func install(_ snapshot: WindowSnapshot, on layer: CALayer, scale: Double, active: Bool) {
@@ -474,7 +503,8 @@ import PaperiCore
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) else { return }
         let scale = screen.backingScaleFactor
         let tasks = content.windows.filter { missing.contains($0.windowID) }.map { item in
-            (item, Task { try await self.captureWindow(item, scale: scale) })
+            // Listed just now, so the listed bounds are current.
+            (item, Task { try await self.captureWindow(item, frame: item.frame, scale: scale) })
         }
         for (item, task) in tasks {
             guard let snapshot = try? await task.value else { continue }
